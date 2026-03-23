@@ -96,12 +96,12 @@ RUN mkdir -p \
 # ── 挂载点（持久化数据目录）──
 VOLUME ["/var/www/nav/data"]
 
-# ── 暴露端口（默认 80，可通过环境变量覆盖）──
-EXPOSE 80
+# ── 暴露端口（默认 58080，可通过环境变量 NAV_PORT 覆盖）──
+EXPOSE 58080
 
-# ── 健康检查 ──
+# ── 健康检查（默认端口 58080，支持 NAV_PORT 覆盖）──
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost/login.php || exit 1
+    CMD sh -c 'curl -sf "http://localhost:${NAV_PORT:-58080}/login.php" || exit 1'
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

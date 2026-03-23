@@ -8,7 +8,7 @@ set -e
 echo "[entrypoint] 导航网站容器启动..."
 
 # ── 环境变量默认值 ──
-NAV_PORT=${NAV_PORT:-80}
+NAV_PORT=${NAV_PORT:-58080}
 TZ=${TZ:-Asia/Shanghai}
 
 # ── 时区设置 ──
@@ -18,13 +18,13 @@ if [ -f "/usr/share/zoneinfo/${TZ}" ]; then
 fi
 
 # ── 将 NAV_PORT 注入 Nginx 站点配置 ──
-# nginx-site.conf 中使用了 ${NAV_PORT:-80} 占位，用 envsubst 替换
+# nginx-site.conf 中使用了 ${NAV_PORT} 占位，用 envsubst 替换
 if command -v envsubst >/dev/null 2>&1; then
     envsubst '${NAV_PORT}' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp
     mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf
 else
     # Alpine 上 envsubst 在 gettext 包，降级处理
-    sed -i "s/\${NAV_PORT:-80}/${NAV_PORT}/g" /etc/nginx/http.d/nav.conf
+    sed -i "s/\${NAV_PORT}/${NAV_PORT}/g" /etc/nginx/http.d/nav.conf
 fi
 
 echo "[entrypoint] Nginx 监听端口: ${NAV_PORT}"
