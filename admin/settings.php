@@ -107,7 +107,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
                 if (!empty($obj['config']) && is_array($obj['config'])) {
                     // 合并默认值，避免旧备份缺少新字段导致 Warning
                     $defaults = [
-                        'card_size' => 140, 'card_height' => 0,
+                        'site_name'      => '导航中心',
+                        'nav_domain'     => '',
+                        'card_size'      => 140, 'card_height' => 0,
                         'card_show_desc' => '1', 'card_layout' => 'grid', 'card_direction' => 'col',
                         'display_errors' => '0',
                     ];
@@ -193,6 +195,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             header('Location: ' . $redirect); exit;
         }
 
+        // ── 保存 Webhook 设置 ──
+        if ($action === 'save_webhook') {
+            $cfg = load_config();
+            $cfg['webhook_enabled'] = ($_POST['webhook_enabled'] ?? '0') === '1' ? '1' : '0';
+            $cfg['webhook_type']    = in_array($_POST['webhook_type'] ?? 'custom', ['telegram','feishu','dingtalk','custom'])
+                                      ? $_POST['webhook_type'] : 'custom';
+            $cfg['webhook_url']     = trim($_POST['webhook_url']     ?? '');
+            $cfg['webhook_tg_chat'] = trim($_POST['webhook_tg_chat'] ?? '');
+            $events_raw = $_POST['webhook_events'] ?? [];
+            $allowed_events = ['SUCCESS','FAIL','IP_LOCKED','LOGOUT','SETUP'];
+            $events = array_values(array_intersect((array)$events_raw, $allowed_events));
+            $cfg['webhook_events']  = implode(',', $events ?: ['FAIL','IP_LOCKED']);
+            save_config($cfg);
+            flash_set('success', 'Webhook 设置已保存');
+            header('Location: settings.php#webhook'); exit;
+        }
+
+        // ── 测试 Webhook ──
+        if ($action === 'test_webhook') {
+            $result = webhook_test();
+            flash_set($result['ok'] ? 'success' : 'error', $result['msg']);
+            header('Location: settings.php#webhook'); exit;
+        }
+
         // ── 清除 Cookie ──
         if ($action === 'clear_cookie') {
             auth_clear_cookie();
@@ -212,8 +238,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
         // ── 保存基础设置 ──
         if ($action === 'save_settings') {
             $cfg = load_config();
+            $site_name_input = trim($_POST['site_name'] ?? '');
+            if ($site_name_input === '') {
+                flash_set('error', '站点名称不能为空');
+                header('Location: settings.php'); exit;
+            }
+            if (mb_strlen($site_name_input) > 60) {
+                flash_set('error', '站点名称不能超过 60 个字符');
+                header('Location: settings.php'); exit;
+            }
             backup_create('auto_settings');
-            $cfg['site_name']          = trim($_POST['site_name']         ?? '导航中心');
+            $cfg['site_name']          = $site_name_input;
             $cfg['nav_domain']         = trim($_POST['nav_domain']        ?? '');
             $cfg['token_expire_hours'] = max(1, (int)($_POST['token_expire_hours'] ?? 8));
             $cfg['remember_me_days']   = max(1, (int)($_POST['remember_me_days']   ?? 60));
@@ -297,7 +332,8 @@ $log_pages   = max(1, (int)ceil($log_total / $log_perpage));
     <input type="hidden" name="action" value="save_settings">
     <div class="form-grid">
       <div class="form-group"><label>站点名称</label>
-        <input type="text" name="site_name" value="<?= htmlspecialchars($cfg['site_name']??'导航中心') ?>" required></div>
+        <input type="text" name="site_name" value="<?= htmlspecialchars($cfg['site_name']??'导航中心') ?>" required maxlength="60" placeholder="导航中心">
+        <div class="form-hint" style="margin-top:6px">显示在浏览器标签页、登录页、首页标题栏及后台侧边栏，最多 60 个字符。</div></div>
       <div class="form-group"><label>导航站域名</label>
         <input type="text" name="nav_domain" value="<?= htmlspecialchars($cfg['nav_domain']??'') ?>" placeholder="nav.yourdomain.com"></div>
       <div class="form-group"><label>Token有效期（小时）</label>
@@ -743,5 +779,201 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   <?php endif; ?>
   <?php endif; ?>
 </div>
+
+<!-- Webhook 通知 -->
+<div class="card" id="webhook">
+  <div class="card-title">🔔 Webhook 通知</div>
+  <form method="POST">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="save_webhook">
+    <div class="form-grid">
+      <div class="form-group" style="grid-column:1/-1;display:flex;align-items:center;gap:14px">
+        <label style="margin:0">启用 Webhook 通知</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="webhook_enabled" value="1" <?= ($cfg['webhook_enabled']??'0')==='1'?'checked':'' ?>
+                 style="width:16px;height:16px;accent-color:var(--ac)">
+          <span style="font-size:13px">启用</span>
+        </label>
+      </div>
+      <div class="form-group">
+        <label>通知类型</label>
+        <select name="webhook_type" id="wh_type" onchange="syncWebhookType()" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">
+          <?php $wt=$cfg['webhook_type']??'custom'; foreach(['telegram'=>'Telegram Bot','feishu'=>'飞书 Webhook','dingtalk'=>'钉钉 Webhook','custom'=>'自定义 POST JSON'] as $v=>$l): ?>
+          <option value="<?=$v?>" <?= $wt===$v?'selected':'' ?>><?=$l?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Webhook URL</label>
+        <input type="url" name="webhook_url" value="<?= htmlspecialchars($cfg['webhook_url']??'') ?>" placeholder="https://..." style="width:100%">
+      </div>
+      <div class="form-group" id="wh_tg_chat" style="display:<?= ($cfg['webhook_type']??'custom')==='telegram'?'block':'none' ?>">
+        <label>Telegram Chat ID</label>
+        <input type="text" name="webhook_tg_chat" value="<?= htmlspecialchars($cfg['webhook_tg_chat']??'') ?>" placeholder="-1001234567890">
+        <div class="form-hint" style="margin-top:5px">从 @userinfobot 获取，群组 ID 通常为负数</div>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label style="margin-bottom:8px;display:block">订阅事件</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <?php
+          $wevents = array_filter(array_map('trim', explode(',', $cfg['webhook_events']??'FAIL,IP_LOCKED')));
+          $event_labels = ['SUCCESS'=>'✅ 登录成功','FAIL'=>'❌ 登录失败','IP_LOCKED'=>'🔒 IP被锁定','LOGOUT'=>'🚪 退出登录','SETUP'=>'🎉 初始安装'];
+          foreach ($event_labels as $ev => $el): ?>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+            <input type="checkbox" name="webhook_events[]" value="<?=$ev?>" <?= in_array($ev,$wevents)?'checked':'' ?>
+                   style="accent-color:var(--ac)">
+            <?= $el ?>
+          </label>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions" style="display:flex;gap:10px">
+      <button type="submit" class="btn btn-primary">保存 Webhook 设置</button>
+      <button type="button" class="btn btn-secondary" onclick="testWebhook()">📨 发送测试消息</button>
+    </div>
+    <div class="form-hint" style="margin-top:10px">
+      <b>Telegram</b>：先创建 Bot（@BotFather），URL 填 <code>https://api.telegram.org/bot{TOKEN}/sendMessage</code>，Chat ID 填目标会话 ID。<br>
+      <b>飞书 / 钉钉</b>：在群机器人设置中创建 Webhook，复制 URL 填入即可。<br>
+      <b>自定义</b>：向指定 URL POST 一个 JSON，包含 event/username/ip/time/text 字段。
+    </div>
+  </form>
+  <!-- 隐藏的测试表单 -->
+  <form id="webhookTestForm" method="POST" style="display:none">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="test_webhook">
+  </form>
+</div>
+
+<!-- 站点健康检测 -->
+<div class="card" id="health">
+  <div class="card-title">💚 站点健康检测
+    <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">检测所有站点可用性</span>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <button class="btn btn-primary" onclick="runHealthCheck()">🔍 立即检测所有站点</button>
+    <button class="btn btn-secondary" onclick="loadHealthStatus()">🔄 刷新缓存状态</button>
+    <span id="health_last_check" style="font-size:12px;color:var(--tm)"></span>
+  </div>
+  <div id="health_results" style="display:none">
+    <div class="table-wrap"><table id="health_table">
+      <tr><th>站点名称</th><th>类型</th><th>目标地址</th><th>状态</th><th>响应码</th><th>耗时</th><th>检测时间</th></tr>
+    </table></div>
+  </div>
+  <div id="health_empty" style="color:var(--tm);font-size:13px">点击「立即检测」获取各站点可用性状态。</div>
+  <!-- 测试按钮隐藏表单 -->
+  <form id="healthCheckForm" method="POST" action="health_check.php" style="display:none">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="check_all">
+  </form>
+</div>
+
+<script>
+// ── Webhook 类型联动 ──
+function syncWebhookType() {
+    var t = document.getElementById('wh_type').value;
+    document.getElementById('wh_tg_chat').style.display = t === 'telegram' ? 'block' : 'none';
+}
+function testWebhook() {
+    if (!confirm('发送一条测试 Webhook 消息？')) return;
+    document.getElementById('webhookTestForm').submit();
+}
+
+// ── 健康检测 ──
+function runHealthCheck() {
+    var btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '检测中...';
+    document.getElementById('health_empty').textContent = '正在检测，请稍候...';
+    document.getElementById('health_empty').style.display = 'block';
+    document.getElementById('health_results').style.display = 'none';
+
+    var form = document.getElementById('healthCheckForm');
+    fetch('health_check.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: new FormData(form),
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function(r){ return r.json(); }).then(function(d){
+        btn.disabled = false;
+        btn.textContent = '🔍 立即检测所有站点';
+        if (d.ok) renderHealthResults(d.data);
+        else showToast(d.msg || '检测失败', 'error');
+    }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = '🔍 立即检测所有站点';
+        showToast('请求失败，请重试', 'error');
+    });
+}
+
+function loadHealthStatus() {
+    fetch('health_check.php?ajax=status', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.ok && d.data && Object.keys(d.data).length) renderHealthResults(d.data);
+        else document.getElementById('health_empty').textContent = '暂无缓存数据，请点击「立即检测」。';
+    });
+}
+
+function renderHealthResults(data) {
+    var sites = <?= json_encode(
+        array_merge(...array_map(function($g){
+            return array_map(function($s) use ($g) {
+                return [
+                    'name' => $s['name'],
+                    'type' => $s['type'] ?? 'external',
+                    'url'  => ($s['type'] ?? '') === 'proxy' ? ($s['proxy_target'] ?? '') : ($s['url'] ?? ''),
+                ];
+            }, $g['sites'] ?? []);
+        }, load_sites()['groups'] ?? [])),
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG
+    ) ?>;
+
+    var tbody = '';
+    var checked_any = false;
+    sites.forEach(function(s) {
+        if (!s.url) return;
+        var h = data[s.url];
+        if (!h) return;
+        checked_any = true;
+        var dot = h.status === 'up'
+            ? '<span style="color:#4ade80;font-size:16px" title="在线">●</span>'
+            : '<span style="color:#f87171;font-size:16px" title="离线">●</span>';
+        var ms   = h.ms   != null ? h.ms + ' ms'  : '-';
+        var code = h.code ? h.code : '-';
+        var t    = h.checked_at ? new Date(h.checked_at * 1000).toLocaleTimeString() : '-';
+        var url_short = s.url.length > 40 ? s.url.substring(0,40)+'…' : s.url;
+        tbody += '<tr>'
+            + '<td>' + escHtml(s.name) + '</td>'
+            + '<td><span class="badge badge-' + (s.type==='proxy'?'yellow':s.type==='internal'?'purple':'gray') + '">' + escHtml(s.type) + '</span></td>'
+            + '<td style="font-size:11px;font-family:monospace" title="' + escHtml(s.url) + '">' + escHtml(url_short) + '</td>'
+            + '<td>' + dot + ' ' + (h.status==='up'?'在线':'离线') + '</td>'
+            + '<td style="font-family:monospace">' + code + '</td>'
+            + '<td style="font-family:monospace">' + ms + '</td>'
+            + '<td style="font-size:11px;color:var(--tm)">' + t + '</td>'
+            + '</tr>';
+    });
+
+    if (!checked_any) {
+        document.getElementById('health_empty').textContent = '没有可检测的站点（站点需配置有效的 URL）。';
+        document.getElementById('health_empty').style.display = 'block';
+        document.getElementById('health_results').style.display = 'none';
+        return;
+    }
+    document.getElementById('health_table').tBodies[0]
+        ? document.getElementById('health_table').tBodies[0].innerHTML = tbody
+        : document.getElementById('health_table').innerHTML += '<tbody>' + tbody + '</tbody>';
+    document.getElementById('health_results').style.display = 'block';
+    document.getElementById('health_empty').style.display = 'none';
+    document.getElementById('health_last_check').textContent = '上次刷新：' + new Date().toLocaleTimeString();
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 页面加载时拉取缓存状态
+loadHealthStatus();
+</script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

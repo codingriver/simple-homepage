@@ -26,6 +26,15 @@ $user     = auth_get_current_user();
 $is_admin = ($user['role'] ?? '') === 'admin';
 $token    = $_COOKIE[SESSION_COOKIE_NAME] ?? '';
 
+// 健康状态缓存（仅对登录用户显示）
+$health_cache = [];
+if ($user) {
+    $health_file = DATA_DIR . '/health_cache.json';
+    if (file_exists($health_file)) {
+        $health_cache = json_decode(file_get_contents($health_file), true) ?? [];
+    }
+}
+
 // 判断是否有公开分组（auth_required=false）
 $has_public = false;
 foreach ($groups as $g) {
@@ -286,11 +295,21 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
     $tl=['internal'=>'内站','proxy'=>'代理','external'=>'外链'][$s['type']??'']??'';
     $icon_url=($s['url']??$s['proxy_target']??'');
     $domain=parse_url($icon_url,PHP_URL_HOST)??'';
+    // 健康状态（仅登录用户可见）
+    $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
+    $h_entry = $health_cache[$h_url] ?? null;
+    $h_status = 'unknown';
+    if ($h_entry && (time() - ($h_entry['checked_at']??0)) < 600) {
+        $h_status = $h_entry['status'] ?? 'unknown';
+    }
   ?>
   <a class="card" href="<?= htmlspecialchars($href) ?>" target="_blank" rel="noopener noreferrer"
      data-name="<?= htmlspecialchars(strtolower($s['name'])) ?>"
      data-desc="<?= htmlspecialchars(strtolower($s['desc']??'')) ?>">
     <span class="bx <?=$tc?>"><?=$tl?></span>
+    <?php if ($user && $h_status !== 'unknown'): ?>
+    <span class="hd" style="position:absolute;bottom:5px;right:6px;width:7px;height:7px;border-radius:50%;background:<?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;box-shadow:0 0 5px <?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;" title="<?= $h_status==='up' ? '在线' : '离线' ?>"></span>
+    <?php endif; ?>
     <div class="ci">
       <?php if($domain&&!is_private_ip($domain)):?>
       <img src="/favicon.php?url=<?= urlencode('https://'.$domain) ?>"

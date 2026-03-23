@@ -230,6 +230,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $sites_data = load_sites();
 $groups     = $sites_data['groups'] ?? [];
+// 健康状态缓存
+$health_cache_file = DATA_DIR . '/health_cache.json';
+$health_cache = file_exists($health_cache_file)
+    ? (json_decode(file_get_contents($health_cache_file), true) ?? [])
+    : [];
 // 构建分组选项（供JS弹层使用）
 $groups_json = json_encode(
     array_map(function($g){ return ['id'=>$g['id'],'name'=>$g['name']]; }, $groups),
@@ -250,14 +255,29 @@ $groups_json = json_encode(
     <p style="color:var(--tm);font-size:13px">该分组暂无站点</p>
   <?php else: ?>
   <div class="table-wrap"><table>
-    <tr><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>排序</th><th>操作</th></tr>
-    <?php foreach ($grp['sites'] as $s): ?>
+    <tr><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>状态</th><th>排序</th><th>操作</th></tr>
+    <?php foreach ($grp['sites'] as $s):
+      $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
+      $h_entry = $health_cache[$h_url] ?? null;
+      if ($h_entry && (time() - ($h_entry['checked_at']??0)) < 600) {
+          $h_status = $h_entry['status'] ?? 'unknown';
+          $h_ms     = $h_entry['ms'] ?? '-';
+      } else {
+          $h_status = 'unknown'; $h_ms = '-';
+      }
+      $h_dot = $h_status === 'up'
+          ? '<span style="color:#4ade80" title="在线（'.$h_ms.'ms）">● 在线</span>'
+          : ($h_status === 'down'
+              ? '<span style="color:#f87171" title="离线">● 离线</span>'
+              : '<span style="color:var(--tm)">— </span>');
+    ?>
     <tr>
       <td><code style="font-size:12px"><?= htmlspecialchars($s['id']) ?></code></td>
       <td><?= htmlspecialchars($s['icon']??'') ?> <?= htmlspecialchars($s['name']) ?></td>
       <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars($s['type']??'external') ?></span></td>
       <td style="font-size:12px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></td>
+      <td style="font-size:12px;white-space:nowrap"><?= $h_dot ?><?= $h_status==='up' && $h_ms!=='-' ? ' <span style="color:var(--tm);font-size:10px">('.$h_ms.'ms)</span>' : '' ?></td>
       <td><?= $s['order']??0 ?></td>
       <td>
         <button class="btn btn-sm btn-secondary"

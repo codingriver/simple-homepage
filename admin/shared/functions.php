@@ -298,6 +298,249 @@ function debug_read_log(string $type, int $lines = 100): string {
     return implode("\n", $result);
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── 站点健康检测
+// ══════════════════════════════════════════════════════════════
+
+define('HEALTH_CACHE_FILE', DATA_DIR . '/health_cache.json');
+define('HEALTH_CACHE_TTL',  300);  // 缓存有效期（秒），5 分钟
+define('HEALTH_TIMEOUT',    5);    // 单站点检测超时（秒）
+
+/**
+ * 读取健康状态缓存
+ * @return array  { url => ['status'=>'up'|'down'|'unknown', 'code'=>int, 'ms'=>int, 'checked_at'=>int] }
+ */
+function health_load_cache(): array {
+    if (!file_exists(HEALTH_CACHE_FILE)) return [];
+    return json_decode(file_get_contents(HEALTH_CACHE_FILE), true) ?? [];
+}
+
+/**
+ * 写入健康状态缓存
+ */
+function health_save_cache(array $data): void {
+    file_put_contents(HEALTH_CACHE_FILE,
+        json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+/**
+ * 检测单个 URL 的可用性（HTTP HEAD，超时 HEALTH_TIMEOUT 秒）
+ * @return array ['status'=>'up'|'down', 'code'=>int, 'ms'=>int]
+ */
+function health_check_url(string $url): array {
+    $start = microtime(true);
+    $ctx = stream_context_create([
+        'http' => [
+            'method'          => 'HEAD',
+            'timeout'         => HEALTH_TIMEOUT,
+            'ignore_errors'   => true,
+            'follow_location' => 1,
+            'max_redirects'   => 3,
+            'header'          => "User-Agent: NavPortal-HealthCheck/1.0\r\n",
+        ],
+        'ssl'  => [
+            'verify_peer'      => false,
+            'verify_peer_name' => false,
+        ],
+    ]);
+    $code   = 0;
+    $status = 'down';
+    try {
+        $body = @file_get_contents($url, false, $ctx);
+        // 从 $http_response_header 解析状态码
+        if (!empty($http_response_header)) {
+            preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m);
+            $code = (int)($m[1] ?? 0);
+        }
+        // 2xx / 3xx 均视为 up
+        $status = ($code >= 200 && $code < 500) ? 'up' : 'down';
+    } catch (\Throwable $e) {
+        $status = 'down';
+    }
+    $ms = (int)round((microtime(true) - $start) * 1000);
+    return ['status' => $status, 'code' => $code, 'ms' => $ms];
+}
+
+/**
+ * 检测所有站点并更新缓存
+ * 仅检测 external / internal 类型有 url 字段的站点，以及 proxy 类型的 proxy_target
+ * @return array  url => health_result
+ */
+function health_check_all(): array {
+    $sites_data = load_sites();
+    $cache      = health_load_cache();
+    $now        = time();
+
+    foreach ($sites_data['groups'] as $grp) {
+        foreach ($grp['sites'] ?? [] as $s) {
+            // 构造要检测的 URL
+            if (($s['type'] ?? '') === 'proxy') {
+                $url = $s['proxy_target'] ?? '';
+            } else {
+                $url = $s['url'] ?? '';
+            }
+            if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) continue;
+
+            $result = health_check_url($url);
+            $result['checked_at'] = $now;
+            $cache[$url] = $result;
+        }
+    }
+
+    health_save_cache($cache);
+    return $cache;
+}
+
+/**
+ * 根据站点数据获取其健康状态（从缓存）
+ * @param array $site   站点数组
+ * @param array $cache  health_load_cache() 返回的缓存
+ * @return string  'up' | 'down' | 'unknown'
+ */
+function health_get_status(array $site, array $cache): string {
+    $url = ($site['type'] ?? '') === 'proxy'
+        ? ($site['proxy_target'] ?? '')
+        : ($site['url'] ?? '');
+    if (!$url || !isset($cache[$url])) return 'unknown';
+    // 超过 TTL 视为 unknown
+    if ((time() - ($cache[$url]['checked_at'] ?? 0)) > HEALTH_CACHE_TTL * 2) return 'unknown';
+    return $cache[$url]['status'] ?? 'unknown';
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Webhook 通知
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 发送 Webhook 通知
+ * 支持：Telegram Bot、飞书、钉钉、自定义（POST JSON）
+ *
+ * config.json 中的相关字段：
+ *   webhook_enabled   : '1' | '0'
+ *   webhook_type      : 'telegram' | 'feishu' | 'dingtalk' | 'custom'
+ *   webhook_url       : Webhook URL
+ *   webhook_tg_chat   : Telegram Chat ID（仅 telegram 类型需要）
+ *   webhook_events    : 逗号分隔的事件列表，如 'SUCCESS,FAIL,IP_LOCKED'
+ *
+ * @param string $event    事件类型：SUCCESS / FAIL / IP_LOCKED / SETUP
+ * @param string $username 用户名
+ * @param string $ip       客户端 IP
+ * @param string $note     附加说明
+ */
+function webhook_send(string $event, string $username, string $ip, string $note = ''): void {
+    $cfg = load_config();
+    if (($cfg['webhook_enabled'] ?? '0') !== '1') return;
+
+    // 检查事件是否在订阅列表内
+    $events = array_filter(array_map('trim', explode(',', $cfg['webhook_events'] ?? 'FAIL,IP_LOCKED')));
+    if (!in_array($event, $events, true)) return;
+
+    $url  = trim($cfg['webhook_url'] ?? '');
+    $type = $cfg['webhook_type'] ?? 'custom';
+    if (!$url) return;
+
+    $site_name = $cfg['site_name'] ?? '导航中心';
+    $time_str  = date('Y-m-d H:i:s');
+    $emoji_map = [
+        'SUCCESS'   => '✅',
+        'FAIL'      => '❌',
+        'IP_LOCKED' => '🔒',
+        'LOGOUT'    => '🚪',
+        'SETUP'     => '🎉',
+    ];
+    $emoji = $emoji_map[$event] ?? '📢';
+    $text  = "{$emoji} [{$site_name}] 登录事件\n"
+           . "事件：{$event}\n"
+           . "用户：{$username}\n"
+           . "IP：{$ip}\n"
+           . "时间：{$time_str}"
+           . ($note ? "\n备注：{$note}" : '');
+
+    // 根据类型构造 payload
+    switch ($type) {
+        case 'telegram':
+            $chat_id = trim($cfg['webhook_tg_chat'] ?? '');
+            if (!$chat_id) return;
+            $payload = json_encode(['chat_id' => $chat_id, 'text' => $text, 'parse_mode' => '']);
+            break;
+        case 'feishu':
+            $payload = json_encode(['msg_type' => 'text', 'content' => ['text' => $text]]);
+            break;
+        case 'dingtalk':
+            $payload = json_encode(['msgtype' => 'text', 'text' => ['content' => $text]]);
+            break;
+        default: // custom
+            $payload = json_encode([
+                'event'    => $event,
+                'username' => $username,
+                'ip'       => $ip,
+                'note'     => $note,
+                'time'     => $time_str,
+                'site'     => $site_name,
+                'text'     => $text,
+            ]);
+    }
+
+    // 异步发送（不阻塞页面响应）
+    $ctx = stream_context_create([
+        'http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
+            'content' => $payload,
+            'timeout' => 3,
+            'ignore_errors' => true,
+        ],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+    ]);
+    @file_get_contents($url, false, $ctx);
+}
+
+/**
+ * 测试 Webhook（发送一条测试消息）
+ * @return array ['ok' => bool, 'msg' => string]
+ */
+function webhook_test(): array {
+    $cfg = load_config();
+    $url  = trim($cfg['webhook_url'] ?? '');
+    $type = $cfg['webhook_type'] ?? 'custom';
+    if (!$url) return ['ok' => false, 'msg' => '未配置 Webhook URL'];
+
+    $site_name = $cfg['site_name'] ?? '导航中心';
+    $text = "🔔 [{$site_name}] Webhook 测试消息\n这是一条来自导航站后台的测试通知，发送时间：" . date('Y-m-d H:i:s');
+
+    switch ($type) {
+        case 'telegram':
+            $chat_id = trim($cfg['webhook_tg_chat'] ?? '');
+            if (!$chat_id) return ['ok' => false, 'msg' => '未配置 Telegram Chat ID'];
+            $payload = json_encode(['chat_id' => $chat_id, 'text' => $text]);
+            break;
+        case 'feishu':
+            $payload = json_encode(['msg_type' => 'text', 'content' => ['text' => $text]]);
+            break;
+        case 'dingtalk':
+            $payload = json_encode(['msgtype' => 'text', 'text' => ['content' => $text]]);
+            break;
+        default:
+            $payload = json_encode(['text' => $text, 'event' => 'TEST', 'site' => $site_name]);
+    }
+
+    $ctx = stream_context_create([
+        'http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
+            'content' => $payload,
+            'timeout' => 5,
+            'ignore_errors' => true,
+        ],
+        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+    ]);
+    $resp = @file_get_contents($url, false, $ctx);
+    if ($resp === false) {
+        return ['ok' => false, 'msg' => '发送失败，请检查 URL 是否正确'];
+    }
+    return ['ok' => true, 'msg' => '测试消息已发送，请检查接收端'];
+}
+
 
 
 /**
