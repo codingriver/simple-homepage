@@ -35,6 +35,41 @@ jobs:
           chmod +x .github/scripts/smoke-test.sh
           ./.github/scripts/smoke-test.sh smoke-report.txt local/smoke:test
 
+      - name: Publish smoke summary
+        if: always()
+        run: |
+          echo "## 🧪 Smoke Test Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f smoke-report.txt ]; then
+            RESULT="$(awk -F': ' '/^result:/{print $2}' smoke-report.txt | tail -n1)"
+            LOGIN_CODE="$(awk -F': ' '/^login.php_status:/{print $2}' smoke-report.txt | tail -n1)"
+            SETUP_CODE="$(awk -F': ' '/^setup.php_status:/{print $2}' smoke-report.txt | tail -n1)"
+            HEALTH_STATUS="$(awk -F': ' '/^health_status:/{print $2}' smoke-report.txt | tail -n1)"
+
+            if [ "$RESULT" = "PASS" ]; then
+              echo "✅ **Result:** PASS" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "❌ **Result:** FAIL" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Check | Value |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| login.php status | ${LOGIN_CODE:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| setup.php status | ${SETUP_CODE:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| docker health | ${HEALTH_STATUS:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "<details><summary>Raw smoke-report.txt</summary>" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat smoke-report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ smoke-report.txt not found" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload smoke report
         if: always()
         uses: actions/upload-artifact@v4
