@@ -1,16 +1,19 @@
 # ============================================================
-# 导航网站 Docker Compose 配置
+# 导航网站 Docker Compose 配置（本地构建专用）
+# 此文件位于 local/ 目录，Dockerfile 在上级目录
 # 使用方式：
-#   cp .env.example .env       # 复制并编辑配置
-#   docker compose up -d       # 启动
-#   docker compose down        # 停止
-#   docker compose logs -f     # 查看日志
+#   cp local/.env.example local/.env   # 复制并编辑配置
+#   bash local/docker-build.sh         # 构建并启动
+# 或手动：
+#   docker compose -f local/docker-compose.yml up -d
+#   docker compose -f local/docker-compose.yml down
+#   docker compose -f local/docker-compose.yml logs -f
 # ============================================================
 
 services:
   nav:
     build:
-      context: .
+      context: ..              # Dockerfile 在上级项目根目录
       dockerfile: Dockerfile
       args:
         TZ: ${TZ:-Asia/Shanghai}
@@ -27,14 +30,14 @@ services:
 
     volumes:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──
-      - ${DATA_DIR:-./nav-data}:/var/www/nav/data
+      - ${DATA_DIR:-../nav-data}:/var/www/nav/data
 
       # ── 可选：挂载自定义 Nginx 反代配置 ──
-      # - ./nav-proxy.conf:/etc/nginx/conf.d/nav-proxy.conf
+      # - ../nav-proxy.conf:/etc/nginx/conf.d/nav-proxy.conf
 
       # ── 可选：挂载日志到宿主机 ──
-      # - ./logs/nginx:/var/log/nginx
-      # - ./logs/php-fpm:/var/log/php-fpm
+      # - ../logs/nginx:/var/log/nginx
+      # - ../logs/php-fpm:/var/log/php-fpm
 
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/login.php"]
@@ -43,30 +46,16 @@ services:
       retries: 3
       start_period: 15s
 
-    # 资源限制（可选，防止单容器占用过多资源）
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '1.0'
-    #       memory: 256M
-    #     reservations:
-    #       memory: 64M
-
     labels:
       - "com.nav-portal.version=latest"
       - "com.nav-portal.description=Nav Portal Navigation Site"
 
-# ── 使用命名卷（可选，替代上方 bind mount）──
-# volumes:
-#   nav-data:
-#     driver: local
-
 # ============================================================
-# 常用命令（优先使用 docker compose，旧环境可改用 docker-compose）
+# 常用命令
 # ============================================================
-# docker compose up -d --build    # 构建并启动（Docker CLI 插件）
-# docker-compose up -d --build    # 构建并启动（旧版独立安装）
-# docker compose down             # 停止
-# docker compose logs -f          # 查看日志
-# docker compose ps               # 查看状态
-# docker compose restart          # 重启
+# bash local/docker-build.sh                              # 推荐：一键构建+启动
+# docker compose -f local/docker-compose.yml up -d --build  # 手动构建并启动
+# docker compose -f local/docker-compose.yml down           # 停止
+# docker compose -f local/docker-compose.yml logs -f        # 查看日志
+# docker compose -f local/docker-compose.yml ps             # 查看状态
+# docker compose -f local/docker-compose.yml restart        # 重启
