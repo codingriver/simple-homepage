@@ -42,25 +42,33 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f smoke-report.txt ]; then
             RESULT="$(awk -F': ' '/^result:/{print $2}' smoke-report.txt | tail -n1)"
-            LOGIN_CODE="$(awk -F': ' '/^login.php_status:/{print $2}' smoke-report.txt | tail -n1)"
-            SETUP_CODE="$(awk -F': ' '/^setup.php_status:/{print $2}' smoke-report.txt | tail -n1)"
-            HEALTH_STATUS="$(awk -F': ' '/^health_status:/{print $2}' smoke-report.txt | tail -n1)"
+            TOTAL="$(awk -F': ' '/^total:/{print $2}' smoke-report.txt | tail -n1)"
+            PASS="$(awk -F': ' '/^pass:/{print $2}' smoke-report.txt | tail -n1)"
+            FAIL="$(awk -F': ' '/^fail:/{print $2}' smoke-report.txt | tail -n1)"
+            SKIP="$(awk -F': ' '/^skip:/{print $2}' smoke-report.txt | tail -n1)"
 
             if [ "$RESULT" = "PASS" ]; then
-              echo "✅ **Result:** PASS" >> "$GITHUB_STEP_SUMMARY"
+              echo "✅ **Result: PASS**" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "❌ **Result:** FAIL" >> "$GITHUB_STEP_SUMMARY"
+              echo "❌ **Result: FAIL**" >> "$GITHUB_STEP_SUMMARY"
             fi
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Check | Value |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
             echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-            echo "| login.php status | ${LOGIN_CODE:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| setup.php status | ${SETUP_CODE:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| docker health | ${HEALTH_STATUS:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Total cases | ${TOTAL:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ✅ Pass | ${PASS:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ❌ Fail | ${FAIL:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ⏭ Skip | ${SKIP:-N/A} |" >> "$GITHUB_STEP_SUMMARY"
 
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "<details><summary>Raw smoke-report.txt</summary>" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Case Details" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            awk '/^## Results/{found=1;next} found && /^## /{exit} found{print}' smoke-report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "<details><summary>Full smoke-report.txt</summary>" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             cat smoke-report.txt >> "$GITHUB_STEP_SUMMARY"
