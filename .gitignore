@@ -1,0 +1,23 @@
+# 环境变量
+.env
+.env.local
+
+# 数据目录（运行时生成，不提交）
+data/
+backups/
+favicon_cache/
+logs/
+nginx-conf/
+misplaced-data-backup/
+
+# 临时文件
+*.tmp
+*.zip
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

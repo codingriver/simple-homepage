@@ -1,0 +1,246 @@
+<?php
+/**
+ * 安装向导 setup.php
+ * 首次部署时引导管理员设置账户密码和站点名称。
+ * 安装完成后写入 .installed 锁，后续访问返回 404。
+ */
+if (session_status() === PHP_SESSION_NONE) session_start();
+require_once __DIR__ . '/../shared/auth.php';
+
+// 已安装则返回 404，防止攻击者探测
+if (file_exists(INSTALLED_FLAG)) {
+    http_response_code(404);
+    exit('404 Not Found');
+}
+
+$errors = [];
+$step   = 'form';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // CSRF 验证
+    csrf_check();
+    $username   = trim($_POST['username']   ?? '');
+    $password   = $_POST['password']        ?? '';
+    $password2  = $_POST['password2']       ?? '';
+    $site_name  = trim($_POST['site_name']  ?? '导航中心');
+    $nav_domain = trim($_POST['nav_domain'] ?? '');
+
+    if (!preg_match('/^[a-zA-Z0-9_-]{2,32}$/', $username))
+        $errors[] = '用户名只允许字母、数字、下划线、横杠，长度 2-32 位';
+    if (strlen($password) < 8)
+        $errors[] = '密码至少 8 位';
+    if ($password !== $password2)
+        $errors[] = '两次密码不一致';
+    if (!$site_name)
+        $errors[] = '站点名称不能为空';
+
+    if (empty($errors)) {
+        // ── 自动生成 AUTH_SECRET_KEY（如果仍是默认值）──
+        $auth_file = __DIR__ . '/../shared/auth.php';
+        $auth_src  = file_get_contents($auth_file);
+        $default_key_pattern = '/define\(\s*\'AUTH_SECRET_KEY\'\s*,\s*\'CHANGE_THIS[^\']*\'(?:\s*\.\s*[^;]+)?;/m';
+        if (preg_match($default_key_pattern, $auth_src)) {
+            // 生成 64 字节的随机密钥（hex 输出为 128 字符）
+            $new_key = bin2hex(random_bytes(64));
+            $auth_src = preg_replace(
+                $default_key_pattern,
+                "define('AUTH_SECRET_KEY',   '" . $new_key . "');",
+                $auth_src
+            );
+            file_put_contents($auth_file, $auth_src, LOCK_EX);
+            // 重新加载常量（本次请求内生效）
+            // AUTH_SECRET_KEY 已通过 define() 固化，用变量传给 Token 生成
+            // 后续请求会从更新后的文件读取
+        }
+
+        // 创建必要目录并设置权限
+        // data/ 主目录：750（www-data 可读写，外部不可访问）
+        if (!is_dir(DATA_DIR)) {
+            mkdir(DATA_DIR, 0750, true);
+        } else {
+            chmod(DATA_DIR, 0750);
+        }
+        // 数据子目录：755（bg/favicon_cache 需要 PHP 写入）
+        foreach ([
+            DATA_DIR.'/backups',
+            DATA_DIR.'/logs',
+            DATA_DIR.'/favicon_cache',
+            DATA_DIR.'/bg',
+        ] as $d) {
+            if (!is_dir($d)) {
+                mkdir($d, 0755, true);
+            }
+        }
+        // 写入管理员账户
+        auth_save_user($username, $password, 'admin');
+        // 写入初始配置
+        $cfg = [
+            'site_name'          => $site_name,
+            'nav_domain'         => $nav_domain,
+            'token_expire_hours' => 8,
+            'remember_me_days'   => 60,
+            'login_fail_limit'   => 5,
+            'login_lock_minutes' => 15,
+            'bg_color'           => '',
+            'bg_image'           => '',
+            'cookie_secure'      => 'off',  // 默认关闭，方便 IP 直接访问调试
+            'cookie_domain'      => '',      // 默认留空，自动使用当前 host
+        ];
+        file_put_contents(CONFIG_FILE,
+            json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        // 写入初始站点配置
+        if (!file_exists(DATA_DIR.'/sites.json')) {
+            $sites = ['groups' => [[
+                'id'            => 'default',
+                'name'          => '我的应用',
+                'icon'          => '🌐',
+                'order'         => 0,
+                'auth_required' => true,
+                'visible_to'    => 'all',
+                'sites'         => [],
+            ]]];
+            file_put_contents(DATA_DIR.'/sites.json',
+                json_encode($sites, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        }
+        // 写安装锁
+        auth_mark_installed();
+        // 若本次请求自动生成了新密钥，AUTH_SECRET_KEY 常量仍是旧值，
+        // 自动登录生成的 Token 会在下次请求时验证失败（新密钥不匹配）。
+        // 因此跳转到登录页，由用户使用新密钥完成登录。
+        auth_write_log('SETUP', $username, get_client_ip(), 'initial_setup');
+        $step = 'done';
+        $nav_domain_preview = $nav_domain ?: 'nav.yourdomain.com';
+    }
+}
+$nd = htmlspecialchars($_POST['nav_domain'] ?? 'nav.yourdomain.com') ?: 'nav.yourdomain.com';
+$nginx_cfg = <<<NGINX
+server {
+    listen 80;
+    server_name {$nd};
+    return 301 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl http2;
+    server_name {$nd};
+    ssl_certificate     /etc/letsencrypt/live/{$nd}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{$nd}/privkey.pem;
+    root /var/www/nav/public;
+    index index.php login.php;
+    location ~* \.(json|sh|md|log)\$ { deny all; }
+    location = /auth/verify.php {
+        internal;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_pass_request_body off;
+        fastcgi_param CONTENT_LENGTH "";
+        include fastcgi_params;
+    }
+    location ^~ /admin/ {
+        alias /var/www/nav/admin/;
+        location ~ \.php\$ {
+            fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+            fastcgi_param SCRIPT_FILENAME /var/www/nav/admin\$fastcgi_script_name;
+            include fastcgi_params;
+        }
+    }
+    location ~ \.php\$ {
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+    location / { try_files \$uri \$uri/ /index.php?\$query_string; }
+}
+NGINX;
+?>
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>安装向导 — 导航中心</title>
+<style>
+:root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ach:#7c73ff;
+--tx:#e2e4f0;--tm:#7b7f9e;--er:#ff6b6b;--r:12px;
+--fn:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
+padding:40px 16px;
+background-image:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(108,99,255,.18),transparent 70%)}
+.wrap{max-width:560px;margin:0 auto}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);
+padding:40px 36px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+.logo{text-align:center;margin-bottom:28px}
+.icon{width:54px;height:54px;background:linear-gradient(135deg,var(--ac),#a78bfa);
+border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+font-size:26px;margin-bottom:10px}
+h1{font-size:22px;font-weight:700}
+.sub{color:var(--tm);font-size:13px;margin-top:4px}
+.steps{display:flex;gap:6px;margin-bottom:26px}
+.s{flex:1;height:3px;border-radius:2px;background:var(--bd)}
+.s.on{background:var(--ac)}
+.fg{margin-bottom:14px}
+label{display:block;font-size:12px;color:var(--tm);margin-bottom:4px;font-weight:500}
+label em{color:var(--er);font-style:normal;margin-left:2px}
+input[type=text],input[type=password]{width:100%;background:var(--bg);
+border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);
+font-size:14px;font-family:var(--fn);outline:none;transition:border-color .2s}
+input:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(108,99,255,.12)}
+.ht{font-size:11px;color:var(--tm);margin-top:3px}
+.errs{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.28);
+border-radius:8px;padding:10px 14px;margin-bottom:16px}
+.errs li{color:var(--er);font-size:13px;margin-left:16px;line-height:1.8}
+.sep{border:none;border-top:1px solid var(--bd);margin:20px 0}
+.btn{width:100%;background:var(--ac);color:#fff;border:none;border-radius:8px;
+padding:12px;font-size:15px;font-weight:600;cursor:pointer;font-family:var(--fn);margin-top:4px}
+.btn:hover{background:var(--ach)}
+.done-icon{font-size:48px;text-align:center;margin-bottom:14px}
+h2{font-size:18px;font-weight:700;text-align:center;margin-bottom:6px}
+.ds{color:var(--tm);font-size:13px;text-align:center;margin-bottom:20px}
+.nginx{background:var(--bg);border:1px solid var(--bd);border-radius:8px;
+padding:12px;font-size:11px;font-family:monospace;color:#a5f3a5;
+overflow-x:auto;white-space:pre;max-height:240px;overflow-y:auto;margin-bottom:14px}
+.go{display:block;text-align:center;background:var(--ac);color:#fff;
+border-radius:8px;padding:12px;font-size:15px;font-weight:600;
+text-decoration:none;margin-top:8px}
+.go:hover{background:var(--ach)}
+</style></head>
+<body><div class="wrap">
+<?php if ($step === 'form'): ?>
+<div class="card">
+  <div class="logo"><div class="icon">🧭</div><h1>导航中心</h1><div class="sub">首次安装向导</div></div>
+  <div class="steps"><div class="s on"></div><div class="s"></div></div>
+  <?php if (!empty($errors)): ?>
+  <ul class="errs"><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul>
+  <?php endif; ?>
+  <form method="POST">
+    <?= csrf_field() ?>
+    <div class="fg"><label>管理员用户名<em>*</em></label>
+      <input type="text" name="username" required autofocus pattern="[a-zA-Z0-9_-]{2,32}"
+             value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
+      <div class="ht">字母、数字、下划线、横杠，2-32 位</div></div>
+    <div class="fg"><label>密码<em>*</em></label>
+      <input type="password" name="password" required autocomplete="new-password">
+      <div class="ht">至少 8 位</div></div>
+    <div class="fg"><label>确认密码<em>*</em></label>
+      <input type="password" name="password2" required autocomplete="new-password"></div>
+    <hr class="sep">
+    <div class="fg"><label>站点名称<em>*</em></label>
+      <input type="text" name="site_name" required
+             value="<?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?>"></div>
+    <div class="fg"><label>导航站域名</label>
+      <input type="text" name="nav_domain" placeholder="nav.yourdomain.com"
+             value="<?= htmlspecialchars($_POST['nav_domain'] ?? '') ?>">
+      <div class="ht">用于生成 Nginx 配置，可稍后在后台修改</div></div>
+    <button type="submit" class="btn">开始使用 →</button>
+  </form>
+</div>
+<?php else: ?>
+<div class="card">
+  <div class="steps"><div class="s on"></div><div class="s on"></div></div>
+  <div class="done-icon">✅</div>
+  <h2>安装完成！</h2>
+  <div class="ds">账户已创建，安全密钥已自动生成并保存。<br>请用你设置的密码登录。</div>
+  <div class="nginx"><?= htmlspecialchars($nginx_cfg) ?></div>
+  <div class="ht" style="margin-bottom:14px">将以上配置保存到 /etc/nginx/sites-available/nav.conf 并 reload Nginx</div>
+  <a href="/login.php" class="go">前往登录 →</a>
+</div>
+<?php endif; ?>
+</div></body></html>

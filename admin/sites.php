@@ -1,0 +1,468 @@
+<?php
+/**
+ * 站点管理 admin/sites.php
+ * 增删改查站点，支持 internal/proxy/external 三种类型
+ * Proxy 类型验证内网IP防止SSRF
+ */
+
+// AJAX POST：在 header.php 输出 HTML 之前处理，确保能正确设置 Content-Type
+if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once __DIR__ . '/shared/functions.php';
+    // AJAX 场景下鉴权失败返回 JSON 而非重定向
+    $current_user = auth_get_current_user();
+    if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'msg' => '未登录或无权限，请刷新页面重新登录']);
+        exit;
+    }
+    csrf_check();
+    $sites_data = load_sites();
+    $action = $_POST['action'] ?? '';
+    $json_out = ['ok' => false, 'msg' => '未知操作'];
+
+    if ($action === 'save') {
+        $old_gid = $_POST['old_gid'] ?? '';
+        $old_sid = $_POST['old_sid'] ?? '';
+        $gid     = trim($_POST['gid']  ?? '');
+        $sid     = trim($_POST['sid']  ?? '');
+        $name    = trim($_POST['name'] ?? '');
+        $icon    = trim($_POST['icon'] ?? '🔗');
+        $desc    = trim($_POST['desc'] ?? '');
+        $order   = (int)($_POST['order'] ?? 0);
+        $type    = $_POST['type'] ?? 'external';
+        $url     = trim($_POST['url']  ?? '');
+        $err = '';
+        if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
+        elseif (!$name) $err = '名称不能为空';
+        elseif (!$gid)  $err = '请选择所属分组';
+        elseif ($type === 'proxy') {
+            $target = trim($_POST['proxy_target'] ?? '');
+            if (!is_allowed_proxy_target($target)) $err = '代理目标必须是内网IP地址（防SSRF）';
+        }
+        if ($err) {
+            $json_out = ['ok' => false, 'msg' => $err];
+        } else {
+            $site = ['id'=>$sid,'name'=>$name,'icon'=>$icon,'desc'=>$desc,'order'=>$order,'type'=>$type];
+            if ($type === 'proxy') {
+                $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
+                $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
+                $site['slug']         = trim($_POST['slug'] ?? $sid);
+                $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
+            } else {
+                $site['url'] = $url;
+            }
+            if ($old_gid && $old_gid === $gid) {
+                foreach ($sites_data['groups'] as &$g) {
+                    if ($g['id'] !== $gid) continue;
+                    $replaced = false;
+                    foreach ($g['sites'] as &$s) {
+                        if ($s['id'] === $old_sid) { $s = $site; $replaced = true; break; }
+                    }
+                    unset($s);
+                    if (!$replaced) $g['sites'][] = $site;
+                    usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+                    break;
+                }
+                unset($g);
+            } else {
+                if ($old_gid) {
+                    foreach ($sites_data['groups'] as &$g) {
+                        if ($g['id'] === $old_gid)
+                            $g['sites'] = array_values(array_filter($g['sites'], function($s) use ($old_sid){ return $s['id'] !== $old_sid; }));
+                    }
+                    unset($g);
+                }
+                foreach ($sites_data['groups'] as &$g) {
+                    if ($g['id'] === $gid) {
+                        $g['sites'][] = $site;
+                        usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+                        break;
+                    }
+                }
+                unset($g);
+            }
+            save_sites($sites_data);
+            flash_set('success', '站点已保存');
+            $json_out = ['ok' => true];
+        }
+    } elseif ($action === 'delete') {
+        $gid = $_POST['gid'] ?? '';
+        $sid = $_POST['sid'] ?? '';
+        foreach ($sites_data['groups'] as &$g) {
+            if ($g['id'] === $gid) {
+                $g['sites'] = array_values(array_filter($g['sites'], function($s) use ($sid){ return $s['id'] !== $sid; }));
+                break;
+            }
+        }
+        unset($g);
+        save_sites($sites_data);
+        flash_set('success', '站点已删除');
+        $json_out = ['ok' => true];
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($json_out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$page_title = '站点管理';
+require_once __DIR__ . '/shared/header.php';
+
+$sites_data = load_sites();
+
+// 构建分组索引（gid => &group）
+function &find_group(array &$data, string $gid) {
+    foreach ($data['groups'] as &$g) {
+        if ($g['id'] === $gid) return $g;
+    }
+    return null;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'save') {
+        $old_gid = $_POST['old_gid']   ?? '';
+        $old_sid = $_POST['old_sid']   ?? '';
+        $gid     = trim($_POST['gid']  ?? '');
+        $sid     = trim($_POST['sid']  ?? '');
+        $name    = trim($_POST['name'] ?? '');
+        $icon    = trim($_POST['icon'] ?? '🔗');
+        $desc    = trim($_POST['desc'] ?? '');
+        $order   = (int)($_POST['order'] ?? 0);
+        $type    = $_POST['type'] ?? 'external';
+        $url     = trim($_POST['url']  ?? '');
+
+        // 校验
+        $err = '';
+        if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
+        elseif (!$name) $err = '名称不能为空';
+        elseif (!$gid)  $err = '请选择所属分组';
+        elseif ($type === 'proxy') {
+            $target = trim($_POST['proxy_target'] ?? '');
+            if (!is_allowed_proxy_target($target))
+                $err = '代理目标必须是内网IP地址（防SSRF）';
+        }
+
+        if ($err) {
+            flash_set('error', $err);
+            header('Location: sites.php'); exit;
+        }
+
+        // 构建站点数据
+        $site = ['id' => $sid, 'name' => $name, 'icon' => $icon,
+                 'desc' => $desc, 'order' => $order, 'type' => $type];
+        if ($type === 'proxy') {
+            $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
+            $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
+            $site['slug']         = trim($_POST['slug']    ?? $sid);
+            $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
+        } else {
+            $site['url'] = $url;
+        }
+
+        // 如果是编辑且分组没变：原地更新
+        if ($old_gid && $old_gid === $gid) {
+            foreach ($sites_data['groups'] as &$g) {
+                if ($g['id'] !== $gid) continue;
+                $replaced = false;
+                foreach ($g['sites'] as &$s) {
+                    if ($s['id'] === $old_sid) { $s = $site; $replaced = true; break; }
+                }
+                unset($s);
+                if (!$replaced) $g['sites'][] = $site;
+                usort($g['sites'], function($a,$b){ return ($a['order']??0) - ($b['order']??0); });
+                break;
+            }
+            unset($g);
+        } else {
+            // 跨分组移动：从旧分组删除
+            if ($old_gid) {
+                foreach ($sites_data['groups'] as &$g) {
+                    if ($g['id'] === $old_gid) {
+                        $g['sites'] = array_values(
+                            array_filter($g['sites'], function($s) use ($old_sid){ return $s['id'] !== $old_sid; }));
+                    }
+                }
+                unset($g);
+            }
+            // 添加到新分组
+            foreach ($sites_data['groups'] as &$g) {
+                if ($g['id'] === $gid) {
+                    $g['sites'][] = $site;
+                    usort($g['sites'], function($a,$b){ return ($a['order']??0) - ($b['order']??0); });
+                    break;
+                }
+            }
+            unset($g);
+        }
+        save_sites($sites_data);
+        flash_set('success', '站点已保存');
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+        header('Location: sites.php'); exit;
+
+    } elseif ($action === 'delete') {
+        $gid = $_POST['gid'] ?? '';
+        $sid = $_POST['sid'] ?? '';
+        foreach ($sites_data['groups'] as &$g) {
+            if ($g['id'] === $gid) {
+                $g['sites'] = array_values(
+                    array_filter($g['sites'], function($s) use ($sid){ return $s['id'] !== $sid; }));
+                break;
+            }
+        }
+        unset($g);
+        save_sites($sites_data);
+        flash_set('success', '站点已删除');
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+        header('Location: sites.php'); exit;
+    }
+}
+
+$sites_data = load_sites();
+$groups     = $sites_data['groups'] ?? [];
+// 构建分组选项（供JS弹层使用）
+$groups_json = json_encode(
+    array_map(function($g){ return ['id'=>$g['id'],'name'=>$g['name']]; }, $groups),
+    JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP
+);
+?>
+
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="openForm(null,null)">＋ 添加站点</button>
+</div>
+
+<?php foreach ($groups as $grp): ?>
+<div class="card">
+  <div class="card-title"><?= htmlspecialchars($grp['icon']??'') ?> <?= htmlspecialchars($grp['name']) ?>
+    <span class="badge badge-blue" style="margin-left:6px"><?= count($grp['sites']??[]) ?> 个站点</span>
+  </div>
+  <?php if (empty($grp['sites'])): ?>
+    <p style="color:var(--tm);font-size:13px">该分组暂无站点</p>
+  <?php else: ?>
+  <div class="table-wrap"><table>
+    <tr><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>排序</th><th>操作</th></tr>
+    <?php foreach ($grp['sites'] as $s): ?>
+    <tr>
+      <td><code style="font-size:12px"><?= htmlspecialchars($s['id']) ?></code></td>
+      <td><?= htmlspecialchars($s['icon']??'') ?> <?= htmlspecialchars($s['name']) ?></td>
+      <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars($s['type']??'external') ?></span></td>
+      <td style="font-size:12px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></td>
+      <td><?= $s['order']??0 ?></td>
+      <td>
+        <button class="btn btn-sm btn-secondary"
+          onclick='openForm(<?= htmlspecialchars(json_encode($s),ENT_QUOTES) ?>, "<?= htmlspecialchars($grp['id'],ENT_QUOTES) ?>")'>编辑</button>
+        <form method="POST" style="display:inline" onsubmit="return confirm('确认删除该站点？')">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="gid" value="<?= htmlspecialchars($grp['id']) ?>">
+          <input type="hidden" name="sid" value="<?= htmlspecialchars($s['id']) ?>">
+          <button type="submit" class="btn btn-sm btn-danger">删除</button>
+        </form>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+  </table></div>
+  <?php endif; ?>
+</div>
+<?php endforeach; ?>
+
+<!-- 编辑弹层 -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+z-index:500;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+<div id="modalInner" style="background:var(--sf);border:1px solid var(--bd);border-radius:14px;
+padding:28px;width:100%;max-width:520px;margin:auto">
+  <div style="font-weight:700;font-size:15px;margin-bottom:20px" id="mtitle">添加站点</div>
+  <form method="POST" id="siteForm">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="save">
+    <input type="hidden" name="old_gid" id="fi_ogid">
+    <input type="hidden" name="old_sid" id="fi_osid">
+    <div class="form-grid">
+      <div class="form-group"><label>站点ID（小写英文）</label>
+        <input type="text" name="sid" id="fi_sid" pattern="[a-z0-9_-]+" required></div>
+      <div class="form-group"><label>名称</label>
+        <input type="text" name="name" id="fi_name" required></div>
+      <div class="form-group"><label>图标（Emoji）</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" name="icon" id="fi_icon" value="🔗" style="flex:1">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="openEmojiPicker('fi_icon')" style="flex-shrink:0">😊 选择</button>
+        </div></div>
+      <div class="form-group"><label>排序</label>
+        <input type="number" name="order" id="fi_order" value="0"></div>
+      <div class="form-group full"><label>描述</label>
+        <input type="text" name="desc" id="fi_desc"></div>
+      <div class="form-group"><label>所属分组</label>
+        <select name="gid" id="fi_gid"></select></div>
+      <div class="form-group"><label>类型</label>
+        <select name="type" id="fi_type" onchange="toggleType(this.value)">
+          <option value="external">外链 External</option>
+          <option value="internal">内站 Internal</option>
+          <option value="proxy">代理 Proxy</option>
+        </select></div>
+      <div class="form-group full" id="row_url"><label>目标URL</label>
+        <input type="url" name="url" id="fi_url" placeholder="https://"></div>
+      <div id="proxy_fields" style="display:none;grid-column:1/-1">
+        <div class="form-grid">
+          <div class="form-group"><label>代理模式</label>
+            <select name="proxy_mode" id="fi_pmode">
+              <option value="path">路径前缀 /p/{slug}/</option>
+              <option value="domain">子域名 proxy_domain</option>
+            </select></div>
+          <div class="form-group"><label>内网目标（防SSRF）</label>
+            <input type="text" name="proxy_target" id="fi_ptarget" placeholder="http://192.168.1.x:port"></div>
+          <div class="form-group"><label>Slug（路径模式用）</label>
+            <input type="text" name="slug" id="fi_slug" placeholder="my-app"></div>
+          <div class="form-group"><label>代理域名（子域名模式）</label>
+            <input type="text" name="proxy_domain" id="fi_pdomain" placeholder="app.yourdomain.com"></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+    </div>
+  </form>
+</div></div>
+
+<script>
+var modal  = document.getElementById('modal');
+var groups = <?= $groups_json ?>;
+function populateGroups(selGid) {
+    var sel = document.getElementById('fi_gid');
+    if(!groups||!groups.length){sel.innerHTML='<option value="">(请先添加分组)</option>';return;}
+    sel.innerHTML = groups.map(function(g){
+        return '<option value="'+g.id+'"'+(g.id===selGid?' selected':'')+'>'+g.name+'</option>';
+    }).join('');
+}
+function toggleType(t) {
+    document.getElementById('row_url').style.display    = t==='proxy' ? 'none' : '';
+    document.getElementById('proxy_fields').style.display = t==='proxy' ? 'grid' : 'none';
+}
+function openForm(s, gid) {
+    document.getElementById('mtitle').textContent = s ? '编辑站点' : '添加站点';
+    document.getElementById('fi_ogid').value   = gid  || '';
+    document.getElementById('fi_osid').value   = s ? s.id   : '';
+    document.getElementById('fi_sid').value    = s ? s.id   : '';
+    document.getElementById('fi_name').value   = s ? s.name : '';
+    document.getElementById('fi_icon').value   = s ? (s.icon||'🔗') : '🔗';
+    document.getElementById('fi_order').value  = s ? (s.order||0) : 0;
+    document.getElementById('fi_desc').value   = s ? (s.desc||'') : '';
+    document.getElementById('fi_url').value    = s ? (s.url||'') : '';
+    document.getElementById('fi_type').value   = s ? (s.type||'external') : 'external';
+    document.getElementById('fi_pmode').value  = s ? (s.proxy_mode||'path') : 'path';
+    document.getElementById('fi_ptarget').value= s ? (s.proxy_target||'') : '';
+    document.getElementById('fi_slug').value   = s ? (s.slug||'') : '';
+    document.getElementById('fi_pdomain').value= s ? (s.proxy_domain||'') : '';
+    populateGroups(gid||(groups.length?groups[0].id:''));
+    toggleType(s ? (s.type||'external') : 'external');
+    var sb=document.querySelector('#siteForm button[type=submit]');if(sb){sb.disabled=false;sb.textContent='保存';}
+    modal.style.display='flex';
+}
+function closeModal() { modal.style.display = 'none'; closeEmojiPicker(); }
+
+// 防止鼠标滑动误关闭弹窗：只有点击背景层（非内容区）才关闭
+(function(){
+    var _mdBg=false;
+    modal.addEventListener('mousedown',function(e){_mdBg=(e.target===modal);});
+    modal.addEventListener('click',function(e){if(e.target===modal&&_mdBg)closeModal();_mdBg=false;});
+})();
+
+// AJAX 提交，成功后关闭弹窗并刷新页面
+document.getElementById('siteForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    var form = this;
+    var btn  = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+    fetch('sites.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: new FormData(form),
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.ok) {
+            closeModal();
+            window.location.reload();
+        } else {
+            btn.disabled = false;
+            btn.textContent = '保存';
+            alert(d.msg || '保存失败，请重试');
+        }
+    }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = '保存';
+        alert('网络错误，请重试');
+    });
+});
+
+// ── Emoji 选择器 ──
+var EMOJIS = [
+  '🔗','🌐','🏠','📁','📂','⚙️','🛠','🔧','🔨','🖥','💻','📱','🖨','🖱',
+  '📊','📈','📉','📋','📌','📍','🗂','🗃','📦','📬','📮','✉️','📧','💬',
+  '🔔','🔕','🔒','🔓','🔑','🗝','🛡','⚠️','🚨','🚀','✈️','🚗','🚢','🏎',
+  '🎮','🕹','🎯','🎲','♟','🧩','🎵','🎬','📷','📸','🎥','📺','📻','🔊',
+  '💡','🔦','🕯','🌙','☀️','⭐','🌟','💫','✨','🔥','💧','🌊','🌈','❄️',
+  '🌿','🌱','🌲','🌸','🍎','🍕','☕','🍺','🧃','🏆','🥇','🎖','🎗','🏅',
+  '👤','👥','👨‍💻','👩‍💻','🧑‍🔧','👔','🤖','👾','😊','🙂','😎','🤔','💪','👍',
+  '❤️','💙','💚','💛','🧡','💜','🖤','🤍','♥️','💯','✅','❌','⭕','🔴',
+  '🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤','🔶','🔷','🔸','🔹','▶️','⏩',
+  '📡','🛰','🔭','🔬','🧬','💊','🏥','🏦','🏪','🏫','🏗','🏠','🏡','🗼',
+];
+var emojiPickerEl = null;
+var currentEmojiInput = null;
+function openEmojiPicker(inputId) {
+    closeEmojiPicker();
+    currentEmojiInput = document.getElementById(inputId);
+    var rect = currentEmojiInput.getBoundingClientRect();
+    var picker = document.createElement('div');
+    picker.id = 'emojiPicker';
+    picker.style.cssText = 'position:fixed;z-index:2000;background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:10px;display:grid;grid-template-columns:repeat(14,1fr);gap:2px;width:480px;overflow-x:hidden;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+    var top = rect.bottom + 6;
+    var left = rect.left;
+    if (left + 320 > window.innerWidth) left = window.innerWidth - 330;
+    if (left < 6) left = 6;
+    if (top + 260 > window.innerHeight) top = rect.top - 266;
+    if (top < 6) top = 6;
+    picker.style.top  = top + 'px';
+    picker.style.left = left + 'px';
+    EMOJIS.forEach(function(em) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = em;
+        btn.style.cssText = 'background:none;border:none;font-size:18px;cursor:pointer;padding:4px;border-radius:4px;line-height:1';
+        btn.addEventListener('mouseenter', function(){ this.style.background='var(--bd)'; });
+        btn.addEventListener('mouseleave', function(){ this.style.background='none'; });
+        btn.addEventListener('click', function(e){
+            e.stopPropagation();
+            currentEmojiInput.value = em;
+            closeEmojiPicker();
+        });
+        picker.appendChild(btn);
+    });
+    document.body.appendChild(picker);
+    emojiPickerEl = picker;
+    // 点击其他地方关闭
+    setTimeout(function(){
+        document.addEventListener('click', outsideEmojiClick);
+    }, 10);
+}
+function closeEmojiPicker() {
+    if (emojiPickerEl) { emojiPickerEl.remove(); emojiPickerEl = null; }
+    document.removeEventListener('click', outsideEmojiClick);
+}
+function outsideEmojiClick(e) {
+    if (emojiPickerEl && !emojiPickerEl.contains(e.target)) closeEmojiPicker();
+}
+</script>
+<?php require_once __DIR__ . '/shared/footer.php'; ?>
