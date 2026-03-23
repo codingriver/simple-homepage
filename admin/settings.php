@@ -195,6 +195,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             header('Location: ' . $redirect); exit;
         }
 
+        // ── 保存反代参数模式 ──
+        if ($action === 'save_proxy_params_mode') {
+            $cfg = load_config();
+            $cfg['proxy_params_mode'] = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+            save_config($cfg);
+            flash_set('success', '反代参数模式已保存，请重新生成配置并 Reload Nginx');
+            header('Location: settings.php#nginx'); exit;
+        }
+
         // ── 保存 Webhook 设置 ──
         if ($action === 'save_webhook') {
             $cfg = load_config();
@@ -257,6 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             $cfg['cookie_secure']      = in_array($_POST['cookie_secure'] ?? 'off', ['auto','on','off'])
                                          ? $_POST['cookie_secure'] : 'off';
             $cfg['cookie_domain']      = trim($_POST['cookie_domain'] ?? '');
+            $cfg['proxy_params_mode']  = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
             // ── 卡片尺寸（支持自定义）──
             $card_size_raw = $_POST['card_size'] ?? '140';
             if ($card_size_raw === 'custom' || !empty($_POST['card_size_custom'])) {
@@ -592,6 +602,18 @@ function syncCustom(field) {
 // 初始化（页面加载时）
 ['card_size','card_height'].forEach(function(f){ syncCustom(f); });
 
+// ── 反代参数模式选择卡片联动 ──
+function selectPPM(val) {
+    var labels = document.querySelectorAll('input[name="proxy_params_mode"]');
+    labels.forEach(function(radio) {
+        var card = radio.parentElement;
+        var isSelected = radio.value === val;
+        radio.checked = isSelected;
+        card.style.borderColor = isSelected ? 'var(--ac)' : 'var(--bd)';
+        card.style.background  = isSelected ? 'rgba(99,179,237,.08)' : 'var(--sf)';
+    });
+}
+
 var currentLog = 'nginx_access';
 var logTabs = document.querySelectorAll('.log-tab');
 logTabs.forEach(function(btn) {
@@ -697,6 +719,34 @@ refreshLog();
     <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;min-width:120px">
       <div style="font-size:11px;color:var(--tm);margin-bottom:4px">Proxy 站点数</div>
       <div style="font-size:28px;font-weight:700;color:var(--ac2)"><?= $proxy_count ?></div>
+    </div>
+  </div>
+
+  <!-- 反代参数模式选择 -->
+  <?php $ppm = $cfg['proxy_params_mode'] ?? 'simple'; ?>
+  <div style="margin-bottom:16px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 18px">
+    <div style="font-size:12px;color:var(--tm);margin-bottom:10px;font-weight:600">📦 反代参数模板</div>
+    <form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save_proxy_params_mode">
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('simple')">
+        <input type="radio" name="proxy_params_mode" value="simple" <?= $ppm==='simple'?'checked':'' ?> id="ppm_simple" style="margin-top:2px;accent-color:var(--ac)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式（默认推荐）</div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">包含基础反代参数：HTTP/1.1、WebSocket、Host/IP 透传、60s 超时。适合普通 Web 应用，小白首选。</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('full')">
+        <input type="radio" name="proxy_params_mode" value="full" <?= $ppm==='full'?'checked':'' ?> id="ppm_full" style="margin-top:2px;accent-color:var(--ac)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式（高级）</div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">内置完整 19 组参数：断点续传、Cookie/Auth 透传、CORS、WebSocket、流媒体、无限超时。适合视频流、SSH、大文件等复杂场景。</div>
+        </div>
+      </label>
+      <button type="submit" class="btn btn-secondary" style="align-self:center">💾 保存模式</button>
+    </form>
+    <div class="form-hint" style="margin-top:8px">
+      切换后需点击「生成配置并 Reload Nginx」重新生成配置文件才会生效。
     </div>
   </div>
 

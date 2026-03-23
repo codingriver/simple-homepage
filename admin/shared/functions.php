@@ -559,6 +559,9 @@ function nginx_generate_proxy_conf(): array {
     $sites_data = load_sites();
     $groups     = $sites_data['groups'] ?? [];
 
+    // proxy_params_mode: 'simple'（精简，默认）或 'full'（完整19组参数，适合流媒体/WebSocket/大文件）
+    $params_mode = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+
     $path_blocks   = []; // location /p/{slug}/ 块（追加到主站 server 内，需手动 include）
     $domain_blocks = []; // 独立 server 块（子域名模式）
 
@@ -572,14 +575,80 @@ function nginx_generate_proxy_conf(): array {
             }
             $name   = $s['name'] ?? $s['id'];
 
-            if (($s['proxy_mode'] ?? 'path') === 'path') {
-                $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
-                $path_blocks[] = implode("\n", [
-                    "    # {$name}",
-                    "    location /p/{$slug}/ {",
-                    "        auth_request      /auth/verify.php;",
-                    "        error_page 401  = @login_redirect;",
-                    "        proxy_pass        {$target}/;",
+            if ($params_mode === 'full') {
+                $proxy_params_path = [
+                    "        proxy_http_version              1.1;",
+                    "        proxy_set_header                Upgrade                        \$http_upgrade;",
+                    "        proxy_set_header                Connection                     \"upgrade\";",
+                    "        proxy_set_header                Sec-WebSocket-Extensions       \$http_sec_websocket_extensions;",
+                    "        proxy_set_header                Sec-WebSocket-Key              \$http_sec_websocket_key;",
+                    "        proxy_set_header                Sec-WebSocket-Version          \$http_sec_websocket_version;",
+                    "        proxy_set_header                Host                           \$host;",
+                    "        proxy_set_header                X-Real-IP                      \$remote_addr;",
+                    "        proxy_set_header                REMOTE-HOST                    \$remote_addr;",
+                    "        proxy_set_header                X-Forwarded-For                \$proxy_add_x_forwarded_for;",
+                    "        proxy_set_header                X-Forwarded-Proto              \$scheme;",
+                    "        proxy_set_header                X-Forwarded-Host               \$host;",
+                    "        proxy_set_header                X-Forwarded-Port               \$server_port;",
+                    "        proxy_set_header                X-Original-URI                 \$request_uri;",
+                    "        proxy_set_header                Authorization                  \$http_authorization;",
+                    "        proxy_set_header                Cookie                         \$http_cookie;",
+                    "        proxy_pass_header               Set-Cookie;",
+                    "        proxy_pass_request_headers      on;",
+                    "        proxy_pass_request_body         on;",
+                    "        proxy_set_header                Range                          \$http_range;",
+                    "        proxy_set_header                If-Range                       \$http_if_range;",
+                    "        proxy_set_header                Accept                         \$http_accept;",
+                    "        proxy_set_header                Accept-Encoding                \$http_accept_encoding;",
+                    "        proxy_set_header                Accept-Language                \$http_accept_language;",
+                    "        proxy_set_header                Origin                         \$http_origin;",
+                    "        proxy_set_header                Referer                        \$http_referer;",
+                    "        proxy_set_header                User-Agent                     \$http_user_agent;",
+                    "        proxy_set_header                Cache-Control                  \$http_cache_control;",
+                    "        proxy_set_header                If-Modified-Since              \$http_if_modified_since;",
+                    "        proxy_set_header                If-None-Match                  \$http_if_none_match;",
+                    "        proxy_set_header                Access-Control-Request-Headers \$http_access_control_request_headers;",
+                    "        proxy_set_header                Access-Control-Request-Method  \$http_access_control_request_method;",
+                    "        client_max_body_size            0;",
+                    "        client_body_timeout             86400s;",
+                    "        proxy_request_buffering         off;",
+                    "        proxy_buffering                 off;",
+                    "        proxy_buffer_size               16k;",
+                    "        proxy_buffers                   4 32k;",
+                    "        proxy_busy_buffers_size         64k;",
+                    "        proxy_max_temp_file_size        0;",
+                    "        proxy_cache                     off;",
+                    "        proxy_no_cache                  1;",
+                    "        proxy_cache_bypass              1;",
+                    "        proxy_connect_timeout           600s;",
+                    "        proxy_send_timeout              86400s;",
+                    "        proxy_read_timeout              86400s;",
+                    "        keepalive_timeout               600s;",
+                    "        send_timeout                    86400s;",
+                    "        proxy_intercept_errors          off;",
+                    "        proxy_redirect                  off;",
+                    "        proxy_hide_header               X-Powered-By;",
+                    "        proxy_pass_header               Server;",
+                    "        proxy_pass_header               Content-Type;",
+                    "        proxy_pass_header               Content-Length;",
+                    "        proxy_pass_header               Content-Encoding;",
+                    "        proxy_pass_header               Content-Range;",
+                    "        proxy_pass_header               Accept-Ranges;",
+                    "        proxy_pass_header               ETag;",
+                    "        proxy_pass_header               Last-Modified;",
+                    "        proxy_pass_header               Location;",
+                    "        proxy_pass_header               WWW-Authenticate;",
+                    "        proxy_pass_header               Access-Control-Allow-Origin;",
+                    "        proxy_pass_header               Access-Control-Allow-Methods;",
+                    "        proxy_pass_header               Access-Control-Allow-Headers;",
+                    "        proxy_pass_header               Access-Control-Allow-Credentials;",
+                    "        proxy_pass_header               Access-Control-Expose-Headers;",
+                    "        proxy_pass_header               Access-Control-Max-Age;",
+                ];
+                $proxy_params_domain = $proxy_params_path; // 子域名模式复用相同参数
+            } else {
+                // 精简模式（默认）
+                $proxy_params_path = [
                     "        proxy_http_version 1.1;",
                     "        proxy_set_header  Upgrade \$http_upgrade;",
                     "        proxy_set_header  Connection \$connection_upgrade;",
@@ -594,13 +663,27 @@ function nginx_generate_proxy_conf(): array {
                     "        proxy_buffer_size     8k;",
                     "        proxy_buffers         8 16k;",
                     "        proxy_busy_buffers_size 32k;",
-                    "    }",
-                ]);
+                ];
+                $proxy_params_domain = $proxy_params_path;
+            }
+
+            if (($s['proxy_mode'] ?? 'path') === 'path') {
+                $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
+                $block_lines = [
+                    "    # {$name}",
+                    "    location /p/{$slug}/ {",
+                    "        auth_request      /auth/verify.php;",
+                    "        error_page 401  = @login_redirect;",
+                    "        proxy_pass        {$target}/;",
+                ];
+                foreach ($proxy_params_path as $pl) $block_lines[] = $pl;
+                $block_lines[] = "    }";
+                $path_blocks[] = implode("\n", $block_lines);
             } else {
                 // 子域名模式：独立 server 块
                 $pd = $s['proxy_domain'] ?? '';
                 if (!$pd) continue;
-                $domain_blocks[] = implode("\n", [
+                $block_lines = [
                     "server {",
                     "    listen 443 ssl http2;",
                     "    server_name {$pd};",
@@ -620,20 +703,9 @@ function nginx_generate_proxy_conf(): array {
                     "        auth_request /auth/verify;",
                     "        error_page 401 = @nav_login;",
                     "        proxy_pass {$target};",
-                    "        proxy_http_version 1.1;",
-                    "        proxy_set_header Upgrade \$http_upgrade;",
-                    "        proxy_set_header Connection \$connection_upgrade;",
-                    "        proxy_set_header Host \$host;",
-                    "        proxy_set_header X-Real-IP \$remote_addr;",
-                    "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;",
-                    "        proxy_set_header X-Forwarded-Proto \$scheme;",
-                    "        proxy_connect_timeout 10s;",
-                    "        proxy_send_timeout    60s;",
-                    "        proxy_read_timeout    60s;",
-                    "        proxy_buffering       on;",
-                    "        proxy_buffer_size     8k;",
-                    "        proxy_buffers         8 16k;",
-                    "        proxy_busy_buffers_size 32k;",
+                ];
+                foreach ($proxy_params_domain as $pl) $block_lines[] = '    ' . ltrim($pl);
+                $block_lines = array_merge($block_lines, [
                     "    }",
                     "",
                     "    location @nav_login {",
@@ -641,6 +713,7 @@ function nginx_generate_proxy_conf(): array {
                     "    }",
                     "}",
                 ]);
+                $domain_blocks[] = implode("\n", $block_lines);
             }
         }
     }
