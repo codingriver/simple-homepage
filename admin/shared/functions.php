@@ -450,6 +450,42 @@ function nginx_generate_proxy_conf(): array {
 }
 
 /**
+ * 写入反代配置，并在 reload 失败时自动回滚
+ * @param bool $reload 是否立即 reload
+ * @return array ['ok'=>bool,'msg'=>string]
+ */
+function nginx_apply_proxy_conf(bool $reload = false): array {
+    $conf_path = nginx_proxy_conf_path();
+    $old_conf  = file_exists($conf_path) ? @file_get_contents($conf_path) : null;
+
+    $gen = nginx_generate_proxy_conf();
+    if (!$gen['ok']) {
+        return ['ok' => false, 'msg' => $gen['msg']];
+    }
+
+    if (!$reload) {
+        return ['ok' => true, 'msg' => '反代配置已写入，请点击「Reload Nginx」使其生效'];
+    }
+
+    $rel = nginx_reload();
+    if ($rel['ok']) {
+        return ['ok' => true, 'msg' => 'Nginx 已成功 reload，代理配置已生效'];
+    }
+
+    // reload 失败：回滚到旧配置并尝试恢复 reload
+    if ($old_conf !== null) {
+        @file_put_contents($conf_path, $old_conf, LOCK_EX);
+        $rollback_rel = nginx_reload();
+        if ($rollback_rel['ok']) {
+            return ['ok' => false, 'msg' => 'Reload 失败，已自动回滚到上一次可用配置：' . $rel['msg']];
+        }
+        return ['ok' => false, 'msg' => 'Reload 失败，且自动回滚后恢复失败，请手动检查 Nginx：' . $rel['msg']];
+    }
+
+    return ['ok' => false, 'msg' => 'Reload 失败，且不存在可回滚的旧配置：' . $rel['msg']];
+}
+
+/**
  * 自动检测 Nginx 可执行文件路径
  * 按优先级检测：宝塔路径 → 标准路径 → which 命令
  */

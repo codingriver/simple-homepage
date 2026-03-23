@@ -10,7 +10,7 @@
 ## 镜像核心信息（先看这里）
 
 - 镜像：`codingriver/simple-homepage:latest`
-- 容器内默认端口：`58080`（已改，避免 host 网络模式下与系统 80 端口冲突）
+- 容器内默认端口：`58080`（避免 host 网络模式下与系统 80 端口冲突）
 - 数据目录：`/var/www/nav/data`（必须挂载）
 - 首次启动：自动进入安装向导
 - 后台入口：`/admin/`
@@ -71,33 +71,21 @@ docker run -d \
 
 ---
 
-### 方式二：`docker compose`
+### 方式二：`docker compose`（仓库已内置官方文件）
 
-新建 `docker-compose.yml`：
-
-```yaml
-services:
-  simple-homepage:
-    image: codingriver/simple-homepage:latest
-    container_name: simple-homepage
-    restart: unless-stopped
-    ports:
-      - "58080:58080"
-    volumes:
-      - ./data:/var/www/nav/data
-```
-
-启动：
+仓库根目录已提供官方 `docker-compose.yml`，直接执行：
 
 ```bash
 docker compose up -d
 ```
 
+如果你需要自定义，可修改根目录 `docker-compose.yml` 中的端口、时区和数据挂载目录。
+
 ---
 
 ### 方式三：Host 网络模式（更简单）
 
-如果你想少配端口映射，可直接 host 模式：
+如果你想少配端口映射，可直接 host 模式（仅 Linux）：
 
 ```bash
 docker run -d \
@@ -111,7 +99,9 @@ docker run -d \
 访问：
 - `http://你的服务器IP:58080`
 
-> 说明：镜像内默认监听 58080，所以 host 模式下不会默认抢占系统 80 端口。
+> 注意：
+> - host 模式下 `-p` 参数会被忽略（这是 Docker 行为）。
+> - 若 58080 已被占用，请先释放端口，或改 `NAV_PORT`。
 
 ---
 
@@ -139,6 +129,7 @@ docker run -d \
 - 当前镜像采用的是 `include /etc/nginx/conf.d/nav-proxy.conf` 机制。
 - 容器启动时会自动创建空文件：`/etc/nginx/conf.d/nav-proxy.conf`。
 - 你在后台新增代理站点后，点击「生成配置并 Reload Nginx」，系统会自动写入该文件并生效。
+- 若 reload 失败，系统会自动回滚到上次可用配置。
 
 ### 小白建议流程
 
@@ -201,3 +192,37 @@ bash local/docker-build.sh
 - 只有你打 `v*` git tag 时，才会额外推送版本标签（如 `v1.2.0`）
 
 这样可以避免 tag 混乱，方便新手直接使用 `latest`。
+
+---
+
+## 小白部署故障排查（最常见）
+
+1. **打不开页面**
+   - 先执行：`docker ps`
+   - 再看日志：`docker logs -f simple-homepage`
+
+2. **端口冲突（58080 被占用）**
+   - bridge 模式：把左侧端口改成其他值（如 `-p 58081:58080`）
+   - host 模式：释放 58080 或改 `NAV_PORT`
+
+3. **重建容器后数据丢失**
+   - 原因：没挂载 `/var/www/nav/data`
+   - 正确方式：`-v ./data:/var/www/nav/data`
+
+4. **后台 Proxy 不生效**
+   - 在后台「Nginx 反代管理」点击“生成配置并 Reload Nginx”
+   - 若 reload 失败，系统会自动回滚到上次可用配置
+
+5. **登录失败/反复跳登录页**
+   - IP 访问时，`cookie_domain` 建议留空
+   - 若是 HTTPS 反代，`cookie_secure` 建议设为 `auto`
+
+---
+
+## 生产环境最小安全配置（建议）
+
+1. 首次安装后立即使用高强度管理员密码
+2. 尽量通过 HTTPS 访问后台
+3. `cookie_secure` 设为 `auto`（全站 HTTPS 可设 `on`）
+4. 定期在后台执行备份并下载离线保存
+5. 只开放必要端口，避免把后台暴露到公网

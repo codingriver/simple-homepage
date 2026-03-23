@@ -28,6 +28,16 @@ else
 fi
 
 echo "[entrypoint] Nginx 监听端口: ${NAV_PORT}"
+echo "[entrypoint] 时区: ${TZ}"
+echo "[entrypoint] 数据目录: /var/www/nav/data"
+
+# ── 启动自检（面向小白）──
+if awk '$2=="/var/www/nav/data"{found=1} END{exit !found}' /proc/mounts; then
+    echo "[entrypoint] 数据目录挂载状态: OK（已检测到宿主机挂载）"
+else
+    echo "[entrypoint][WARN] 未检测到 /var/www/nav/data 宿主机挂载，重建容器会丢数据！"
+    echo "[entrypoint][WARN] 建议使用：-v ./data:/var/www/nav/data"
+fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p \

@@ -174,21 +174,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             header('Location: settings.php'); exit;
         }
 
-        // ── Nginx 写入 + reload ──
+        // ── Nginx 写入 + reload（带预检与失败回滚）──
         if ($action === 'nginx_apply' || $action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
-            $result = nginx_generate_proxy_conf();
+            $do_reload = ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload');
+            $result = nginx_apply_proxy_conf($do_reload);
+
             if (!$result['ok']) {
                 flash_set('error', $result['msg']);
                 header('Location: settings.php#nginx'); exit;
             }
-            if ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
-                $rel = nginx_reload();
-                if ($rel['ok']) nginx_mark_applied();
-                flash_set($rel['ok'] ? 'success' : 'error',
-                    $rel['ok'] ? 'Nginx 已成功 reload，代理配置已生效' : 'Reload 失败：' . $rel['msg']);
-            } else {
-                flash_set('success', '反代配置已写入，请点击「Reload Nginx」使其生效');
+
+            if ($do_reload) {
+                nginx_mark_applied();
             }
+
+            flash_set('success', $result['msg']);
             $redirect = ($action === 'nginx_apply_and_reload') ? 'settings.php' : 'settings.php#nginx';
             header('Location: ' . $redirect); exit;
         }

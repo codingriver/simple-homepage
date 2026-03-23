@@ -101,7 +101,7 @@ EXPOSE 58080
 
 # ── 健康检查（默认端口 58080，支持 NAV_PORT 覆盖）──
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD sh -c 'curl -sf "http://localhost:${NAV_PORT:-58080}/login.php" || exit 1'
+    CMD sh -c 'test -S /run/php-fpm.sock && curl -fsS "http://127.0.0.1:${NAV_PORT:-58080}/login.php" >/dev/null || exit 1'
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
