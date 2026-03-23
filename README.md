@@ -190,8 +190,23 @@ bash local/docker-build.sh
 
 - 常规分支构建统一推送：`latest`
 - 只有你打 `v*` git tag 时，才会额外推送版本标签（如 `v1.2.0`）
+- 推送镜像为多架构：`linux/amd64` + `linux/arm64`
 
 这样可以避免 tag 混乱，方便新手直接使用 `latest`。
+
+---
+
+## CI 冒烟测试（P2）
+
+每次触发工作流会先执行 `smoke-test`：
+
+1. 本地构建测试镜像（不推送）
+2. 启动容器并等待服务可用
+3. 检查 `login.php` / `setup.php` 状态码
+4. 读取 Docker Health 状态
+5. 生成 `smoke-report.txt` 并作为 artifact 上传
+
+只有冒烟测试通过，才会进入 Docker Hub 推送阶段。
 
 ---
 
