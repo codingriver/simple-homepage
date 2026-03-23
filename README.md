@@ -2,7 +2,8 @@
 
 一个适合新手的、自托管的导航网站，支持 Docker 一键运行。
 
-Docker Hub 镜像：`codingriver/simple-homepage`
+- GitHub 仓库：[https://github.com/codingriver/simple-homepage](https://github.com/codingriver/simple-homepage)
+- Docker Hub：[https://hub.docker.com/r/codingriver/simple-homepage](https://hub.docker.com/r/codingriver/simple-homepage)
 
 ## 功能特点
 - 简单易用的导航首页
@@ -34,7 +35,7 @@ docker run -d \
 
 ### 方式二：使用 `docker compose`
 
-项目内已经提供 `docker-compose.yml`，直接使用即可：
+新建 `docker-compose.yml`：
 
 ```yaml
 services:
@@ -147,27 +148,31 @@ docker run -d \
 ---
 
 ## 本地开发 / 本地构建
-项目内已提供构建脚本：
+
+项目内已提供构建脚本（位于 `local/` 目录）：
 
 ```bash
-./docker-build.sh
+# 1. 复制配置文件
+cp local/.env.example local/.env
+# 2. 按需修改 local/.env（端口、数据目录、代理等）
+# 3. 一键构建并启动
+bash local/docker-build.sh
 ```
 
-支持通过 `.env` 控制构建时是否启用代理：
+支持通过 `local/.env` 控制构建时是否启用代理：
 
 ```bash
-BUILD_USE_PROXY=0
-BUILD_PROXY_URL=http://192.168.2.2:7890
+BUILD_USE_PROXY=0          # 禁用代理（默认）
+BUILD_USE_PROXY=1          # 启用代理
+BUILD_PROXY_URL=http://127.0.0.1:7890
 ```
-
-含义：
-- `BUILD_USE_PROXY=0`：构建时禁用代理
-- `BUILD_USE_PROXY=1`：构建时启用代理
 
 ---
 
-## Docker Hub 发布地址
-- `codingriver/simple-homepage:latest`
+## 相关链接
+
+- GitHub 仓库：[https://github.com/codingriver/simple-homepage](https://github.com/codingriver/simple-homepage)
+- Docker Hub：[https://hub.docker.com/r/codingriver/simple-homepage](https://hub.docker.com/r/codingriver/simple-homepage)
 
 ---
 
