@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Nav Portal Full Smoke Test
-set -uo pipefail
+set -ue
+# 注意：不用 pipefail，避免管道中 grep/curl 返回非零时意外退出
+
+echo "[smoke] START pid=$$ pwd=$(pwd)"
+echo "[smoke] IMAGE=${2:-local/smoke:test}"
 
 REPORT_PATH="${1:-smoke-report.txt}"
 IMAGE_TAG="${2:-local/smoke:test}"
@@ -59,6 +63,10 @@ post_ajax() {
 
 # ------- 1. Container -------
 echo ""; echo "[1/11] Container start..."
+echo "[smoke] DATA_DIR=${DATA_DIR}"
+echo "[smoke] SMOKE_TMPDIR=${SMOKE_TMPDIR}"
+ls -la "${SMOKE_TMPDIR}" || true
+ls -la "${DATA_DIR}" || true
 docker run -d \
   --name "$CONTAINER_NAME" \
   -p "${HOST_PORT}:58080" \
