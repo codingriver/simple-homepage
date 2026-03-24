@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # Nav Portal Full Smoke Test
+# 所有 HTTP 请求均通过 docker exec 在容器内执行，避免宿主机端口映射问题
 set -ue
-# 注意：不用 pipefail，避免管道中 grep/curl 返回非零时意外退出
 
-echo "[smoke] START pid=$$ pwd=$(pwd)"
+echo "[smoke] START pid=$$ ***"
 echo "[smoke] IMAGE=${2:-local/smoke:test}"
 
 REPORT_PATH="${1:-smoke-report.txt}"
 IMAGE_TAG="${2:-local/smoke:test}"
 CONTAINER_NAME="nav-smoke-test"
 HOST_PORT="58081"
-BASE="http://127.0.0.1:${HOST_PORT}"
+BASE="http://127.0.0.1:58080"   # 容器内访问地址
+CJ="/tmp/smoke_cj.txt"           # 容器内 cookie jar
 
-# 使用工作目录下的临时目录，避免 /tmp 在 GitHub Actions runner 上的权限问题
+# 宿主机临时目录（用于挂载数据卷和导出文件）
 SMOKE_TMPDIR="$(pwd)/.smoke_tmp_$$"
-CJ="${SMOKE_TMPDIR}/cj.txt"
 DATA_DIR="${SMOKE_TMPDIR}/nav_data"
-EXPORT_FILE="${SMOKE_TMPDIR}/export.json"
+EXPORT_FILE_HOST="${SMOKE_TMPDIR}/export.json"
+EXPORT_FILE_INNER="/tmp/smoke_export.json"  # 容器内路径
 
 PASS=0; FAIL=0; SKIP=0
 DETAILS=""
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 mkdir -p "${DATA_DIR}/logs" "${DATA_DIR}/favicon_cache" "${DATA_DIR}/bg" "${DATA_DIR}/backups"
-# 确保容器内 navwww(uid=1000) 可写
 chmod -R 777 "${DATA_DIR}"
 
 printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\n' \
@@ -31,7 +31,6 @@ printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\n' \
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  # 容器内写入的文件归属容器用户，runner 无权直接删除，借助 docker 以 root 清理
   if [ -d "$SMOKE_TMPDIR" ]; then
     docker run --rm -v "${SMOKE_TMPDIR}:/cleanup" alpine sh -c 'rm -rf /cleanup/*' >/dev/null 2>&1 || true
     rm -rf "$SMOKE_TMPDIR" 2>/dev/null || true
@@ -41,24 +40,53 @@ trap cleanup EXIT
 
 log_case() {
   local n="$1" r="$2" d="${3:-}"
-  if   [ "$r" = "PASS" ]; then PASS=$((PASS+1)); printf '  [PASS] %s\n' "$n";        DETAILS="${DETAILS}PASS|${n}\n"
-  elif [ "$r" = "SKIP" ]; then SKIP=$((SKIP+1)); printf '  [SKIP] %s\n' "$n";        DETAILS="${DETAILS}SKIP|${n}: ${d}\n"
+  if   [ "$r" = "PASS" ]; then PASS=$((PASS+1)); printf '  [PASS] %s\n' "$n";         DETAILS="${DETAILS}PASS|${n}\n"
+  elif [ "$r" = "SKIP" ]; then SKIP=$((SKIP+1)); printf '  [SKIP] %s\n' "$n";         DETAILS="${DETAILS}SKIP|${n}: ${d}\n"
   else                          FAIL=$((FAIL+1)); printf '  [FAIL] %s  %s\n' "$n" "$d"; DETAILS="${DETAILS}FAIL|${n}: ${d}\n"
   fi
 }
 
-hcode() { curl -sL -b "$CJ" -c "$CJ" --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000; }
-hbody() { curl -sL -b "$CJ" -c "$CJ" --max-time 10 "$1" 2>/dev/null || true; }
+# 容器内执行 curl GET，返回 HTTP 状态码
+hcode() {
+  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000
+}
+
+# 容器内执行 curl GET，返回响应体
+hbody() {
+  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    --max-time 10 "$1" 2>/dev/null || true
+}
+
+# 从页面提取 CSRF token
 get_csrf() { hbody "$1" | grep -oP '(?<=name="_csrf" value=")[^"]+' | head -1 || true; }
 
-assert_code() { local g; g=$(hcode "$2"); [ "$g" = "$3" ] && log_case "$1" PASS || log_case "$1" FAIL "exp $3 got $g"; }
-assert_body() { local b; b=$(hbody "$2"); echo "$b" | grep -qF "$3" && log_case "$1" PASS || log_case "$1" FAIL "'$3' not found"; }
+assert_code() {
+  local g; g=$(hcode "$2")
+  [ "$g" = "$3" ] && log_case "$1" PASS || log_case "$1" FAIL "exp $3 got $g"
+}
 
+assert_body() {
+  local b; b=$(hbody "$2")
+  echo "$b" | grep -qF "$3" && log_case "$1" PASS || log_case "$1" FAIL "'$3' not found"
+}
+
+# 容器内 POST（application/x-www-form-urlencoded）
+# 用法: post_form NAME URL EXPECT_STR -d key=val ...
+post_form() {
+  local n="$1" u="$2" ex="$3"; shift 3
+  local r; r=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    --max-time 15 -X POST "$u" "$@" 2>/dev/null || true)
+  echo "$r" | grep -qF "$ex" && log_case "$n" PASS || log_case "$n" FAIL "${r:0:120}"
+}
+
+# 容器内 POST（multipart/form-data，用于 CRUD AJAX）
 post_ajax() {
   local n="$1" u="$2" ex="$3"; shift 3
-  local r; r=$(curl -sL -b "$CJ" -c "$CJ" --max-time 15 -X POST "$u" \
+  local r; r=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    --max-time 15 -X POST "$u" \
     -H 'X-Requested-With: XMLHttpRequest' "$@" 2>/dev/null || true)
-  echo "$r" | grep -qF "$ex" && log_case "$n" PASS || log_case "$n" FAIL "${r:0:100}"
+  echo "$r" | grep -qF "$ex" && log_case "$n" PASS || log_case "$n" FAIL "${r:0:120}"
 }
 
 # ------- 1. Container -------
@@ -73,46 +101,34 @@ docker run -d \
   -p "${HOST_PORT}:58080" \
   -e NAV_PORT=58080 -e TZ=Asia/Shanghai \
   -v "${DATA_DIR}:/var/www/nav/data" \
-  "$IMAGE_TAG" || { echo "[smoke] docker run FAILED, exit=$?"; docker logs "$CONTAINER_NAME" 2>&1 || true; exit 1; }
+  "$IMAGE_TAG" || { echo "[smoke] docker run FAILED"; exit 1; }
 echo "[smoke] docker run OK, waiting for service..."
-# 等待服务就绪：只要 HTTP 有响应（任意状态码非000）即视为就绪
 READY=0
 for i in $(seq 1 60); do
-  CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:58080/setup.php" 2>/dev/null || echo 000)
+  CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' \
+    --max-time 3 "${BASE}/setup.php" 2>/dev/null || echo 000)
   if [ "$CODE" != "000" ] && [ "$CODE" != "" ]; then
     echo "[smoke] Service ready (HTTP ${CODE})"
-    READY=1
-    break
+    READY=1; break
   fi
   sleep 1
 done
-# 如果是 500，输出响应体帮助排查 PHP 错误
-if [ "$READY" -eq 1 ]; then
-  CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:58080/setup.php" 2>/dev/null || echo 000)
-  if [ "$CODE" = "500" ]; then
-    echo "[smoke] WARNING: setup.php returns 500, response body:"
-    docker exec "$CONTAINER_NAME" curl -s --max-time 5 "http://127.0.0.1:58080/setup.php" 2>/dev/null | head -20 || true
-    echo "[smoke] PHP-FPM error log:"
-    docker exec "$CONTAINER_NAME" tail -20 /var/log/php-fpm/error.log 2>/dev/null || true
-    echo "[smoke] Nginx error log:"
-    docker exec "$CONTAINER_NAME" tail -10 /var/log/nginx/nav.error.log 2>/dev/null || true
-  fi
-fi
 if [ "$READY" -ne 1 ]; then
   printf 'result: FAIL\nreason: not ready after 60s\n' >> "$REPORT_PATH"
-  echo "[smoke] Service not ready, dumping diagnostics:"
-  echo "[smoke] --- docker ps ---"
-  docker ps
-  echo "[smoke] --- port check ---"
-  ss -tlnp | grep 58081 || netstat -tlnp | grep 58081 || true
-  echo "[smoke] --- curl from host ---"
-  curl -v "${BASE}/setup.php" 2>&1 || true
-  echo "[smoke] --- curl from container ---"
-  docker exec "$CONTAINER_NAME" curl -v "http://127.0.0.1:58080/setup.php" 2>&1 || true
-  echo "[smoke] --- container logs ---"
-  docker logs "$CONTAINER_NAME" 2>&1 | tail -40
+  docker logs "$CONTAINER_NAME" 2>&1 | tail -30
   docker logs "$CONTAINER_NAME" >> "$REPORT_PATH" 2>&1 || true
   exit 1
+fi
+# 如果 setup.php 返回 500，输出 PHP 错误日志
+CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' \
+  --max-time 3 "${BASE}/setup.php" 2>/dev/null || echo 000)
+if [ "$CODE" = "500" ]; then
+  echo "[smoke] setup.php returns 500, PHP-FPM log:"
+  docker exec "$CONTAINER_NAME" tail -30 /var/log/php-fpm/error.log 2>/dev/null || true
+  echo "[smoke] Nginx error log:"
+  docker exec "$CONTAINER_NAME" tail -10 /var/log/nginx/nav.error.log 2>/dev/null || true
+  echo "[smoke] setup.php body:"
+  docker exec "$CONTAINER_NAME" curl -s --max-time 5 "${BASE}/setup.php" 2>/dev/null | head -30 || true
 fi
 log_case "container_start" PASS
 
@@ -125,7 +141,8 @@ CSRF=$(get_csrf "${BASE}/setup.php")
 if [ -z "$CSRF" ]; then
   log_case "setup_submit" FAIL "no CSRF"
 else
-  SR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 20 -X POST "${BASE}/setup.php" \
+  SR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 20 \
+    -X POST "${BASE}/setup.php" \
     -d "_csrf=${CSRF}" -d "username=admin" \
     --data-urlencode "password=Admin@smoke1" \
     --data-urlencode "password2=Admin@smoke1" \
@@ -141,7 +158,8 @@ assert_code "login_page_200" "${BASE}/login.php" "200"
 assert_body "login_has_form"  "${BASE}/login.php" "用户名"
 CSRF=$(get_csrf "${BASE}/login.php")
 if [ -n "$CSRF" ]; then
-  WR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 10 -X POST "${BASE}/login.php" \
+  WR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+    -X POST "${BASE}/login.php" \
     -d "_csrf=${CSRF}" -d "username=admin" -d "password=wrongpass" 2>/dev/null || true)
   echo "$WR" | grep -qF "用户名或密码错误" && log_case "login_wrong_pass" PASS || log_case "login_wrong_pass" FAIL "no error msg"
 fi
@@ -149,7 +167,8 @@ CSRF=$(get_csrf "${BASE}/login.php")
 if [ -z "$CSRF" ]; then
   log_case "login_success" FAIL "no CSRF"
 else
-  curl -sL -b "$CJ" -c "$CJ" --max-time 10 -X POST "${BASE}/login.php" \
+  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+    -X POST "${BASE}/login.php" \
     -d "_csrf=${CSRF}" -d "username=admin" --data-urlencode "password=Admin@smoke1" \
     -o /dev/null 2>/dev/null || true
   FRONT=$(hcode "${BASE}/index.php")
@@ -157,11 +176,13 @@ else
 fi
 assert_code "auth_verify_200" "${BASE}/auth/verify.php" "200"
 assert_code "admin_dash_200"  "${BASE}/admin/index.php" "200"
-curl -sL -b "$CJ" -c "$CJ" --max-time 10 "${BASE}/logout.php" -o /dev/null 2>/dev/null || true
+docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+  "${BASE}/logout.php" -o /dev/null 2>/dev/null || true
 LGOUT=$(hcode "${BASE}/admin/index.php")
 [ "$LGOUT" = "302" ] && log_case "logout_clears_session" PASS || log_case "logout_clears_session" FAIL "returns $LGOUT"
 CSRF=$(get_csrf "${BASE}/login.php")
-curl -sL -b "$CJ" -c "$CJ" --max-time 10 -X POST "${BASE}/login.php" \
+docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+  -X POST "${BASE}/login.php" \
   -d "_csrf=${CSRF}" -d "username=admin" --data-urlencode "password=Admin@smoke1" \
   -o /dev/null 2>/dev/null || true
 
@@ -189,7 +210,7 @@ if [ -n "$CSRF" ]; then
     -F "name=SmokeGroupEdited" -F "icon=X" -F "order=1" -F "visible_to=all" -F "auth_required=1"
   assert_body "group_edit_ok" "${BASE}/admin/groups.php" "SmokeGroupEdited"
 else
-  log_case "group_create" SKIP "no CSRF"
+  log_case   "group_create" SKIP "no CSRF"
   log_case "group_edit"   SKIP "no CSRF"
 fi
 
@@ -228,13 +249,13 @@ echo ""; echo "[7/11] User management..."
 assert_code "users_add_page" "${BASE}/admin/users.php?action=add" "200"
 CSRF=$(get_csrf "${BASE}/admin/users.php?action=add")
 if [ -n "$CSRF" ]; then
-  UR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+  UR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
     -X POST "${BASE}/admin/users.php" \
     -d "_csrf=${CSRF}" -d "act=save" -d "username=smokeuser" \
     -d "role=user" --data-urlencode "password=SmokePass1" 2>/dev/null || true)
   echo "$UR" | grep -qF "smokeuser" && log_case "user_create" PASS || log_case "user_create" FAIL "${UR:0:100}"
   CSRF=$(get_csrf "${BASE}/admin/users.php")
-  DR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+  DR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
     -X POST "${BASE}/admin/users.php" \
     -d "_csrf=${CSRF}" -d "act=delete" -d "del_user=smokeuser" 2>/dev/null || true)
   echo "$DR" | grep -vqF "smokeuser" && log_case "user_delete" PASS || log_case "user_delete" FAIL "still visible"
@@ -247,7 +268,7 @@ fi
 echo ""; echo "[8/11] Backup management..."
 CSRF=$(get_csrf "${BASE}/admin/backups.php")
 if [ -n "$CSRF" ]; then
-  BR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
+  BR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
     -X POST "${BASE}/admin/backups.php" \
     -d "_csrf=${CSRF}" -d "action=create" 2>/dev/null || true)
   echo "$BR" | grep -qF "备份已创建" && log_case "backup_create" PASS || log_case "backup_create" FAIL "${BR:0:80}"
@@ -260,7 +281,7 @@ fi
 echo ""; echo "[9/11] Settings / export / import / nginx-gen..."
 CSRF=$(get_csrf "${BASE}/admin/settings.php")
 if [ -n "$CSRF" ]; then
-  SSR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
+  SSR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
     -X POST "${BASE}/admin/settings.php" \
     -d "_csrf=${CSRF}" -d "action=save_settings" \
     -d "site_name=SmokeTest" -d "nav_domain=smoke.test" \
@@ -275,28 +296,33 @@ else
 fi
 CSRF=$(get_csrf "${BASE}/admin/settings.php")
 if [ -n "$CSRF" ]; then
-  EX=$(curl -s -b "$CJ" -c "$CJ" --max-time 10 \
+  docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" --max-time 10 \
     -X POST "${BASE}/admin/settings.php" \
     -d "_csrf=${CSRF}" -d "action=export_config" \
-    -o "$EXPORT_FILE" -w "%{http_code}" 2>/dev/null || echo 000)
-  [ "$EX" = "200" ] && grep -q '"groups"' "$EXPORT_FILE" 2>/dev/null \
-    && log_case "config_export" PASS || log_case "config_export" FAIL "HTTP $EX"
+    -o /tmp/smoke_export.json 2>/dev/null || true
+  docker cp "${CONTAINER_NAME}:/tmp/smoke_export.json" "${SMOKE_TMPDIR}/export.json" 2>/dev/null || true
+  if [ -f "${SMOKE_TMPDIR}/export.json" ] && grep -q '"groups"' "${SMOKE_TMPDIR}/export.json" 2>/dev/null; then
+    log_case "config_export" PASS
+  else
+    log_case "config_export" FAIL "export file invalid"
+  fi
 else
   log_case "config_export" SKIP "no CSRF"
 fi
-if [ -f "$EXPORT_FILE" ]; then
+if [ -f "${SMOKE_TMPDIR}/export.json" ]; then
+  docker cp "${SMOKE_TMPDIR}/export.json" "${CONTAINER_NAME}:/tmp/smoke_import.json" 2>/dev/null || true
   CSRF=$(get_csrf "${BASE}/admin/settings.php")
-  IR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
+  IR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
     -X POST "${BASE}/admin/settings.php" \
     -F "_csrf=${CSRF}" -F "action=import_config" \
-    -F "import_file=@${EXPORT_FILE};type=application/json" 2>/dev/null || true)
+    -F "import_file=@/tmp/smoke_import.json;type=application/json" 2>/dev/null || true)
   echo "$IR" | grep -qF "导入成功" && log_case "config_import" PASS || log_case "config_import" FAIL "${IR:0:100}"
 else
   log_case "config_import" SKIP "export file missing"
 fi
 CSRF=$(get_csrf "${BASE}/admin/settings.php")
 if [ -n "$CSRF" ]; then
-  NGC=$(curl -s -b "$CJ" -c "$CJ" --max-time 10 \
+  NGC=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" --max-time 10 \
     -X POST "${BASE}/admin/settings.php" \
     -d "_csrf=${CSRF}" -d "action=gen_nginx" \
     -o /dev/null -w "%{http_code}" 2>/dev/null || echo 000)
@@ -306,7 +332,7 @@ else
 fi
 CSRF=$(get_csrf "${BASE}/admin/settings.php")
 if [ -n "$CSRF" ]; then
-  MBR=$(curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
+  MBR=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 15 \
     -X POST "${BASE}/admin/settings.php" \
     -d "_csrf=${CSRF}" -d "action=manual_backup" 2>/dev/null || true)
   echo "$MBR" | grep -qF "备份已创建" && log_case "manual_backup_settings" PASS || log_case "manual_backup_settings" FAIL "${MBR:0:100}"
@@ -320,13 +346,13 @@ for LTYPE in nginx_access nginx_error php_fpm; do
   LC=$(hcode "${BASE}/admin/settings.php?ajax=log&type=${LTYPE}&lines=10")
   [ "$LC" = "200" ] && log_case "log_api_${LTYPE}" PASS || log_case "log_api_${LTYPE}" FAIL "HTTP $LC"
 done
-CLR=$(curl -s -b "$CJ" -c "$CJ" --max-time 10 \
-  -X GET "${BASE}/admin/settings.php?ajax=clear_log" \
+CLR=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" --max-time 10 \
+  "${BASE}/admin/settings.php?ajax=clear_log" \
   -o /dev/null -w "%{http_code}" 2>/dev/null || echo 000)
 [ "$CLR" = "200" ] && log_case "log_clear_api" PASS || log_case "log_clear_api" FAIL "HTTP $CLR"
 CSRF=$(get_csrf "${BASE}/admin/settings.php")
 if [ -n "$CSRF" ]; then
-  curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
     -X POST "${BASE}/admin/settings.php" \
     -d "_csrf=${CSRF}" -d "action=clear_cookie" -o /dev/null 2>/dev/null || true
   log_case "cookie_clear" PASS
@@ -356,4 +382,3 @@ else
   printf 'result: PASS\n' >> "$REPORT_PATH"
   printf '\n[smoke] PASS %d/%d\n' "$PASS" "$TOTAL"
 fi
-  
