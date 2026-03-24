@@ -1,0 +1,89 @@
+name: Manual Push to Docker Hub
+
+# 手动触发：直接构建并推送 latest 到 Docker Hub，跳过冒烟测试
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '额外推送的版本标签（留空则只推 latest）'
+        required: false
+        default: ''
+        type: string
+      skip_arm64:
+        description: '跳过 arm64 构建（加快速度）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  push-latest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Determine platforms
+        id: platforms
+        run: |
+          if [ "${{ inputs.skip_arm64 }}" = "true" ]; then
+            echo "list=linux/amd64" >> $GITHUB_OUTPUT
+          else
+            echo "list=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine tags
+        id: tags
+        run: |
+          TAGS="codingriver/simple-homepage:latest"
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAGS="${TAGS},codingriver/simple-homepage:${{ inputs.tag }}"
+          fi
+          echo "list=${TAGS}" >> $GITHUB_OUTPUT
+          echo "[push] Will push tags: ${TAGS}"
+          echo "[push] Platforms: ${{ steps.platforms.outputs.list }}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: ${{ steps.platforms.outputs.list }}
+          tags: ${{ steps.tags.outputs.list }}
+
+      - name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: codingriver/simple-homepage
+          short-description: "A simple self-hosted navigation homepage with Docker support"
+          readme-filepath: ./README.md
+
+      - name: Summary
+        run: |
+          echo "## ✅ Manual Push Completed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tags | \`${{ steps.tags.outputs.list }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platforms | \`${{ steps.platforms.outputs.list }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | ${{ github.sha }} |" >> "$GITHUB_STEP_SUMMARY"
