@@ -75,15 +75,34 @@ docker run -d \
   -v "${DATA_DIR}:/var/www/nav/data" \
   "$IMAGE_TAG" || { echo "[smoke] docker run FAILED, exit=$?"; docker logs "$CONTAINER_NAME" 2>&1 || true; exit 1; }
 echo "[smoke] docker run OK, waiting for service..."
+# 等待容器内服务就绪（直接在容器内 curl，绕过端口映射网络问题）
 READY=0
-for i in $(seq 1 90); do
-  curl -fsS "${BASE}/setup.php" >/dev/null 2>&1 && READY=1 && break
+for i in $(seq 1 60); do
+  docker exec "$CONTAINER_NAME" curl -fsS "http://127.0.0.1:58080/setup.php" >/dev/null 2>&1 && READY=1 && break
   sleep 1
 done
+# 同时也测试宿主机端口映射是否可用
+if [ "$READY" -eq 1 ]; then
+  echo "[smoke] Container inner curl OK"
+  # 再测宿主机端口
+  for i in $(seq 1 15); do
+    curl -fsS "${BASE}/setup.php" >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
 if [ "$READY" -ne 1 ]; then
-  printf 'result: FAIL\nreason: not ready after 90s\n' >> "$REPORT_PATH"
-  echo "[smoke] Container logs:"
-  docker logs "$CONTAINER_NAME" 2>&1 | tail -30
+  printf 'result: FAIL\nreason: not ready after 60s\n' >> "$REPORT_PATH"
+  echo "[smoke] Service not ready, dumping diagnostics:"
+  echo "[smoke] --- docker ps ---"
+  docker ps
+  echo "[smoke] --- port check ---"
+  ss -tlnp | grep 58081 || netstat -tlnp | grep 58081 || true
+  echo "[smoke] --- curl from host ---"
+  curl -v "${BASE}/setup.php" 2>&1 || true
+  echo "[smoke] --- curl from container ---"
+  docker exec "$CONTAINER_NAME" curl -v "http://127.0.0.1:58080/setup.php" 2>&1 || true
+  echo "[smoke] --- container logs ---"
+  docker logs "$CONTAINER_NAME" 2>&1 | tail -40
   docker logs "$CONTAINER_NAME" >> "$REPORT_PATH" 2>&1 || true
   exit 1
 fi
