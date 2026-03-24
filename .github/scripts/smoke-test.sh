@@ -27,7 +27,11 @@ printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\n' \
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  rm -rf "$SMOKE_TMPDIR"
+  # 容器内写入的文件归属容器用户，runner 无权直接删除，借助 docker 以 root 清理
+  if [ -d "$SMOKE_TMPDIR" ]; then
+    docker run --rm -v "${SMOKE_TMPDIR}:/cleanup" alpine sh -c 'rm -rf /cleanup/*' >/dev/null 2>&1 || true
+    rm -rf "$SMOKE_TMPDIR" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
