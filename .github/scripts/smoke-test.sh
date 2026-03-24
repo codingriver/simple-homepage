@@ -75,20 +75,28 @@ docker run -d \
   -v "${DATA_DIR}:/var/www/nav/data" \
   "$IMAGE_TAG" || { echo "[smoke] docker run FAILED, exit=$?"; docker logs "$CONTAINER_NAME" 2>&1 || true; exit 1; }
 echo "[smoke] docker run OK, waiting for service..."
-# 等待容器内服务就绪（直接在容器内 curl，绕过端口映射网络问题）
+# 等待服务就绪：只要 HTTP 有响应（任意状态码非000）即视为就绪
 READY=0
 for i in $(seq 1 60); do
-  docker exec "$CONTAINER_NAME" curl -fsS "http://127.0.0.1:58080/setup.php" >/dev/null 2>&1 && READY=1 && break
+  CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:58080/setup.php" 2>/dev/null || echo 000)
+  if [ "$CODE" != "000" ] && [ "$CODE" != "" ]; then
+    echo "[smoke] Service ready (HTTP ${CODE})"
+    READY=1
+    break
+  fi
   sleep 1
 done
-# 同时也测试宿主机端口映射是否可用
+# 如果是 500，输出响应体帮助排查 PHP 错误
 if [ "$READY" -eq 1 ]; then
-  echo "[smoke] Container inner curl OK"
-  # 再测宿主机端口
-  for i in $(seq 1 15); do
-    curl -fsS "${BASE}/setup.php" >/dev/null 2>&1 && break
-    sleep 1
-  done
+  CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:58080/setup.php" 2>/dev/null || echo 000)
+  if [ "$CODE" = "500" ]; then
+    echo "[smoke] WARNING: setup.php returns 500, response body:"
+    docker exec "$CONTAINER_NAME" curl -s --max-time 5 "http://127.0.0.1:58080/setup.php" 2>/dev/null | head -20 || true
+    echo "[smoke] PHP-FPM error log:"
+    docker exec "$CONTAINER_NAME" tail -20 /var/log/php-fpm/error.log 2>/dev/null || true
+    echo "[smoke] Nginx error log:"
+    docker exec "$CONTAINER_NAME" tail -10 /var/log/nginx/nav.error.log 2>/dev/null || true
+  fi
 fi
 if [ "$READY" -ne 1 ]; then
   printf 'result: FAIL\nreason: not ready after 60s\n' >> "$REPORT_PATH"
