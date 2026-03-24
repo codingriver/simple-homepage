@@ -67,12 +67,14 @@ echo "[smoke] DATA_DIR=${DATA_DIR}"
 echo "[smoke] SMOKE_TMPDIR=${SMOKE_TMPDIR}"
 ls -la "${SMOKE_TMPDIR}" || true
 ls -la "${DATA_DIR}" || true
+echo "[smoke] Running docker run..."
 docker run -d \
   --name "$CONTAINER_NAME" \
   -p "${HOST_PORT}:58080" \
   -e NAV_PORT=58080 -e TZ=Asia/Shanghai \
   -v "${DATA_DIR}:/var/www/nav/data" \
-  "$IMAGE_TAG" >/dev/null
+  "$IMAGE_TAG" || { echo "[smoke] docker run FAILED, exit=$?"; docker logs "$CONTAINER_NAME" 2>&1 || true; exit 1; }
+echo "[smoke] docker run OK, waiting for service..."
 READY=0
 for i in $(seq 1 90); do
   curl -fsS "${BASE}/setup.php" >/dev/null 2>&1 && READY=1 && break
@@ -80,6 +82,8 @@ for i in $(seq 1 90); do
 done
 if [ "$READY" -ne 1 ]; then
   printf 'result: FAIL\nreason: not ready after 90s\n' >> "$REPORT_PATH"
+  echo "[smoke] Container logs:"
+  docker logs "$CONTAINER_NAME" 2>&1 | tail -30
   docker logs "$CONTAINER_NAME" >> "$REPORT_PATH" 2>&1 || true
   exit 1
 fi
