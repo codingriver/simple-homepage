@@ -28,10 +28,37 @@ function save_sites(array $data): void {
 
 // ── 系统配置 ──
 
-/** 读取系统配置 */
+/** 读取系统配置（含默认值，确保所有字段存在，与 auth_get_config() 保持一致）*/
 function load_config(): array {
-    if (!file_exists(CONFIG_FILE)) return [];
-    return json_decode(file_get_contents(CONFIG_FILE), true) ?? [];
+    $raw = file_exists(CONFIG_FILE)
+        ? (json_decode(file_get_contents(CONFIG_FILE), true) ?? [])
+        : [];
+    // 合并默认值：新安装或旧备份恢复后不会出现缺字段
+    return $raw + [
+        'site_name'          => '导航中心',
+        'nav_domain'         => '',
+        'token_expire_hours' => 8,
+        'remember_me_days'   => 60,
+        'login_fail_limit'   => 5,
+        'login_lock_minutes' => 15,
+        'bg_color'           => '',
+        'bg_image'           => '',
+        'cookie_secure'      => 'off',
+        'cookie_domain'      => '',
+        'card_size'          => 140,
+        'card_height'        => 0,
+        'card_show_desc'     => '1',
+        'card_layout'        => 'grid',
+        'card_direction'     => 'col',
+        'display_errors'     => '0',
+        'proxy_params_mode'  => 'simple',
+        'webhook_enabled'    => '0',
+        'webhook_type'       => 'custom',
+        'webhook_url'        => '',
+        'webhook_tg_chat'    => '',
+        'webhook_events'     => 'FAIL,IP_LOCKED',
+        'nginx_last_applied' => 0,
+    ];
 }
 
 /** 写入系统配置 */

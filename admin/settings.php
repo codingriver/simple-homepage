@@ -4,63 +4,15 @@
  */
 
 // ── 所有需要在 HTML 之前输出的操作（文件下载/导出）──
-if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
 
-    // AJAX 日志读取
-    if (isset($_GET['ajax']) && $_GET['ajax'] === 'log') {
-        $current_admin = auth_get_current_user();
-        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
-            http_response_code(401);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo '（未登录或无权限）'; exit;
-        }
-        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm'])
-                 ? $_GET['type'] : 'nginx_access';
-        $lines = min(500, max(10, (int)($_GET['lines'] ?? 100)));
-        header('Content-Type: text/plain; charset=utf-8');
-        echo debug_read_log($type, $lines); exit;
+    $current_admin = auth_get_current_user();
+    if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
+        header('Location: /login.php'); exit;
     }
-
-    // AJAX 清空日志
-    if (isset($_GET['ajax']) && $_GET['ajax'] === 'clear_log') {
-        $current_admin = auth_get_current_user();
-        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
-            http_response_code(401); echo json_encode(['ok'=>false,'msg'=>'未登录']); exit;
-        }
-        header('Content-Type: application/json; charset=utf-8');
-        $log_map = [
-            'nginx_access' => '/var/log/nginx/nav.access.log',
-            'nginx_error'  => '/var/log/nginx/nav.error.log',
-            'nginx_main'   => '/var/log/nginx/error.log',
-            'php_fpm'      => '/var/log/php-fpm/error.log',
-        ];
-        $cleared = [];
-        $failed  = [];
-        foreach ($log_map as $key => $path) {
-            if (!file_exists($path)) continue;
-            if (file_put_contents($path, '') !== false) {
-                $cleared[] = $key;
-            } else {
-                $failed[] = $key;
-            }
-        }
-        echo json_encode([
-            'ok'      => empty($failed),
-            'cleared' => $cleared,
-            'failed'  => $failed,
-            'msg'     => empty($failed) ? '已清空 ' . count($cleared) . ' 个日志文件' : '部分日志清空失败：' . implode(', ', $failed),
-        ]);
-        exit;
-    }
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $current_admin = auth_get_current_user();
-        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
-            header('Location: /login.php'); exit;
-        }
-        csrf_check();
-        $action = $_POST['action'] ?? '';
+    csrf_check();
+    $action = $_POST['action'] ?? '';
 
         // ── 导出配置（统一备份格式：sites + config）──
         if ($action === 'export_sites' || $action === 'export_config') {
@@ -200,7 +152,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             $cfg = load_config();
             $cfg['proxy_params_mode'] = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
             save_config($cfg);
-            flash_set('success', '反代参数模式已保存，请重新生成配置并 Reload Nginx');
+            // 统计 proxy 站点数量，>0 时提示立即 reload
+            $proxy_cnt_check = 0;
+            foreach (load_sites()['groups'] ?? [] as $_g)
+                foreach ($_g['sites'] ?? [] as $_s)
+                    if (($_s['type'] ?? '') === 'proxy') $proxy_cnt_check++;
+            if ($proxy_cnt_check > 0) {
+                flash_set('warn', "反代参数模式已切换为【" . ($cfg['proxy_params_mode'] === 'full' ? '完整模式' : '精简模式') . "】，当前有 {$proxy_cnt_check} 个代理站点，需要重新生成配置并 Reload Nginx 才能生效。");
+            } else {
+                flash_set('success', '反代参数模式已保存（当前无代理站点，无需 Reload）');
+            }
             header('Location: settings.php#nginx'); exit;
         }
 
@@ -226,22 +187,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             $result = webhook_test();
             flash_set($result['ok'] ? 'success' : 'error', $result['msg']);
             header('Location: settings.php#webhook'); exit;
-        }
-
-        // ── 清除 Cookie ──
-        if ($action === 'clear_cookie') {
-            auth_clear_cookie();
-            flash_set('success', 'Cookie 已清除，即将跳转到登录页');
-            header('Location: ../login.php'); exit;
-        }
-
-        // ── display_errors 切换 ──
-        if ($action === 'toggle_display_errors') {
-            $enable = ($_POST['display_errors'] ?? '0') === '1';
-            $result = debug_set_display_errors($enable);
-            flash_set($result['ok'] ? 'success' : 'error',
-                $result['ok'] ? 'display_errors 已' . ($enable ? '开启' : '关闭') : '操作失败：' . $result['msg']);
-            header('Location: settings.php#debug'); exit;
         }
 
         // ── 保存基础设置 ──
@@ -317,21 +262,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
             flash_set('success', '设置已保存');
             header('Location: settings.php'); exit;
         }
-    }
 }
 
 $page_title = '系统设置';
 require_once __DIR__ . '/shared/header.php';
 
 $cfg = load_config();
-
-// 日志分页
-$log_page    = max(1, (int)($_GET['logp'] ?? 1));
-$log_perpage = 50;
-$log_offset  = ($log_page - 1) * $log_perpage;
-$log_data    = auth_read_log($log_perpage, $log_offset);
-$log_total   = $log_data['total'];
-$log_pages   = max(1, (int)ceil($log_total / $log_perpage));
 ?>
 
 <!-- 基础设置 -->
@@ -494,57 +430,6 @@ $log_pages   = max(1, (int)ceil($log_total / $log_perpage));
   <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」格式完全一致，导入时自动识别格式。</div>
 </div>
 
-<!-- 调试工具 -->
-<div class="card" id="debug">
-  <div class="card-title">🛠 调试工具</div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-    <form method="POST" style="display:inline" onsubmit="return confirm('确认清除当前浏览器的登录 Cookie？清除后将跳转到登录页。')"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="clear_cookie">
-      <button class="btn" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:#ff6b6b">🍪 清除当前 Cookie</button>
-    </form>
-
-    <?php $de_on = debug_get_display_errors(); ?>
-    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-      <label style="font-size:13px;color:var(--tm)">display_errors</label>
-      <form method="POST" style="display:inline" onsubmit="return confirm(this.querySelector('[name=display_errors]').value==='1'?'开启 display_errors 会将 PHP 错误直接输出到页面，仅调试时使用，确认开启？':'确认关闭 display_errors？')"><?= csrf_field() ?>
-        <input type="hidden" name="action" value="toggle_display_errors">
-        <input type="hidden" name="display_errors" value="<?= $de_on ? '0' : '1' ?>">
-        <button type="submit" style="display:flex;align-items:center;gap:10px;background:<?= $de_on ? 'rgba(251,191,36,.1)' : 'rgba(30,32,44,.8)' ?>;border:2px solid <?= $de_on ? '#fbbf24' : 'var(--bd)' ?>;border-radius:50px;padding:6px 16px 6px 8px;cursor:pointer;transition:all .2s">
-          <!-- Toggle 滑块 -->
-          <span style="display:inline-flex;align-items:center;width:36px;height:20px;background:<?= $de_on ? '#fbbf24' : 'var(--bd)' ?>;border-radius:10px;position:relative;transition:background .2s">
-            <span style="position:absolute;<?= $de_on ? 'right:2px' : 'left:2px' ?>;top:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:all .2s"></span>
-          </span>
-          <span style="font-size:13px;font-weight:600;color:<?= $de_on ? '#fbbf24' : 'var(--tm)' ?>">
-            <?= $de_on ? '🔆 已开启（调试模式）' : '🌙 已关闭（生产模式）' ?>
-          </span>
-        </button>
-      </form>
-    </div>
-    <div class="form-hint" style="margin-top:10px">
-      <b>清除当前 Cookie</b>：清除本浏览器的登录状态，跳转到登录页。不影响其他用户或其他浏览器的登录状态。<br>
-      <b>display_errors</b>：点击 Toggle 切换状态。开启后 PHP 错误直接输出到页面，方便调试；<span style="color:#ff6b6b">生产环境请保持关闭</span>。
-    </div>
-</div>
-<div class="card" id="logs-viewer">
-  <div class="card-title">📄 日志查看器</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    <button class="btn btn-secondary btn-sm log-tab active" data-log="nginx_access">Nginx 访问日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_error">Nginx 错误日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_main">Nginx 主错误日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="php_fpm">PHP-FPM 日志</button>
-    <button class="btn btn-secondary btn-sm" onclick="refreshLog()">🔄 刷新</button>
-    <button class="btn btn-sm" onclick="clearAllLogs()" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:#ff6b6b">🗑 清空所有日志</button>
-    <select id="logLines" onchange="refreshLog()" style="background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:5px 10px;color:var(--tx);font-size:12px">
-      <option value="50">最近 50 行</option>
-      <option value="100" selected>最近 100 行</option>
-      <option value="200">最近 200 行</option>
-    </select>
-  </div>
-  <pre id="logContent" style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;
-padding:14px;font-size:11px;font-family:monospace;color:#a5f3a5;overflow-x:auto;
-max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all">加载中...</pre>
-</div>
-
 <script>
 // ── 导入配置前端校验（兼容备份格式和旧 sites-only 格式）──
 function handleImportFile(input) {
@@ -614,51 +499,6 @@ function selectPPM(val) {
     });
 }
 
-var currentLog = 'nginx_access';
-var logTabs = document.querySelectorAll('.log-tab');
-logTabs.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-        logTabs.forEach(function(b){ b.classList.remove('active'); b.style.borderColor=''; b.style.color=''; });
-        this.classList.add('active');
-        this.style.borderColor = 'var(--ac)';
-        this.style.color = 'var(--ac2)';
-        currentLog = this.dataset.log;
-        refreshLog();
-    });
-});
-// 初始化第一个 tab 样式
-logTabs[0] && (logTabs[0].style.borderColor = 'var(--ac)', logTabs[0].style.color = 'var(--ac2)');
-
-function refreshLog() {
-    var lines = document.getElementById('logLines').value;
-    var pre   = document.getElementById('logContent');
-    pre.textContent = '加载中...';
-    fetch('settings.php?ajax=log&type=' + currentLog + '&lines=' + lines, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.text(); }).then(function(t){
-        pre.textContent = t;
-    }).catch(function(){
-        pre.textContent = '加载失败，请重试';
-    });
-}
-function clearAllLogs() {
-    if (!confirm('确认清空所有日志文件？此操作不可恢复。')) return;
-    var pre = document.getElementById('logContent');
-    pre.textContent = '清空中...';
-    fetch('settings.php?ajax=clear_log', {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.json(); }).then(function(d){
-        if (d.ok) {
-            pre.textContent = '✅ ' + d.msg + '\n\n日志已清空，刷新中...';
-            setTimeout(refreshLog, 1000);
-        } else {
-            pre.textContent = '❌ ' + d.msg;
-        }
-    }).catch(function(){
-        pre.textContent = '清空请求失败，请重试';
-    });
-}
-refreshLog();
 </script>
 
 <!-- Nginx 反代管理 -->
@@ -732,21 +572,26 @@ refreshLog();
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('simple')">
         <input type="radio" name="proxy_params_mode" value="simple" <?= $ppm==='simple'?'checked':'' ?> id="ppm_simple" style="margin-top:2px;accent-color:var(--ac)">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式（默认推荐）</div>
-          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">包含基础反代参数：HTTP/1.1、WebSocket、Host/IP 透传、60s 超时。适合普通 Web 应用，小白首选。</div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（14 条参数 · 超时 60s）</span></div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">HTTP/1.1、WebSocket 升级、Host / IP / Proto 透传、连接 10s + 读写 60s 超时、基础缓冲。<br>适合普通 Web 应用，<b>默认推荐</b>，小白首选。</div>
         </div>
       </label>
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('full')">
         <input type="radio" name="proxy_params_mode" value="full" <?= $ppm==='full'?'checked':'' ?> id="ppm_full" style="margin-top:2px;accent-color:var(--ac)">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式（高级）</div>
-          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">内置完整 19 组参数：断点续传、Cookie/Auth 透传、CORS、WebSocket、流媒体、无限超时。适合视频流、SSH、大文件等复杂场景。</div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（60+ 条参数 · 超时 86400s）</span></div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">WebSocket 全头透传、断点续传、Cookie / Auth / CORS 透传、流媒体无缓冲、无限超时（86400s）、全量响应头直通。<br>适合视频流、大文件、SSH 隧道、长连接等复杂场景。</div>
         </div>
       </label>
-      <button type="submit" class="btn btn-secondary" style="align-self:center">💾 保存模式</button>
+      <div style="display:flex;flex-direction:column;gap:8px;align-self:center">
+        <button type="submit" class="btn btn-primary" style="white-space:nowrap">💾 保存模式</button>
+        <?php if ($proxy_count > 0): ?>
+        <span style="font-size:11px;color:var(--tm);text-align:center">保存后需 Reload<br>才能生效</span>
+        <?php endif; ?>
+      </div>
     </form>
     <div class="form-hint" style="margin-top:8px">
-      切换后需点击「生成配置并 Reload Nginx」重新生成配置文件才会生效。
+      切换模式后需点击下方「生成配置并 Reload Nginx」重新生成配置文件才会生效。<?php if ($proxy_count > 0): ?> <span style="color:#fbbf24">当前有 <?= $proxy_count ?> 个代理站点，切换后请及时 Reload。</span><?php endif; ?>
     </div>
   </div>
 

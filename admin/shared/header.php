@@ -34,6 +34,8 @@ $nav_items = [
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
+    ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
+
 ];
 ?>
 <!DOCTYPE html><html lang="zh-CN"><head>
@@ -100,10 +102,29 @@ function showToast(msg, type) {
 
 <!-- Flash 消息 -->
 <?php if ($flash): ?>
-<div class="alert alert-<?= htmlspecialchars($flash['type']) ?>">
-  <?= $flash['type'] === 'success' ? '✅' : '❌' ?> <?= htmlspecialchars($flash['msg']) ?>
+<?php
+  $flash_icon = match($flash['type']) {
+      'success' => '✅',
+      'warn'    => '⚠️',
+      'error'   => '❌',
+      default   => 'ℹ️',
+  };
+  // warn 类型映射到 alert-warn CSS 类
+  $flash_css = $flash['type'] === 'warn' ? 'alert-warn' : 'alert-' . $flash['type'];
+  // toast 类型映射
+  $flash_toast_type = $flash['type'] === 'warn' ? 'warning' : $flash['type'];
+?>
+<div class="alert <?= htmlspecialchars($flash_css) ?>" style="<?= $flash['type']==='warn' ? 'display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap' : '' ?>">
+  <span style="flex:1"><?= $flash_icon ?> <?= htmlspecialchars($flash['msg']) ?></span>
+<?php if ($flash['type'] === 'warn' && ($current_admin['role'] ?? '') === 'admin'): ?>
+  <form method="POST" action="settings.php" style="margin:0;flex-shrink:0">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="nginx_apply_and_reload">
+    <button type="submit" style="background:rgba(251,191,36,.18);border:1px solid rgba(251,191,36,.5);color:#fbbf24;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:600">🔄 立即生成配置并 Reload Nginx</button>
+  </form>
+<?php endif; ?>
 </div>
-<script>showToast(<?= json_encode($flash['msg']) ?>, <?= json_encode($flash['type']) ?>);</script>
+<script>showToast(<?= json_encode($flash['msg']) ?>, <?= json_encode($flash_toast_type) ?>);</script>
 <?php endif; ?>
 
 <?php if (!empty($_pending_proxy)): ?>

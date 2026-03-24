@@ -41,20 +41,28 @@ function auth_get_config(): array {
     // 默认值
     $cfg += [
         'site_name'           => '导航中心',
+        'nav_domain'          => '',
         'token_expire_hours'  => 8,
         'remember_me_days'    => 60,
         'login_fail_limit'    => 5,
         'login_lock_minutes'  => 15,
         'bg_color'            => '',
         'bg_image'            => '',
-        'cookie_secure'       => 'off',  // off=关闭（默认）| auto=自动检测 | on=强制开启
-        'cookie_domain'       => '',     // 空=使用当前访问域名，填写则覆盖（如 .yourdomain.com）
+        'cookie_secure'       => 'off',
+        'cookie_domain'       => '',
         'card_size'           => 140,
         'card_height'         => 0,
         'card_show_desc'      => '1',
         'card_layout'         => 'grid',
         'card_direction'      => 'col',
         'display_errors'      => '0',
+        'proxy_params_mode'   => 'simple',
+        'webhook_enabled'     => '0',
+        'webhook_type'        => 'custom',
+        'webhook_url'         => '',
+        'webhook_tg_chat'     => '',
+        'webhook_events'      => 'FAIL,IP_LOCKED',
+        'nginx_last_applied'  => 0,
     ];
     return $cfg;
 }
@@ -374,17 +382,47 @@ function ip_locks_save(array $data): void {
 }
 
 /**
- * 获取当前请求的真实 IP（支持反代）
+ * 获取当前请求的真实客户端 IP（支持反向代理链）
+ *
+ * 优先级：
+ *   1. X-Real-IP（上游反代直接设置的单一真实 IP，最可信）
+ *   2. X-Forwarded-For 链中最左侧的非私有 IP（穿越多层反代时）
+ *   3. REMOTE_ADDR 兜底（直连或仅容器网关时）
+ *
+ * 注意：需在 Nginx fastcgi_param 中将这两个头传给 PHP，
+ *       否则 $_SERVER 中不会存在这些键。
  */
 function get_client_ip(): string {
-    foreach (['HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $key) {
-        if (!empty($_SERVER[$key])) {
-            // X-Forwarded-For 可能包含多个 IP，取第一个
-            $ip = trim(explode(',', $_SERVER[$key])[0]);
-            if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+    // 1. X-Real-IP：通常由最外层反代（如宿主机 Nginx/Caddy）直接写入真实 IP
+    if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        $ip = trim($_SERVER['HTTP_X_REAL_IP']);
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $ip;
         }
+        // X-Real-IP 是内网 IP 时（如直接内网访问）也接受
+        if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
     }
-    return '0.0.0.0';
+
+    // 2. X-Forwarded-For：可能包含多个 IP（客户端, 代理1, 代理2, ...）
+    //    取最左侧的公网 IP；若全为私有 IP（内网访问），取最左侧的私有 IP
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ips = array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
+        $first_private = null;
+        foreach ($ips as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) continue;
+            // 优先返回公网 IP
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                return $ip;
+            }
+            // 记录第一个合法私有 IP 备用
+            if ($first_private === null) $first_private = $ip;
+        }
+        if ($first_private !== null) return $first_private;
+    }
+
+    // 3. REMOTE_ADDR 兜底（直连时为真实 IP，容器内为 Docker 网关 IP）
+    $ip = trim($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    return filter_var($ip, FILTER_VALIDATE_IP) ? $ip : '0.0.0.0';
 }
 
 /**

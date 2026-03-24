@@ -21,7 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username   = trim($_POST['username']   ?? '');
     $password   = $_POST['password']        ?? '';
     $password2  = $_POST['password2']       ?? '';
-    $site_name  = trim($_POST['site_name']  ?? '导航中心');
+    $site_name  = trim($_POST['site_name']  ?? '');
+    if ($site_name === '') $site_name = '导航中心';
     $nav_domain = trim($_POST['nav_domain'] ?? '');
 
     if (!preg_match('/^[a-zA-Z0-9_-]{2,32}$/', $username))
@@ -72,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         // 写入管理员账户
         auth_save_user($username, $password, 'admin');
-        // 写入初始配置
+        // 写入初始配置（含所有字段默认值，避免后台读取时出现未定义 key）
         $cfg = [
             'site_name'          => $site_name,
             'nav_domain'         => $nav_domain,
@@ -82,8 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'login_lock_minutes' => 15,
             'bg_color'           => '',
             'bg_image'           => '',
-            'cookie_secure'      => 'off',  // 默认关闭，方便 IP 直接访问调试
-            'cookie_domain'      => '',      // 默认留空，自动使用当前 host
+            'cookie_secure'      => 'off',
+            'cookie_domain'      => '',
+            'card_size'          => 140,
+            'card_height'        => 0,
+            'card_show_desc'     => '1',
+            'card_layout'        => 'grid',
+            'card_direction'     => 'col',
+            'display_errors'     => '0',
+            'proxy_params_mode'  => 'simple',
+            'webhook_enabled'    => '0',
+            'webhook_type'       => 'custom',
+            'webhook_url'        => '',
+            'webhook_tg_chat'    => '',
+            'webhook_events'     => 'FAIL,IP_LOCKED',
         ];
         file_put_contents(CONFIG_FILE,
             json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -154,7 +167,7 @@ NGINX;
 <!DOCTYPE html>
 <html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>安装向导 — 导航中心</title>
+<title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?></title>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ach:#7c73ff;
 --tx:#e2e4f0;--tm:#7b7f9e;--er:#ff6b6b;--r:12px;
@@ -204,7 +217,7 @@ text-decoration:none;margin-top:8px}
 <body><div class="wrap">
 <?php if ($step === 'form'): ?>
 <div class="card">
-  <div class="logo"><div class="icon">🧭</div><h1>导航中心</h1><div class="sub">首次安装向导</div></div>
+  <div class="logo"><div class="icon">🧭</div><h1><?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?></h1><div class="sub">首次安装向导</div></div>
   <div class="steps"><div class="s on"></div><div class="s"></div></div>
   <?php if (!empty($errors)): ?>
   <ul class="errs"><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul>
