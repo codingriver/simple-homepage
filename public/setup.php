@@ -6,8 +6,7 @@
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
-
-// 已安装则返回 404，防止攻击者探测
+require_once __DIR__ . '/../admin/shared/functions.php';
 if (file_exists(INSTALLED_FLAG)) {
     http_response_code(404);
     exit('404 Not Found');

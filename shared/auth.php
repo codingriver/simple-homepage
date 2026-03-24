@@ -447,6 +447,10 @@ function auth_write_log(string $type, string $username, string $ip, string $note
         $note ? " note=$note" : ''
     );
     file_put_contents(AUTH_LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+    // 触发 Webhook 通知（webhook_send 由 admin/shared/functions.php 提供，仅在已加载时调用）
+    if (function_exists('webhook_send')) {
+        webhook_send($type, $username, $ip, $note);
+    }
 }
 
 /**
