@@ -7,23 +7,27 @@ IMAGE_TAG="${2:-local/smoke:test}"
 CONTAINER_NAME="nav-smoke-test"
 HOST_PORT="58081"
 BASE="http://127.0.0.1:${HOST_PORT}"
-CJ="/tmp/smoke_cj_$$.txt"
-DATA_DIR="/tmp/nav_smoke_$$"
-EXPORT_FILE="/tmp/smoke_export_$$.json"
+
+# 使用工作目录下的临时目录，避免 /tmp 在 GitHub Actions runner 上的权限问题
+SMOKE_TMPDIR="$(pwd)/.smoke_tmp_$$"
+CJ="${SMOKE_TMPDIR}/cj.txt"
+DATA_DIR="${SMOKE_TMPDIR}/nav_data"
+EXPORT_FILE="${SMOKE_TMPDIR}/export.json"
 
 PASS=0; FAIL=0; SKIP=0
 DETAILS=""
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-rm -f "$CJ" "$EXPORT_FILE"
-mkdir -p "${DATA_DIR}/logs"
+mkdir -p "${DATA_DIR}/logs" "${DATA_DIR}/favicon_cache" "${DATA_DIR}/bg" "${DATA_DIR}/backups"
+# 确保容器内 navwww(uid=1000) 可写
+chmod -R 777 "${DATA_DIR}"
 
 printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\n' \
   "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$IMAGE_TAG" > "$REPORT_PATH"
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  rm -rf "$DATA_DIR" "$CJ" "$EXPORT_FILE"
+  rm -rf "$SMOKE_TMPDIR"
 }
 trap cleanup EXIT
 
