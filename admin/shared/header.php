@@ -85,7 +85,11 @@ function showToast(msg, type) {
   </nav>
   <div class="sidebar-footer">
     👤 <?= htmlspecialchars($current_admin['username']) ?>
-    <br><a href="/logout.php" style="color:var(--red);margin-top:4px;display:inline-block">退出登录</a>
+    <br>
+    <form method="POST" action="/logout.php" style="display:inline">
+      <?= csrf_field() ?>
+      <button type="submit" style="color:var(--red);margin-top:4px;display:inline-block;background:none;border:none;padding:0;cursor:pointer">退出登录</button>
+    </form>
     · <a href="/index.php">返回首页</a>
   </div>
 </aside>

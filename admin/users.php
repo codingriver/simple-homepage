@@ -1,6 +1,13 @@
 <?php
 $page_title='用户管理';
-require_once __DIR__.'/shared/header.php';
+require_once __DIR__.'/shared/functions.php';
+
+$current_admin = auth_get_current_user();
+if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
+  header('Location: /login.php');
+  exit;
+}
+
 $users=auth_load_users();
 $action=$_GET['action']??'list';$uname=$_GET['uname']??'';$err='';
 if($_SERVER['REQUEST_METHOD']==='POST'){
@@ -27,12 +34,14 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     else{unset($users[$du]);auth_write_users($users);flash_set('success','已删除');header('Location: users.php');exit;}
   }
 }
+
+require_once __DIR__.'/shared/header.php';
 $eu=null;
 if($action==='edit'&&$uname&&isset($users[$uname]))$eu=$users[$uname]+['username'=>$uname];
 $sf=($action==='add'||$action==='edit');
-$fs=flash_get('success');
+$flash_msg=flash_get();
 ?>
-<?php if($fs):?><div class="alert alert-success">✅ <?=htmlspecialchars($fs)?></div><?php endif;?>
+<?php if($flash_msg):?><div class="alert alert-<?= htmlspecialchars($flash_msg['type'] ?? 'success') ?>">✅ <?=htmlspecialchars($flash_msg['msg'] ?? '')?></div><?php endif;?>
 <?php if($err):?><div class="alert alert-error">❌ <?=htmlspecialchars($err)?></div><?php endif;?>
 <?php if($sf):?>
 <div class="card"><div class="card-title"><?=$eu?'编辑':'添加'?>用户</div>

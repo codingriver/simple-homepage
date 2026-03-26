@@ -28,9 +28,9 @@ $user = auth_get_current_user();
 
 if (!$user) {
     // 未登录，跳回导航登录页，携带当前 URL 方便登录后回跳
-    $redirect = urlencode((isset($_SERVER['HTTPS']) ? 'https' : 'http') .
+    $redirect = urlencode(auth_request_scheme() .
         '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']);
-    header('Location: ' . NAV_LOGIN_URL . '?redirect=' . $redirect);
+    header('Location: ' . auth_nav_login_url() . '?redirect=' . $redirect);
     exit;
 }
 

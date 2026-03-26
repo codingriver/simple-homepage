@@ -4,21 +4,10 @@
  * 增删改查分组，支持 auth_required / visible_to / order 设置
  */
 
-// AJAX POST：在 header.php 输出 HTML 之前处理
-if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    require_once __DIR__ . '/shared/functions.php';
-    $current_user = auth_get_current_user();
-    if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
-        header('Content-Type: application/json; charset=utf-8');
-        http_response_code(401);
-        echo json_encode(['ok' => false, 'msg' => '未登录或无权限，请刷新页面重新登录']);
-        exit;
-    }
-    csrf_check();
-    $sites_data = load_sites();
+// 统一处理保存/删除逻辑（AJAX 与普通表单共用）
+function groups_handle_post(array &$sites_data): array {
     $groups = &$sites_data['groups'];
     $action = $_POST['action'] ?? '';
-    $json_out = ['ok' => false, 'msg' => '未知操作'];
 
     if ($action === 'save') {
         $old_id  = $_POST['old_id']    ?? '';
@@ -27,44 +16,81 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 
         $icon    = trim($_POST['icon'] ?? '📁');
         $order   = (int)($_POST['order'] ?? 0);
         $auth    = isset($_POST['auth_required']) && $_POST['auth_required'] === '1';
-        $visible = in_array($_POST['visible_to'] ?? 'all', ['all','admin'])
+        $visible = in_array($_POST['visible_to'] ?? 'all', ['all','admin'], true)
             ? $_POST['visible_to'] : 'all';
+
         if (!preg_match('/^[a-z0-9_-]+$/', $id) || !$name) {
-            $json_out = ['ok' => false, 'msg' => 'ID 只允许小写字母/数字/下划线/横杠，名称不能为空'];
-        } else {
-            if ($old_id && $old_id !== $id) {
-                foreach ($groups as &$g) { if ($g['id'] === $old_id) $g['id'] = $id; }
-                unset($g);
-            }
-            $found = false;
-            foreach ($groups as &$g) {
-                if ($g['id'] === $id) {
-                    $g['name']=$name; $g['icon']=$icon; $g['order']=$order;
-                    $g['auth_required']=$auth; $g['visible_to']=$visible;
-                    $found=true; break;
-                }
-            }
-            unset($g);
-            if (!$found) {
-                $groups[] = ['id'=>$id,'name'=>$name,'icon'=>$icon,'order'=>$order,
-                    'auth_required'=>$auth,'visible_to'=>$visible,'sites'=>[]];
-            }
-            usort($groups, function($a,$b){ return ($a['order']??0)-($b['order']??0); });
-            save_sites($sites_data);
-            flash_set('success', '分组已保存');
-            $json_out = ['ok' => true];
+            return ['ok' => false, 'msg' => 'ID 只允许小写字母/数字/下划线/横杠，名称不能为空'];
         }
-    } elseif ($action === 'delete') {
+
+        if ($old_id && $old_id !== $id) {
+            foreach ($groups as &$g) { if ($g['id'] === $old_id) $g['id'] = $id; }
+            unset($g);
+        }
+
+        $found = false;
+        foreach ($groups as &$g) {
+            if ($g['id'] === $id) {
+                $g['name']=$name; $g['icon']=$icon; $g['order']=$order;
+                $g['auth_required']=$auth; $g['visible_to']=$visible;
+                $found=true; break;
+            }
+        }
+        unset($g);
+
+        if (!$found) {
+            $groups[] = ['id'=>$id,'name'=>$name,'icon'=>$icon,'order'=>$order,
+                'auth_required'=>$auth,'visible_to'=>$visible,'sites'=>[]];
+        }
+
+        usort($groups, function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+        save_sites($sites_data);
+        flash_set('success', '分组已保存');
+        return ['ok' => true, 'msg' => '分组已保存'];
+    }
+
+    if ($action === 'delete') {
         $id = $_POST['gid'] ?? '';
         $sites_data['groups'] = array_values(
             array_filter($groups, function($g) use ($id){ return $g['id'] !== $id; })
         );
         save_sites($sites_data);
         flash_set('success', '分组及其站点已删除');
-        $json_out = ['ok' => true];
+        return ['ok' => true, 'msg' => '分组及其站点已删除'];
     }
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($json_out, JSON_UNESCAPED_UNICODE);
+
+    return ['ok' => false, 'msg' => '未知操作'];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once __DIR__ . '/shared/functions.php';
+    $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']);
+    $current_user = auth_get_current_user();
+    if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
+        if ($is_ajax) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(401);
+            echo json_encode(['ok' => false, 'msg' => '未登录或无权限，请刷新页面重新登录']);
+            exit;
+        }
+        header('Location: /login.php');
+        exit;
+    }
+
+    csrf_check();
+    $sites_data = load_sites();
+    $result = groups_handle_post($sites_data);
+
+    if ($is_ajax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (!$result['ok']) {
+        flash_set('error', $result['msg']);
+    }
+    header('Location: groups.php');
     exit;
 }
 

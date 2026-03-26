@@ -32,6 +32,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'check_one') {
+        if (!auth_is_ip_access()) {
+            echo json_encode([
+                'ok' => false,
+                'msg' => '任意 URL 单点探测仅允许在 IP 访问模式下使用，避免域名模式被滥用',
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         $url = trim($_POST['url'] ?? '');
         if (!$url) { echo json_encode(['ok' => false, 'msg' => '缺少 url']); exit; }
         $status = health_check_url($url);

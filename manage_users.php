@@ -122,21 +122,9 @@ switch ($cmd) {
             echo "[4/10] ⏭  IP 锁定记录不存在，跳过\n";
         }
 
-        // [5] 生成新 AUTH_SECRET_KEY
-        $auth_file = __DIR__ . '/../shared/auth.php';
-        if (file_exists($auth_file)) {
-            $content = file_get_contents($auth_file);
-            $new_key = bin2hex(random_bytes(32));
-            $content = preg_replace(
-                "/define\s*\(\s*'AUTH_SECRET_KEY'\s*,\s*'[^']*'\s*(?:\.\s*[^;]+)?;/",
-                "define('AUTH_SECRET_KEY', '{$new_key}');",
-                $content
-            );
-            file_put_contents($auth_file, $content, LOCK_EX);
-            echo "[5/10] ✅ AUTH_SECRET_KEY 已更换为新随机密钥\n";
-        } else {
-            echo "[5/10] ⚠️  shared/auth.php 不存在，跳过\n";
-        }
+        // [5] 生成新认证密钥文件
+        auth_rotate_secret_key();
+        echo "[5/10] ✅ 认证密钥已更换为新随机值（data/auth_secret.key）\n";
 
         // [6] 清空站点配置（sites.json）
         $sites_file = DATA_DIR . '/sites.json';
@@ -192,17 +180,25 @@ switch ($cmd) {
                 }
             }
         }
-        // 特殊处理：容器内固定路径 nav-proxy.conf（被 nav.conf include，不能删除）
+        // 特殊处理：容器内固定路径 nav-proxy*.conf（被 Nginx include，不能删除）
         $nav_proxy = '/etc/nginx/conf.d/nav-proxy.conf';
+        $nav_proxy_domains = '/etc/nginx/http.d/nav-proxy-domains.conf';
         $nav_proxy_placeholder = "# 反代配置已由 manage_users.php reset 清空\n"
             . "# 如需添加反代，在此文件中添加：\n"
             . "# location /proxy-path/ {\n"
             . "#     proxy_pass http://内网IP:端口/;\n"
             . "#     include /etc/nginx/proxy_params_full;\n"
             . "# }\n";
+        $nav_proxy_domains_placeholder = "# 子域名反代配置已由 manage_users.php reset 清空\n"
+            . "# 如需添加子域名反代，在此文件中添加独立 server 块。\n";
         if (!file_exists($nav_proxy) || strpos(file_get_contents($nav_proxy), 'proxy_pass') !== false) {
             file_put_contents($nav_proxy, $nav_proxy_placeholder, LOCK_EX);
             echo "         已重建空白 nav-proxy.conf（避免 nginx include 报错）\n";
+            $proxy_cleaned++;
+        }
+        if (!file_exists($nav_proxy_domains) || strpos(file_get_contents($nav_proxy_domains), 'server {') !== false) {
+            file_put_contents($nav_proxy_domains, $nav_proxy_domains_placeholder, LOCK_EX);
+            echo "         已重建空白 nav-proxy-domains.conf（避免 nginx include 报错）\n";
             $proxy_cleaned++;
         }
         echo "[9/10] ✅ 反代配置已清空（共处理 {$proxy_cleaned} 个，均保留文件避免 include 报错）\n";

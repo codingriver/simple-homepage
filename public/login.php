@@ -18,24 +18,7 @@ if (auth_get_current_user()) {
 
 $error    = '';
 $redirect = $_GET['redirect'] ?? $_POST['redirect'] ?? '';
-
-// 安全校验 redirect 参数，允许同域、相对路径、以及内网地址跳转
-$safe_redirect = '';
-if ($redirect) {
-    $parsed = parse_url($redirect);
-    $host   = $parsed['host'] ?? '';
-    $cfg    = auth_get_config();
-    $nav    = $cfg['nav_domain'] ?? NAV_DOMAIN;
-    // 允许：① 相对路径（无 host）② 同导航站域名 ③ 私有 IP（内网部署）④ .local/.lan/.internal 内网域名
-    $is_private_host = $host && (
-        is_private_ip($host) ||
-        preg_match('/\.(local|lan|internal|intranet|corp)$/i', $host) ||
-        preg_match('/^(localhost|127\.0\.0\.1|::1)$/', $host)
-    );
-    if (!$host || $host === $nav || $is_private_host) {
-        $safe_redirect = $redirect;
-    }
-}
+$safe_redirect = auth_sanitize_redirect((string)$redirect);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // CSRF 验证
@@ -83,54 +66,8 @@ $site_name   = $cfg['site_name'] ?? '导航中心';
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录 — <?= htmlspecialchars($site_name) ?></title>
-<style>
-:root{--bg:#080b10;--sf:#0e1218;--bd:#1e2733;--ac:#00d4aa;--ach:#00e8bb;
---tx:#cdd6e8;--tm:#556070;--er:#ff5566;--r:10px;
---fn:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
---mono:'JetBrains Mono','Consolas',monospace}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
-display:flex;align-items:center;justify-content:center;padding:20px;
-background-image:
-  linear-gradient(rgba(0,212,170,0.018) 1px,transparent 1px),
-  linear-gradient(90deg,rgba(0,212,170,0.018) 1px,transparent 1px);
-background-size:40px 40px}
-.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;
-padding:40px 36px;width:100%;max-width:400px;
-box-shadow:0 24px 60px rgba(0,0,0,.5);
-animation:fadeIn .25s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.logo{text-align:center;margin-bottom:28px}
-.icon{width:52px;height:52px;background:linear-gradient(135deg,#00d4aa,#4dffd4);
-border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
-font-size:24px;margin-bottom:10px;box-shadow:0 0 24px rgba(0,212,170,0.3)}
-h1{font-size:20px;font-weight:700;font-family:var(--mono);color:var(--tx)}
-.sub{color:var(--tm);font-size:13px;margin-top:4px}
-.fg{margin-bottom:14px}
-label{display:block;font-size:10px;color:var(--tm);margin-bottom:5px;
-font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
-input[type=text],input[type=password]{width:100%;background:var(--bg);
-border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);
-font-size:14px;font-family:var(--fn);outline:none;transition:border-color .2s,box-shadow .2s}
-input:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(0,212,170,.1)}
-input::placeholder{color:var(--tm)}
-.rm{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--tm);
-cursor:pointer;margin-bottom:16px}
-.rm input{width:auto;accent-color:var(--ac)}
-.rm span{margin-left:auto;font-size:11px;font-family:var(--mono)}
-.err{background:rgba(255,85,102,.08);border:1px solid rgba(255,85,102,.25);
-border-radius:8px;padding:10px 13px;color:var(--er);font-size:13px;
-margin-bottom:14px;display:flex;align-items:center;gap:7px}
-.btn{width:100%;background:var(--ac);color:#000;border:none;border-radius:8px;
-padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fn);
-transition:all .18s;letter-spacing:.01em}
-.btn:hover{background:var(--ach);box-shadow:0 0 16px rgba(0,212,170,.3)}
-.btn:active{transform:scale(.98)}
-.rescue{margin-top:20px;padding:12px;background:rgba(255,204,68,.06);
-border:1px solid rgba(255,204,68,.2);border-radius:8px;font-size:11px;color:#ffcc44}
-.rescue code{display:block;margin-top:6px;font-family:var(--mono);font-size:11px;
-background:var(--bg);padding:6px 8px;border-radius:4px;color:var(--tx)}
-</style></head><body>
+<link rel="stylesheet" href="login.css">
+</head><body>
 <div class="card">
   <div class="logo"><div class="icon">🧭</div>
     <h1><?= htmlspecialchars($site_name) ?></h1><div class="sub">请登录以继续</div></div>

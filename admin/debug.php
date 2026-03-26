@@ -23,11 +23,12 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // AJAX 清空日志
-    if (isset($_GET['ajax']) && $_GET['ajax'] === 'clear_log') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['ajax'] ?? '') === 'clear_log')) {
         $current_admin = auth_get_current_user();
         if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
             http_response_code(401); echo json_encode(['ok'=>false,'msg'=>'未登录']); exit;
         }
+        csrf_check();
         header('Content-Type: application/json; charset=utf-8');
         $log_map = [
             'nginx_access' => '/var/log/nginx/nav.access.log',
@@ -171,7 +172,12 @@ function clearAllLogs() {
     if (!confirm('确认清空所有日志文件？此操作不可恢复。')) return;
     var pre = document.getElementById('logContent');
     pre.textContent = '清空中...';
-    fetch('debug.php?ajax=clear_log', {
+    var form = new FormData();
+    form.append('ajax', 'clear_log');
+    form.append('_csrf', window.DEBUG_CSRF || '');
+    fetch('debug.php', {
+        method: 'POST',
+        body: form,
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
     }).then(function(r){ return r.json(); }).then(function(d){
         if (d.ok) {
@@ -186,5 +192,6 @@ function clearAllLogs() {
 }
 refreshLog();
 </script>
+<script>window.DEBUG_CSRF = <?= json_encode(csrf_token()) ?>;</script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

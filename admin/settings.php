@@ -58,14 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 file_put_contents(SITES_FILE, json_encode($obj['sites'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
                 if (!empty($obj['config']) && is_array($obj['config'])) {
                     // 合并默认值，避免旧备份缺少新字段导致 Warning
-                    $defaults = [
-                        'site_name'      => '导航中心',
-                        'nav_domain'     => '',
-                        'card_size'      => 140, 'card_height' => 0,
-                        'card_show_desc' => '1', 'card_layout' => 'grid', 'card_direction' => 'col',
-                        'display_errors' => '0',
-                    ];
-                    $merged_cfg = array_merge($defaults, $obj['config']);
+                    $merged_cfg = array_merge(auth_default_config(), $obj['config']);
                     file_put_contents(CONFIG_FILE, json_encode($merged_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
                 }
                 $gc = count($obj['sites']['groups']);
@@ -238,14 +231,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg['bg_color'] = $bg_color;
             if (!empty($_FILES['bg_image']['tmp_name'])) {
                 $file = $_FILES['bg_image'];
-                $ext  = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-                if (!in_array($ext, ['jpg','jpeg','png','gif','webp'])) {
-                    flash_set('error', '背景图只支持 jpg/png/gif/webp 格式');
+                if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    flash_set('error', '背景图上传失败，请重试');
+                    header('Location: settings.php'); exit;
+                }
+                if (!is_uploaded_file($file['tmp_name'])) {
+                    flash_set('error', '背景图上传来源无效');
+                    header('Location: settings.php'); exit;
+                }
+                if (($file['size'] ?? 0) <= 0 || ($file['size'] ?? 0) > 8 * 1024 * 1024) {
+                    flash_set('error', '背景图大小需在 8MB 以内');
+                    header('Location: settings.php'); exit;
+                }
+                $mime = function_exists('mime_content_type') ? mime_content_type($file['tmp_name']) : false;
+                $mime_map = [
+                    'image/jpeg' => 'jpg',
+                    'image/png'  => 'png',
+                    'image/gif'  => 'gif',
+                    'image/webp' => 'webp',
+                ];
+                if (!$mime || !isset($mime_map[$mime]) || @getimagesize($file['tmp_name']) === false) {
+                    flash_set('error', '背景图内容无效，只支持 jpg/png/gif/webp 图片');
                     header('Location: settings.php'); exit;
                 }
                 if (!is_dir(BG_DIR)) mkdir(BG_DIR, 0755, true);
-                $fname = 'bg_' . time() . '.' . $ext;
-                move_uploaded_file($file['tmp_name'], BG_DIR . '/' . $fname);
+                $fname = 'bg_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $mime_map[$mime];
+                if (!move_uploaded_file($file['tmp_name'], BG_DIR . '/' . $fname)) {
+                    flash_set('error', '背景图保存失败，请检查目录权限');
+                    header('Location: settings.php'); exit;
+                }
                 if (!empty($cfg['bg_image']) && file_exists(BG_DIR . '/' . $cfg['bg_image'])) {
                     @unlink(BG_DIR . '/' . $cfg['bg_image']);
                 }

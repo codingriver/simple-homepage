@@ -96,8 +96,8 @@ RUN mkdir -p \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
     chmod 440 /etc/sudoers.d/nav-nginx && \
-    # 创建空的反代配置文件（Alpine Nginx 用 http.d/，同时在 conf.d/ 放一份供后台写入）
-    touch /etc/nginx/conf.d/nav-proxy.conf && \
+    # 创建空的反代配置文件
+    touch /etc/nginx/conf.d/nav-proxy.conf /etc/nginx/http.d/nav-proxy-domains.conf && \
     # Nginx 上传/代理临时目录（文件上传必须以 navwww 可写，否则 POST 返回 500）
     mkdir -p /var/lib/nginx/tmp/client_body \
              /var/lib/nginx/tmp/fastcgi \
@@ -114,7 +114,7 @@ RUN mkdir -p \
               /var/www/nav/data/backups \
               /var/www/nav/data/logs && \
     chown -R navwww:navwww /var/log/nginx /var/log/php-fpm /run/nginx && \
-    chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf
+    chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf /etc/nginx/http.d/nav-proxy-domains.conf
 
 # ── 挂载点（持久化数据目录）──
 VOLUME ["/var/www/nav/data"]

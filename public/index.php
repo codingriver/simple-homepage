@@ -74,7 +74,7 @@ if ($is_admin && !empty($_pending_proxy)) {
 
 // 无登录、无公开分组、且无待生效提示时才跳转登录
 if (!$user && !$has_public && empty($_pending_proxy)) {
-    $r = urlencode((isset($_SERVER['HTTPS'])?'https':'http').'://'.$_SERVER['HTTP_HOST'].$_SERVER['REQUEST_URI']);
+    $r = urlencode(auth_request_scheme() . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']);
     header('Location: login.php?redirect='.$r); exit;
 }
 
@@ -100,7 +100,7 @@ if ($bg_image) {
     // 只允许字母数字下划线点横杠，防止路径遍历
     $safe_bg = preg_replace('/[^a-zA-Z0-9._-]/', '', basename($bg_image));
     if ($safe_bg && file_exists(DATA_DIR . '/bg/' . $safe_bg)) {
-        $bg_style = "background-image:url('/data/bg/" . htmlspecialchars($safe_bg) . "');background-size:cover;background-attachment:fixed;";
+        $bg_style = "background-image:url('/bg.php?file=" . rawurlencode($safe_bg) . "');background-size:cover;background-attachment:fixed;";
     }
 } elseif ($bg_color && preg_match('/^#[0-9a-fA-F]{3,8}$/', $bg_color)) {
     $bg_style = "background-color:" . htmlspecialchars($bg_color) . ";";
@@ -251,7 +251,12 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
     <input class="sb" id="sq" placeholder="搜索… (/)" autocomplete="off" type="search">
     <?php if($user):?><div class="ub">👤 <?= htmlspecialchars($user['username']) ?></div><?php endif;?>
     <?php if($is_admin):?><a href="../admin/" class="nl">⚙ 后台</a><?php endif;?>
-    <?php if($user):?><a href="logout.php" class="nl">退出</a><?php else:?><a href="login.php" class="nl">登录</a><?php endif;?>
+    <?php if($user):?>
+    <form method="POST" action="logout.php" style="display:inline;margin:0">
+      <?= csrf_field() ?>
+      <button type="submit" class="nl" style="background:none;cursor:pointer">退出</button>
+    </form>
+    <?php else:?><a href="login.php" class="nl">登录</a><?php endif;?>
   </div>
 </header>
 <nav class="nav-bar" id="tabs">

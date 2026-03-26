@@ -1,0 +1,78 @@
+# Nav Portal Full Smoke Test Report
+time: 2026-03-25T11:52:16Z
+image: local/nav-portal:smoke-20260325
+
+## Summary
+total: 48
+pass:  12
+fail:  36
+skip:  0
+
+## Results
+PASS|container_start
+FAIL|setup_page_200: exp 200 got 000000
+FAIL|setup_has_username: '管理员用户名' not found
+FAIL|setup_has_password: '至少 8 位' not found
+FAIL|setup_submit: no CSRF
+FAIL|setup_locked_404: exp 404 got 000000
+FAIL|login_page_200: exp 200 got 000000
+FAIL|login_has_form: '用户名' not found
+FAIL|login_success: no CSRF
+FAIL|auth_verify_internal_404: exp 404 got 000000
+FAIL|admin_dash_200: exp 200 got 000000
+FAIL|logout_clears_session: no CSRF for logout
+PASS|admin_index_200
+PASS|admin_groups_200
+PASS|admin_sites_200
+PASS|admin_users_200
+PASS|admin_backups_200
+PASS|admin_settings_200
+FAIL|admin_index_stats: '站点数量' not found
+PASS|admin_settings_form
+FAIL|admin_backups_btn: '立即备份' not found
+FAIL|admin_users_add: '添加用户' not found
+FAIL|group_create: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+FAIL|group_in_list: 'smoke-grp' not found
+FAIL|group_edit: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+FAIL|group_edit_ok: 'SmokeGroupEdited' not found
+FAIL|site_create: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+FAIL|site_in_list: 'smoke-site' not found
+FAIL|site_edit: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+FAIL|site_edit_ok: 'SmokeSiteEdited' not found
+FAIL|site_delete: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+FAIL|group_delete: {"ok":false,"msg":"未登录或无权限，请刷新页面重新登׵
+PASS|users_add_page
+FAIL|user_create: <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="5;
+PASS|user_delete
+FAIL|backup_create: <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="
+FAIL|backup_in_list: '手动' not found
+FAIL|settings_save: <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="5;
+FAIL|config_export: export file invalid
+FAIL|config_import: <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="5;
+FAIL|nginx_conf_download: HTTP 302
+FAIL|manual_backup_settings: <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="5;
+FAIL|log_api_nginx_access: HTTP 401
+FAIL|log_api_nginx_error: HTTP 401
+FAIL|log_api_php_fpm: HTTP 401
+FAIL|log_clear_api: {"ok":false,"msg":"未登录"}
+PASS|cookie_clear
+PASS|docker_healthcheck
+
+## Docker Logs tail-60
+[entrypoint] 导航网站容器启动...
+[entrypoint] Nginx 监听端口: 58080
+[entrypoint] 时区: Asia/Shanghai
+[entrypoint] 数据目录: /var/www/nav/data
+[entrypoint] 数据目录挂载状态: OK（已检测到宿主机挂载）
+[entrypoint] 初始化完成，启动服务...
+2026-03-25 19:52:21,050 CRIT Supervisor is running as root.  Privileges were not dropped because no user is specified in the config file.  If you intend to run as root, you can set user=root in the config file to avoid this message.
+2026-03-25 19:52:21,073 INFO RPC interface 'supervisor' initialized
+2026-03-25 19:52:21,074 CRIT Server 'unix_http_server' running without any HTTP authentication checking
+2026-03-25 19:52:21,075 INFO supervisord started with pid 1
+2026-03-25 19:52:22,078 INFO spawned: 'php-fpm' with pid 120
+2026-03-25 19:52:22,081 INFO spawned: 'nginx' with pid 121
+2026-03-25 19:52:22,086 INFO spawned: 'nginx-reload-watcher' with pid 122
+2026-03-25 19:52:23,389 INFO success: php-fpm entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2026-03-25 19:52:23,390 INFO success: nginx entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2026-03-25 19:52:23,390 INFO success: nginx-reload-watcher entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+result: FAIL

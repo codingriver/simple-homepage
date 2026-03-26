@@ -8,9 +8,8 @@
  */
 
 // ============================================================
-// 配置区（部署时必须修改 AUTH_SECRET_KEY）
+// 配置区（AUTH_SECRET_KEY 优先读环境变量，其次读 data/auth_secret.key）
 // ============================================================
-define('AUTH_SECRET_KEY',   '274c52bf5b5cce71d70b0254f5e3d806ad5b8f9d9115e55f9daef0b726ed581c2b7d01ae6fd9e815dff2cdaff6fcbe19c0cfdc26b2246eadedc83db91e7f6a4e');
 define('SESSION_COOKIE_NAME', 'nav_session');
 define('NAV_DOMAIN',        'nav.yourdomain.com');
 define('COOKIE_DOMAIN',     '.yourdomain.com');   // 前面有点，支持所有子域共享
@@ -23,23 +22,13 @@ define('CONFIG_FILE',       DATA_DIR . '/config.json');
 define('IP_LOCKS_FILE',     DATA_DIR . '/ip_locks.json');
 define('INSTALLED_FLAG',    DATA_DIR . '/.installed');
 define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
-
-// ============================================================
-// 动态配置读取（从 config.json，带默认值）
-// ============================================================
+define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 
 /**
- * 读取系统配置，带默认值
+ * 系统配置默认值（单一来源）
  */
-function auth_get_config(): array {
-    static $cfg = null;
-    if ($cfg !== null) return $cfg;
-    $cfg = [];
-    if (file_exists(CONFIG_FILE)) {
-        $cfg = json_decode(file_get_contents(CONFIG_FILE), true) ?? [];
-    }
-    // 默认值
-    $cfg += [
+function auth_default_config(): array {
+    return [
         'site_name'           => '导航中心',
         'nav_domain'          => '',
         'token_expire_hours'  => 8,
@@ -64,6 +53,162 @@ function auth_get_config(): array {
         'webhook_events'      => 'FAIL,IP_LOCKED',
         'nginx_last_applied'  => 0,
     ];
+}
+
+/**
+ * 安全清洗 redirect 参数：仅允许站内相对路径
+ */
+function auth_sanitize_redirect(string $redirect): string {
+    $redirect = trim($redirect);
+    if ($redirect === '') return '';
+
+    // 必须是以 / 开头的相对路径，拒绝 //、\、绝对 URL
+    if ($redirect[0] !== '/') return '';
+    if (strpos($redirect, '//') === 0 || strpos($redirect, '\\') !== false) return '';
+    if (preg_match('/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//', $redirect)) return '';
+
+    return $redirect;
+}
+
+/**
+ * 获取当前实例的认证密钥。
+ * 优先使用环境变量 AUTH_SECRET_KEY；否则使用 data/auth_secret.key。
+ */
+function auth_secret_key(): string {
+    static $secret = null;
+    if ($secret !== null) return $secret;
+
+    $env_secret = trim((string) getenv('AUTH_SECRET_KEY'));
+    if ($env_secret !== '') {
+        $secret = $env_secret;
+        return $secret;
+    }
+
+    if (!file_exists(AUTH_SECRET_FILE)) {
+        auth_rotate_secret_key();
+    }
+
+    $secret = trim((string) @file_get_contents(AUTH_SECRET_FILE));
+    if ($secret === '') {
+        auth_rotate_secret_key();
+        $secret = trim((string) @file_get_contents(AUTH_SECRET_FILE));
+    }
+
+    if ($secret === '') {
+        throw new RuntimeException('AUTH_SECRET_KEY 未初始化');
+    }
+
+    return $secret;
+}
+
+/**
+ * 生成并持久化新的认证密钥。
+ */
+function auth_rotate_secret_key(): string {
+    $dir = dirname(AUTH_SECRET_FILE);
+    if (!is_dir($dir)) mkdir($dir, 0750, true);
+
+    $secret = bin2hex(random_bytes(64));
+    file_put_contents(AUTH_SECRET_FILE, $secret . PHP_EOL, LOCK_EX);
+    @chmod(AUTH_SECRET_FILE, 0600);
+
+    return $secret;
+}
+
+/**
+ * 确保认证密钥文件存在。
+ */
+function auth_ensure_secret_key(): string {
+    return auth_secret_key();
+}
+
+/**
+ * 检测当前请求协议，兼容反向代理。
+ */
+function auth_request_scheme(): string {
+    if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
+        $proto = strtolower(trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]));
+        if (in_array($proto, ['http', 'https'], true)) {
+            return $proto;
+        }
+    }
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        return 'https';
+    }
+    if (!empty($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443) {
+        return 'https';
+    }
+    return 'http';
+}
+
+/**
+ * 获取导航站域名。
+ * 优先使用 config.json 中的 nav_domain；否则回退到当前 Host 或示例常量。
+ */
+function auth_nav_domain(): string {
+    $cfg_domain = trim((string) (auth_get_config()['nav_domain'] ?? ''));
+    if ($cfg_domain !== '') {
+        return $cfg_domain;
+    }
+
+    $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host !== '') {
+        return $host;
+    }
+
+    return NAV_DOMAIN;
+}
+
+/**
+ * 获取导航站登录地址。
+ */
+function auth_nav_login_url(): string {
+    $domain = auth_nav_domain();
+    if ($domain === '') {
+        return NAV_LOGIN_URL;
+    }
+    return auth_request_scheme() . '://' . $domain . '/login.php';
+}
+
+/**
+ * 获取当前访问使用的 Host。
+ */
+function auth_current_host(): string {
+    $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    return $host !== '' ? $host : auth_nav_domain();
+}
+
+/**
+ * 当前访问是否为 IP 模式（含端口）。
+ */
+function auth_is_ip_access(): bool {
+    $host_only = strtok(auth_current_host(), ':');
+    return $host_only !== false && filter_var($host_only, FILTER_VALIDATE_IP) !== false;
+}
+
+/**
+ * 获取当前访问上下文下的登录地址。
+ * 导航站本体通过当前 Host 登录，便于保留内网 IP 排障入口。
+ */
+function auth_current_login_url(): string {
+    return auth_request_scheme() . '://' . auth_current_host() . '/login.php';
+}
+
+// ============================================================
+// 动态配置读取（从 config.json，带默认值）
+// ============================================================
+
+/**
+ * 读取系统配置，带默认值
+ */
+function auth_get_config(): array {
+    static $cfg = null;
+    if ($cfg !== null) return $cfg;
+    $cfg = [];
+    if (file_exists(CONFIG_FILE)) {
+        $cfg = json_decode(file_get_contents(CONFIG_FILE), true) ?? [];
+    }
+    $cfg += auth_default_config();
     return $cfg;
 }
 
@@ -134,7 +279,7 @@ function auth_generate_token(string $username, string $role = 'user', bool $reme
         'jti'         => bin2hex(random_bytes(16)), // 唯一ID，防重放
     ];
     $data = base64_encode(json_encode($payload));
-    $sig  = hash_hmac('sha256', $data, AUTH_SECRET_KEY);
+    $sig  = hash_hmac('sha256', $data, auth_secret_key());
     return $data . '.' . $sig;
 }
 
@@ -149,7 +294,7 @@ function auth_verify_token(string $token) {
     if (count($parts) !== 2) return false;
     [$data, $sig] = $parts;
     // 时间安全的签名比对，防时序攻击
-    $expected = hash_hmac('sha256', $data, AUTH_SECRET_KEY);
+    $expected = hash_hmac('sha256', $data, auth_secret_key());
     if (!hash_equals($expected, $sig)) return false;
     $payload = json_decode(base64_decode($data), true);
     if (!$payload || !isset($payload['exp'])) return false;
@@ -169,8 +314,8 @@ function auth_get_current_user() {
     if (!empty($_COOKIE[SESSION_COOKIE_NAME])) {
         $token = $_COOKIE[SESSION_COOKIE_NAME];
     } elseif (!empty($_GET['_nav_token'])) {
-        // 子站通过 URL 参数传入 Token，验证后写入 Cookie
-        $token = $_GET['_nav_token'];
+        // 子站通过 URL 参数传入 Token，必须是字符串
+        $token = (string) $_GET['_nav_token'];
     }
     if (!$token) return false;
     return auth_verify_token($token);
@@ -190,9 +335,7 @@ function auth_set_cookie(string $token, bool $remember_me = false): void {
     $cfg = auth_get_config();
 
     // 检测当前访问的 host 是否为 IP 地址（含端口，如 192.168.1.100:8080）
-    $host      = $_SERVER['HTTP_HOST'] ?? '';
-    $host_only = strtok($host, ':');   // 去掉端口号
-    $is_ip_access = filter_var($host_only, FILTER_VALIDATE_IP) !== false;
+    $is_ip_access = auth_is_ip_access();
 
     // Cookie Secure 模式
     // IP 访问时强制降级为 false（否则 HTTP+IP 永远登不进去）
@@ -234,35 +377,27 @@ function auth_set_cookie(string $token, bool $remember_me = false): void {
  */
 function auth_clear_cookie(): void {
     $cfg       = auth_get_config();
-    $host      = $_SERVER['HTTP_HOST'] ?? '';
-    $host_only = strtok($host, ':');
-    $is_ip_access = filter_var($host_only, FILTER_VALIDATE_IP) !== false;
+    $is_ip_access = auth_is_ip_access();
 
     if ($is_ip_access) {
-        $is_https      = false;
         $cookie_domain = '';
     } else {
-        $secure_mode = $cfg['cookie_secure'] ?? 'off';
-        if ($secure_mode === 'on') {
-            $is_https = true;
-        } elseif ($secure_mode === 'off') {
-            $is_https = false;
-        } else {
-            $is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-                     || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
-                     || (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
-        }
         $cookie_domain = trim($cfg['cookie_domain'] ?? '');
     }
 
-    setcookie(SESSION_COOKIE_NAME, '', [
-        'expires'  => time() - 3600,
-        'path'     => '/',
-        'domain'   => $cookie_domain,
-        'secure'   => $is_https,
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
+    $domains = array_values(array_unique([$cookie_domain, '']));
+    foreach ($domains as $domain) {
+        foreach ([false, true] as $secure) {
+            setcookie(SESSION_COOKIE_NAME, '', [
+                'expires'  => time() - 3600,
+                'path'     => '/',
+                'domain'   => $domain,
+                'secure'   => $secure,
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
+        }
+    }
 }
 
 // ============================================================
@@ -327,10 +462,10 @@ function auth_save_user(string $username, string $password, string $role = 'admi
 function auth_require_login(): array {
     $user = auth_get_current_user();
     if (!$user) {
-        $redirect = urlencode((isset($_SERVER['HTTPS']) ? 'https' : 'http')
-            . '://' . ($_SERVER['HTTP_HOST'] ?? NAV_DOMAIN)
+        $redirect = urlencode(auth_request_scheme()
+            . '://' . auth_current_host()
             . ($_SERVER['REQUEST_URI'] ?? '/'));
-        header('Location: ' . NAV_LOGIN_URL . '?redirect=' . $redirect);
+        header('Location: ' . auth_current_login_url() . '?redirect=' . $redirect);
         exit;
     }
     return $user;
@@ -522,6 +657,16 @@ function is_private_ip(string $ip): bool {
 }
 
 /**
+ * 检查 IP 是否属于可外连公网地址
+ */
+function is_public_ip(string $ip): bool {
+    $ip = trim($ip);
+    if (!filter_var($ip, FILTER_VALIDATE_IP)) return false;
+    return filter_var($ip, FILTER_VALIDATE_IP,
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+}
+
+/**
  * 检查反代目标是否为合法内网地址（防 SSRF）
  * 支持格式：http://192.168.1.x:port
  * 允许：私有地址段（10.x / 172.16-31.x / 192.168.x）
@@ -530,13 +675,27 @@ function is_private_ip(string $ip): bool {
 function is_allowed_proxy_target(string $url): bool {
     $parsed = parse_url($url);
     if (!$parsed || !isset($parsed['host'])) return false;
+
+    $scheme = strtolower((string)($parsed['scheme'] ?? ''));
+    if (!in_array($scheme, ['http', 'https'], true)) return false;
+
     $host = $parsed['host'];
     // 必须是合法 IP（hostname 不允许，防 DNS 重绑定）
     if (!filter_var($host, FILTER_VALIDATE_IP)) return false;
-    // 明确拒绝 loopback（127.x.x.x）和链路本地（169.254.x.x）
-    if (preg_match('/^(127\.\d+\.\d+\.\d+|169\.254\.\d+\.\d+|::1|fe80:)/', $host)) return false;
-    // 必须是私有地址段
-    return is_private_ip($host);
+
+    // 明确拒绝 loopback、链路本地、未指定、广播等地址
+    if (preg_match('/^(127\.|169\.254\.|0\.|255\.|::1$|fe80:|::$)/i', $host)) return false;
+
+    // 必须是 RFC1918 私网地址（仅允许 10/172.16-31/192.168）
+    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        if (preg_match('/^10\./', $host)) return true;
+        if (preg_match('/^192\.168\./', $host)) return true;
+        if (preg_match('/^172\.(1[6-9]|2\d|3[0-1])\./', $host)) return true;
+        return false;
+    }
+
+    // IPv6 场景暂不允许作为 proxy_target（避免边界复杂度）
+    return false;
 }
 
 // ============================================================

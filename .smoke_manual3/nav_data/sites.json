@@ -1,0 +1,13 @@
+{
+    "groups": [
+        {
+            "id": "default",
+            "name": "我的应用",
+            "icon": "🌐",
+            "order": 0,
+            "auth_required": true,
+            "visible_to": "all",
+            "sites": []
+        }
+    ]
+}

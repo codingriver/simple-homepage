@@ -48,8 +48,24 @@ log_case() {
 
 # 容器内执行 curl GET，返回 HTTP 状态码
 hcode() {
-  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
-    --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000
+  local code
+  code=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
+  case "$code" in
+    [1-5][0-9][0-9]) echo "$code" ;;
+    *) echo 000 ;;
+  esac
+}
+
+# 容器内执行 curl GET，不跟随跳转，返回 HTTP 状态码
+rcode() {
+  local code
+  code=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" \
+    --max-time 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)
+  case "$code" in
+    [1-5][0-9][0-9]) echo "$code" ;;
+    *) echo 000 ;;
+  esac
 }
 
 # 容器内执行 curl GET，返回响应体
@@ -106,11 +122,13 @@ echo "[smoke] docker run OK, waiting for service..."
 READY=0
 for i in $(seq 1 60); do
   CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' \
-    --max-time 3 "${BASE}/setup.php" 2>/dev/null || echo 000)
-  if [ "$CODE" != "000" ] && [ "$CODE" != "" ]; then
+    --max-time 3 "${BASE}/setup.php" 2>/dev/null || true)
+  case "$CODE" in
+    [1-5][0-9][0-9])
     echo "[smoke] Service ready (HTTP ${CODE})"
     READY=1; break
-  fi
+    ;;
+  esac
   sleep 1
 done
 if [ "$READY" -ne 1 ]; then
@@ -121,7 +139,7 @@ if [ "$READY" -ne 1 ]; then
 fi
 # 如果 setup.php 返回 500，输出 PHP 错误日志
 CODE=$(docker exec "$CONTAINER_NAME" curl -s -o /dev/null -w '%{http_code}' \
-  --max-time 3 "${BASE}/setup.php" 2>/dev/null || echo 000)
+  --max-time 3 "${BASE}/setup.php" 2>/dev/null || true)
 if [ "$CODE" = "500" ]; then
   echo "[smoke] setup.php returns 500, PHP-FPM log:"
   docker exec "$CONTAINER_NAME" tail -30 /var/log/php-fpm/error.log 2>/dev/null || true
@@ -174,12 +192,18 @@ else
   FRONT=$(hcode "${BASE}/index.php")
   [ "$FRONT" = "200" ] && log_case "login_success" PASS || log_case "login_success" FAIL "index=$FRONT"
 fi
-assert_code "auth_verify_200" "${BASE}/auth/verify.php" "200"
+assert_code "auth_verify_internal_404" "${BASE}/auth/verify.php" "404"
 assert_code "admin_dash_200"  "${BASE}/admin/index.php" "200"
-docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
-  "${BASE}/logout.php" -o /dev/null 2>/dev/null || true
-LGOUT=$(hcode "${BASE}/admin/index.php")
-[ "$LGOUT" = "302" ] && log_case "logout_clears_session" PASS || log_case "logout_clears_session" FAIL "returns $LGOUT"
+CSRF=$(get_csrf "${BASE}/index.php")
+if [ -n "$CSRF" ]; then
+  docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
+    -X POST "${BASE}/logout.php" \
+    -d "_csrf=${CSRF}" -o /dev/null 2>/dev/null || true
+  LGOUT=$(rcode "${BASE}/admin/index.php")
+  [ "$LGOUT" = "302" ] && log_case "logout_clears_session" PASS || log_case "logout_clears_session" FAIL "returns $LGOUT"
+else
+  log_case "logout_clears_session" FAIL "no CSRF for logout"
+fi
 CSRF=$(get_csrf "${BASE}/login.php")
 docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
   -X POST "${BASE}/login.php" \
@@ -343,20 +367,22 @@ fi
 # ------- 10. Log API / cookie clear -------
 echo ""; echo "[10/11] Log API and cookie clear..."
 for LTYPE in nginx_access nginx_error php_fpm; do
-  LC=$(hcode "${BASE}/admin/settings.php?ajax=log&type=${LTYPE}&lines=10")
+  LC=$(hcode "${BASE}/admin/debug.php?ajax=log&type=${LTYPE}&lines=10")
   [ "$LC" = "200" ] && log_case "log_api_${LTYPE}" PASS || log_case "log_api_${LTYPE}" FAIL "HTTP $LC"
 done
-CLR=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" --max-time 10 \
-  "${BASE}/admin/settings.php?ajax=clear_log" \
-  -o /dev/null -w "%{http_code}" 2>/dev/null || echo 000)
-[ "$CLR" = "200" ] && log_case "log_clear_api" PASS || log_case "log_clear_api" FAIL "HTTP $CLR"
-CSRF=$(get_csrf "${BASE}/admin/settings.php")
+CSRF=$(get_csrf "${BASE}/admin/debug.php")
 if [ -n "$CSRF" ]; then
+  CLR=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" --max-time 10 \
+    -X POST "${BASE}/admin/debug.php" \
+    -H 'X-Requested-With: XMLHttpRequest' \
+    -F "ajax=clear_log" -F "_csrf=${CSRF}" 2>/dev/null || true)
+  echo "$CLR" | grep -qF '"ok":true' && log_case "log_clear_api" PASS || log_case "log_clear_api" FAIL "${CLR:0:120}"
   docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
-    -X POST "${BASE}/admin/settings.php" \
+    -X POST "${BASE}/admin/debug.php" \
     -d "_csrf=${CSRF}" -d "action=clear_cookie" -o /dev/null 2>/dev/null || true
   log_case "cookie_clear" PASS
 else
+  log_case "log_clear_api" SKIP "no CSRF"
   log_case "cookie_clear" SKIP "no CSRF"
 fi
 

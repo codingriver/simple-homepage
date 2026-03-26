@@ -5,21 +5,9 @@
  * Proxy 类型验证内网IP防止SSRF
  */
 
-// AJAX POST：在 header.php 输出 HTML 之前处理，确保能正确设置 Content-Type
-if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    require_once __DIR__ . '/shared/functions.php';
-    // AJAX 场景下鉴权失败返回 JSON 而非重定向
-    $current_user = auth_get_current_user();
-    if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
-        header('Content-Type: application/json; charset=utf-8');
-        http_response_code(401);
-        echo json_encode(['ok' => false, 'msg' => '未登录或无权限，请刷新页面重新登录']);
-        exit;
-    }
-    csrf_check();
-    $sites_data = load_sites();
+// 统一处理保存/删除逻辑（AJAX 与普通表单共用）
+function sites_handle_post(array &$sites_data): array {
     $action = $_POST['action'] ?? '';
-    $json_out = ['ok' => false, 'msg' => '未知操作'];
 
     if ($action === 'save') {
         $old_gid = $_POST['old_gid'] ?? '';
@@ -32,61 +20,66 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 
         $order   = (int)($_POST['order'] ?? 0);
         $type    = $_POST['type'] ?? 'external';
         $url     = trim($_POST['url']  ?? '');
+
         $err = '';
         if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
         elseif (!$name) $err = '名称不能为空';
         elseif (!$gid)  $err = '请选择所属分组';
         elseif ($type === 'proxy') {
             $target = trim($_POST['proxy_target'] ?? '');
-            if (!is_allowed_proxy_target($target)) $err = '代理目标必须是内网IP地址（防SSRF）';
+            if (!is_allowed_proxy_target($target)) $err = '代理目标必须是 RFC1918 内网IPv4地址（防SSRF）';
         }
-        if ($err) {
-            $json_out = ['ok' => false, 'msg' => $err];
+
+        if ($err) return ['ok' => false, 'msg' => $err];
+
+        $site = ['id'=>$sid,'name'=>$name,'icon'=>$icon,'desc'=>$desc,'order'=>$order,'type'=>$type];
+        if ($type === 'proxy') {
+            $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
+            $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
+            $site['slug']         = trim($_POST['slug'] ?? $sid);
+            $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
         } else {
-            $site = ['id'=>$sid,'name'=>$name,'icon'=>$icon,'desc'=>$desc,'order'=>$order,'type'=>$type];
-            if ($type === 'proxy') {
-                $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
-                $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
-                $site['slug']         = trim($_POST['slug'] ?? $sid);
-                $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
-            } else {
-                $site['url'] = $url;
+            $site['url'] = $url;
+        }
+
+        if ($old_gid && $old_gid === $gid) {
+            foreach ($sites_data['groups'] as &$g) {
+                if ($g['id'] !== $gid) continue;
+                $replaced = false;
+                foreach ($g['sites'] as &$s) {
+                    if ($s['id'] === $old_sid) { $s = $site; $replaced = true; break; }
+                }
+                unset($s);
+                if (!$replaced) $g['sites'][] = $site;
+                usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+                break;
             }
-            if ($old_gid && $old_gid === $gid) {
+            unset($g);
+        } else {
+            if ($old_gid) {
                 foreach ($sites_data['groups'] as &$g) {
-                    if ($g['id'] !== $gid) continue;
-                    $replaced = false;
-                    foreach ($g['sites'] as &$s) {
-                        if ($s['id'] === $old_sid) { $s = $site; $replaced = true; break; }
+                    if ($g['id'] === $old_gid) {
+                        $g['sites'] = array_values(array_filter($g['sites'], function($s) use ($old_sid){ return $s['id'] !== $old_sid; }));
                     }
-                    unset($s);
-                    if (!$replaced) $g['sites'][] = $site;
+                }
+                unset($g);
+            }
+            foreach ($sites_data['groups'] as &$g) {
+                if ($g['id'] === $gid) {
+                    $g['sites'][] = $site;
                     usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
                     break;
                 }
-                unset($g);
-            } else {
-                if ($old_gid) {
-                    foreach ($sites_data['groups'] as &$g) {
-                        if ($g['id'] === $old_gid)
-                            $g['sites'] = array_values(array_filter($g['sites'], function($s) use ($old_sid){ return $s['id'] !== $old_sid; }));
-                    }
-                    unset($g);
-                }
-                foreach ($sites_data['groups'] as &$g) {
-                    if ($g['id'] === $gid) {
-                        $g['sites'][] = $site;
-                        usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
-                        break;
-                    }
-                }
-                unset($g);
             }
-            save_sites($sites_data);
-            flash_set('success', '站点已保存');
-            $json_out = ['ok' => true];
+            unset($g);
         }
-    } elseif ($action === 'delete') {
+
+        save_sites($sites_data);
+        flash_set('success', '站点已保存');
+        return ['ok' => true, 'msg' => '站点已保存'];
+    }
+
+    if ($action === 'delete') {
         $gid = $_POST['gid'] ?? '';
         $sid = $_POST['sid'] ?? '';
         foreach ($sites_data['groups'] as &$g) {
@@ -98,10 +91,42 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['REQUEST_METHOD'] === 
         unset($g);
         save_sites($sites_data);
         flash_set('success', '站点已删除');
-        $json_out = ['ok' => true];
+        return ['ok' => true, 'msg' => '站点已删除'];
     }
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($json_out, JSON_UNESCAPED_UNICODE);
+
+    return ['ok' => false, 'msg' => '未知操作'];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once __DIR__ . '/shared/functions.php';
+
+    $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']);
+    $current_user = auth_get_current_user();
+    if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
+        if ($is_ajax) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(401);
+            echo json_encode(['ok' => false, 'msg' => '未登录或无权限，请刷新页面重新登录']);
+            exit;
+        }
+        header('Location: /login.php');
+        exit;
+    }
+
+    csrf_check();
+    $sites_data = load_sites();
+    $result = sites_handle_post($sites_data);
+
+    if ($is_ajax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (!$result['ok']) {
+        flash_set('error', $result['msg']);
+    }
+    header('Location: sites.php');
     exit;
 }
 
@@ -118,115 +143,6 @@ function &find_group(array &$data, string $gid) {
     return null;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_check();
-    $action = $_POST['action'] ?? '';
-
-    if ($action === 'save') {
-        $old_gid = $_POST['old_gid']   ?? '';
-        $old_sid = $_POST['old_sid']   ?? '';
-        $gid     = trim($_POST['gid']  ?? '');
-        $sid     = trim($_POST['sid']  ?? '');
-        $name    = trim($_POST['name'] ?? '');
-        $icon    = trim($_POST['icon'] ?? '🔗');
-        $desc    = trim($_POST['desc'] ?? '');
-        $order   = (int)($_POST['order'] ?? 0);
-        $type    = $_POST['type'] ?? 'external';
-        $url     = trim($_POST['url']  ?? '');
-
-        // 校验
-        $err = '';
-        if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
-        elseif (!$name) $err = '名称不能为空';
-        elseif (!$gid)  $err = '请选择所属分组';
-        elseif ($type === 'proxy') {
-            $target = trim($_POST['proxy_target'] ?? '');
-            if (!is_allowed_proxy_target($target))
-                $err = '代理目标必须是内网IP地址（防SSRF）';
-        }
-
-        if ($err) {
-            flash_set('error', $err);
-            header('Location: sites.php'); exit;
-        }
-
-        // 构建站点数据
-        $site = ['id' => $sid, 'name' => $name, 'icon' => $icon,
-                 'desc' => $desc, 'order' => $order, 'type' => $type];
-        if ($type === 'proxy') {
-            $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
-            $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
-            $site['slug']         = trim($_POST['slug']    ?? $sid);
-            $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
-        } else {
-            $site['url'] = $url;
-        }
-
-        // 如果是编辑且分组没变：原地更新
-        if ($old_gid && $old_gid === $gid) {
-            foreach ($sites_data['groups'] as &$g) {
-                if ($g['id'] !== $gid) continue;
-                $replaced = false;
-                foreach ($g['sites'] as &$s) {
-                    if ($s['id'] === $old_sid) { $s = $site; $replaced = true; break; }
-                }
-                unset($s);
-                if (!$replaced) $g['sites'][] = $site;
-                usort($g['sites'], function($a,$b){ return ($a['order']??0) - ($b['order']??0); });
-                break;
-            }
-            unset($g);
-        } else {
-            // 跨分组移动：从旧分组删除
-            if ($old_gid) {
-                foreach ($sites_data['groups'] as &$g) {
-                    if ($g['id'] === $old_gid) {
-                        $g['sites'] = array_values(
-                            array_filter($g['sites'], function($s) use ($old_sid){ return $s['id'] !== $old_sid; }));
-                    }
-                }
-                unset($g);
-            }
-            // 添加到新分组
-            foreach ($sites_data['groups'] as &$g) {
-                if ($g['id'] === $gid) {
-                    $g['sites'][] = $site;
-                    usort($g['sites'], function($a,$b){ return ($a['order']??0) - ($b['order']??0); });
-                    break;
-                }
-            }
-            unset($g);
-        }
-        save_sites($sites_data);
-        flash_set('success', '站点已保存');
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-            header('Content-Type: application/json');
-            echo json_encode(['ok' => true]);
-            exit;
-        }
-        header('Location: sites.php'); exit;
-
-    } elseif ($action === 'delete') {
-        $gid = $_POST['gid'] ?? '';
-        $sid = $_POST['sid'] ?? '';
-        foreach ($sites_data['groups'] as &$g) {
-            if ($g['id'] === $gid) {
-                $g['sites'] = array_values(
-                    array_filter($g['sites'], function($s) use ($sid){ return $s['id'] !== $sid; }));
-                break;
-            }
-        }
-        unset($g);
-        save_sites($sites_data);
-        flash_set('success', '站点已删除');
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-            header('Content-Type: application/json');
-            echo json_encode(['ok' => true]);
-            exit;
-        }
-        header('Location: sites.php'); exit;
-    }
-}
 
 $sites_data = load_sites();
 $groups     = $sites_data['groups'] ?? [];

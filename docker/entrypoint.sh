@@ -4,6 +4,7 @@
 # 负责：环境变量注入 Nginx 配置、目录初始化、权限修正
 # ============================================================
 set -e
+umask 027
 
 echo "[entrypoint] 导航网站容器启动..."
 
@@ -63,10 +64,13 @@ for f in /var/www/nav/data/users.json \
 done
 
 # ── 确保反代配置文件存在 ──
-mkdir -p /etc/nginx/conf.d
+mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
 touch /etc/nginx/conf.d/nav-proxy.conf
+touch /etc/nginx/http.d/nav-proxy-domains.conf
 chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf
+chown navwww:navwww /etc/nginx/http.d/nav-proxy-domains.conf
 chmod 664 /etc/nginx/conf.d/nav-proxy.conf
+chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
 
 # ── 删除 Alpine Nginx 自带 default.conf（会拦截所有请求返回 404）──
 rm -f /etc/nginx/http.d/default.conf
@@ -95,7 +99,10 @@ chmod -R 755 /var/lib/nginx/tmp
 touch /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
       /var/log/nginx/access.log /var/log/nginx/error.log \
       /var/log/php-fpm/error.log
-chmod 644 /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
+chown navwww:navwww /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
+                  /var/log/nginx/access.log /var/log/nginx/error.log \
+                  /var/log/php-fpm/error.log
+chmod 664 /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
           /var/log/nginx/access.log /var/log/nginx/error.log \
           /var/log/php-fpm/error.log
 

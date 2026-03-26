@@ -33,32 +33,7 @@ function load_config(): array {
     $raw = file_exists(CONFIG_FILE)
         ? (json_decode(file_get_contents(CONFIG_FILE), true) ?? [])
         : [];
-    // 合并默认值：新安装或旧备份恢复后不会出现缺字段
-    return $raw + [
-        'site_name'          => '导航中心',
-        'nav_domain'         => '',
-        'token_expire_hours' => 8,
-        'remember_me_days'   => 60,
-        'login_fail_limit'   => 5,
-        'login_lock_minutes' => 15,
-        'bg_color'           => '',
-        'bg_image'           => '',
-        'cookie_secure'      => 'off',
-        'cookie_domain'      => '',
-        'card_size'          => 140,
-        'card_height'        => 0,
-        'card_show_desc'     => '1',
-        'card_layout'        => 'grid',
-        'card_direction'     => 'col',
-        'display_errors'     => '0',
-        'proxy_params_mode'  => 'simple',
-        'webhook_enabled'    => '0',
-        'webhook_type'       => 'custom',
-        'webhook_url'        => '',
-        'webhook_tg_chat'    => '',
-        'webhook_events'     => 'FAIL,IP_LOCKED',
-        'nginx_last_applied' => 0,
-    ];
+    return $raw + auth_default_config();
 }
 
 /** 写入系统配置 */
@@ -70,28 +45,30 @@ function save_config(array $cfg): void {
 
 // ── CSRF 保护 ──
 
-/** 获取或生成 CSRF Token（存储在 Session 中）*/
-function csrf_token(): string {
-    if (session_status() === PHP_SESSION_NONE) session_start();
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+if (!function_exists('csrf_token')) {
+    /** 获取或生成 CSRF Token（存储在 Session 中）*/
+    function csrf_token(): string {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        if (empty($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+        return $_SESSION['csrf_token'];
     }
-    return $_SESSION['csrf_token'];
-}
 
-/** 输出隐藏的 CSRF Token 字段 */
-function csrf_field(): string {
-    return '<input type="hidden" name="_csrf" value="' . htmlspecialchars(csrf_token()) . '">';
-}
+    /** 输出隐藏的 CSRF Token 字段 */
+    function csrf_field(): string {
+        return '<input type="hidden" name="_csrf" value="' . htmlspecialchars(csrf_token()) . '">';
+    }
 
-/** 验证 CSRF Token，失败则终止 */
-function csrf_check(): void {
-    if (session_status() === PHP_SESSION_NONE) session_start();
-    $token     = $_POST['_csrf'] ?? '';
-    $expected  = $_SESSION['csrf_token'] ?? '';
-    if (!$token || !$expected || !hash_equals($expected, $token)) {
-        http_response_code(403);
-        die('CSRF验证失败，请刷新页面重试。');
+    /** 验证 CSRF Token，失败则终止 */
+    function csrf_check(): void {
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        $token     = $_POST['_csrf'] ?? '';
+        $expected  = $_SESSION['csrf_token'] ?? '';
+        if (!$token || !$expected || !hash_equals($expected, $token)) {
+            http_response_code(403);
+            die('CSRF验证失败，请刷新页面重试。');
+        }
     }
 }
 
@@ -110,6 +87,21 @@ function flash_get() {
     $f = $_SESSION['flash'];
     unset($_SESSION['flash']);
     return $f;
+}
+
+/**
+ * 受控执行系统命令（统一出口）
+ * @return array{ok:bool,code:int,output:string}
+ */
+function admin_run_command(string $command): array {
+    $output = [];
+    $code = 0;
+    exec($command . ' 2>&1', $output, $code);
+    return [
+        'ok' => $code === 0,
+        'code' => $code,
+        'output' => implode("\n", $output),
+    ];
 }
 
 // ── 备份与恢复 ──
@@ -271,8 +263,13 @@ function debug_set_display_errors(bool $on): array {
         $content = preg_replace('/^(\s*display_startup_errors\s*=\s*).*/mi', '${1}' . $value, $content);
     }
     file_put_contents($ini_file, $content, LOCK_EX);
+
     // 异步重启 PHP-FPM，避免杀死当前进程导致 502
-    exec('nohup /usr/bin/supervisorctl -c /etc/supervisord.conf restart php-fpm >/tmp/fpm-restart.log 2>&1 &');
+    $cmd = 'nohup /usr/bin/supervisorctl -c /etc/supervisord.conf restart php-fpm >/tmp/fpm-restart.log 2>&1 &';
+    $run = admin_run_command($cmd);
+    if (!$run['ok']) {
+        return ['ok' => false, 'msg' => 'ini 已更新，但 PHP-FPM 重启触发失败：' . $run['output']];
+    }
     return ['ok' => true, 'msg' => 'ini 已更新，PHP-FPM 正在后台重启'];
 }
 
@@ -355,35 +352,56 @@ function health_save_cache(array $data): void {
  * @return array ['status'=>'up'|'down', 'code'=>int, 'ms'=>int]
  */
 function health_check_url(string $url): array {
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        return ['status' => 'down', 'code' => 0, 'ms' => 0];
+    }
+
     $start = microtime(true);
-    $ctx = stream_context_create([
-        'http' => [
-            'method'          => 'HEAD',
-            'timeout'         => HEALTH_TIMEOUT,
-            'ignore_errors'   => true,
-            'follow_location' => 1,
-            'max_redirects'   => 3,
-            'header'          => "User-Agent: NavPortal-HealthCheck/1.0\r\n",
-        ],
-        'ssl'  => [
-            'verify_peer'      => false,
-            'verify_peer_name' => false,
-        ],
-    ]);
     $code   = 0;
     $status = 'down';
-    try {
-        $body = @file_get_contents($url, false, $ctx);
-        // 从 $http_response_header 解析状态码
-        if (!empty($http_response_header)) {
-            preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m);
-            $code = (int)($m[1] ?? 0);
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_NOBODY => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => HEALTH_TIMEOUT,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_USERAGENT => 'NavPortal-HealthCheck/1.0',
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        ]);
+        $resp = curl_exec($ch);
+        if ($resp !== false) {
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $status = ($code >= 200 && $code < 500) ? 'up' : 'down';
         }
-        // 2xx / 3xx 均视为 up
-        $status = ($code >= 200 && $code < 500) ? 'up' : 'down';
-    } catch (\Throwable $e) {
-        $status = 'down';
+        curl_close($ch);
+    } else {
+        $ctx = stream_context_create([
+            'http' => [
+                'method'          => 'HEAD',
+                'timeout'         => HEALTH_TIMEOUT,
+                'ignore_errors'   => true,
+                'follow_location' => 1,
+                'max_redirects'   => 3,
+                'header'          => "User-Agent: NavPortal-HealthCheck/1.0\r\n",
+            ],
+        ]);
+        try {
+            @file_get_contents($url, false, $ctx);
+            if (!empty($http_response_header)) {
+                preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m);
+                $code = (int)($m[1] ?? 0);
+            }
+            $status = ($code >= 200 && $code < 500) ? 'up' : 'down';
+        } catch (\Throwable $e) {
+            $status = 'down';
+        }
     }
+
     $ms = (int)round((microtime(true) - $start) * 1000);
     return ['status' => $status, 'code' => $code, 'ms' => $ms];
 }
@@ -454,6 +472,68 @@ function health_get_status(array $site, array $cache): string {
  * @param string $ip       客户端 IP
  * @param string $note     附加说明
  */
+function webhook_http_post_json(string $url, string $payload, int $timeout = 5): array {
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        return ['ok' => false, 'status' => 0, 'body' => '', 'error' => 'Webhook URL 无效'];
+    }
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Content-Length: ' . strlen($payload),
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        ]);
+        $body = curl_exec($ch);
+        if ($body === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            return ['ok' => false, 'status' => 0, 'body' => '', 'error' => $error ?: '请求失败'];
+        }
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        return [
+            'ok' => $status >= 200 && $status < 400,
+            'status' => $status,
+            'body' => (string) $body,
+            'error' => '',
+        ];
+    }
+
+    $ctx = stream_context_create([
+        'http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
+            'content' => $payload,
+            'timeout' => $timeout,
+            'ignore_errors' => true,
+            'follow_location' => 1,
+            'max_redirects' => 3,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $ctx);
+    $status = 0;
+    if (!empty($http_response_header) && preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m)) {
+        $status = (int) ($m[1] ?? 0);
+    }
+    return [
+        'ok' => $body !== false && $status >= 200 && $status < 400,
+        'status' => $status,
+        'body' => $body === false ? '' : (string) $body,
+        'error' => $body === false ? '请求失败' : '',
+    ];
+}
+
 function webhook_send(string $event, string $username, string $ip, string $note = ''): void {
     $cfg = load_config();
     if (($cfg['webhook_enabled'] ?? '0') !== '1') return;
@@ -508,18 +588,7 @@ function webhook_send(string $event, string $username, string $ip, string $note 
             ]);
     }
 
-    // 异步发送（不阻塞页面响应）
-    $ctx = stream_context_create([
-        'http' => [
-            'method'  => 'POST',
-            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
-            'content' => $payload,
-            'timeout' => 3,
-            'ignore_errors' => true,
-        ],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
-    ]);
-    @file_get_contents($url, false, $ctx);
+    webhook_http_post_json($url, $payload, 3);
 }
 
 /**
@@ -551,19 +620,12 @@ function webhook_test(): array {
             $payload = json_encode(['text' => $text, 'event' => 'TEST', 'site' => $site_name]);
     }
 
-    $ctx = stream_context_create([
-        'http' => [
-            'method'  => 'POST',
-            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
-            'content' => $payload,
-            'timeout' => 5,
-            'ignore_errors' => true,
-        ],
-        'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
-    ]);
-    $resp = @file_get_contents($url, false, $ctx);
-    if ($resp === false) {
-        return ['ok' => false, 'msg' => '发送失败，请检查 URL 是否正确'];
+    $result = webhook_http_post_json($url, $payload, 5);
+    if (!$result['ok']) {
+        $msg = $result['error'] !== ''
+            ? '发送失败：' . $result['error']
+            : '发送失败，HTTP 状态码：' . ($result['status'] ?: 0);
+        return ['ok' => false, 'msg' => $msg];
     }
     return ['ok' => true, 'msg' => '测试消息已发送，请检查接收端'];
 }
@@ -572,13 +634,16 @@ function webhook_test(): array {
 
 /**
  * 根据当前 sites.json 生成 Nginx 反代配置片段
- * 输出到 /etc/nginx/conf.d/nav-proxy.conf（由 nginx reload 后生效）
+ * 输出到：
+ *   - /etc/nginx/conf.d/nav-proxy.conf        （路径前缀模式）
+ *   - /etc/nginx/http.d/nav-proxy-domains.conf（子域名模式）
+ * 由 nginx reload 后生效。
  *
  * 仅处理 type=proxy 的站点：
  *   - proxy_mode=path   → location /p/{slug}/ { proxy_pass ... }
  *   - proxy_mode=domain → 独立 server 块（子域名模式）
  *
- * @return array ['ok' => bool, 'msg' => string, 'conf' => string]
+ * @return array ['ok' => bool, 'msg' => string, 'path_conf' => string, 'domain_conf' => string]
  */
 function nginx_generate_proxy_conf(): array {
     $cfg        = load_config();
@@ -745,51 +810,68 @@ function nginx_generate_proxy_conf(): array {
         }
     }
 
-    // 组装最终配置内容
+    // 组装路径模式配置
     // 注意：此文件通过 nav.conf 的 include 指令嵌入 server {} 块内
     // 因此只能包含 location 块，不能包含 map/server 等顶层指令
-    $lines = [
+    $path_lines = [
         "# 导航站自动生成的 Nginx 反代配置",
         "# 生成时间：" . date('Y-m-d H:i:s'),
         "# 此文件由后台自动管理，请勿手动编辑",
-        "# 注意：此文件被 include 到 server {} 块内，只能包含 location 块",
+        "# 路径前缀模式：此文件被 include 到 server {} 块内，只能包含 location 块",
         "",
     ];
 
     if (!empty($path_blocks)) {
-        $lines[] = "# ── 路径前缀模式 ──";
-        foreach ($path_blocks as $b) { $lines[] = $b; $lines[] = ""; }
+        $path_lines[] = "# ── 路径前缀模式 ──";
+        foreach ($path_blocks as $b) { $path_lines[] = $b; $path_lines[] = ""; }
     }
 
-    if (empty($path_blocks) && empty($domain_blocks)) {
-        $lines[] = "# 暂无代理站点配置";
+    if (empty($path_blocks)) {
+        $path_lines[] = "# 暂无路径前缀代理站点配置";
     }
+
+    // 组装子域名模式配置
+    $domain_lines = [
+        "# 导航站自动生成的 Nginx 子域名代理配置",
+        "# 生成时间：" . date('Y-m-d H:i:s'),
+        "# 此文件由后台自动管理，请勿手动编辑",
+        "",
+    ];
 
     if (!empty($domain_blocks)) {
-        // 子域名模式需要独立 server 块，无法 include 到 server 内
-        // 生成注释供参考，实际需手动添加到 nginx 主配置
-        $lines[] = "# ── 子域名模式（独立 server 块，需手动添加到 nginx 主配置）──";
+        $domain_lines[] = "# ── 子域名模式 ──";
         foreach ($domain_blocks as $b) {
-            foreach (explode("\n", $b) as $bl) $lines[] = '# ' . $bl;
-            $lines[] = "";
+            $domain_lines[] = $b;
+            $domain_lines[] = "";
         }
+    } else {
+        $domain_lines[] = "# 暂无子域名代理站点配置";
     }
 
-    $conf = implode("\n", $lines);
+    $path_conf   = implode("\n", $path_lines);
+    $domain_conf = implode("\n", $domain_lines);
 
     // 写入配置文件
-    $conf_path = nginx_proxy_conf_path();
-    $result    = @file_put_contents($conf_path, $conf, LOCK_EX);
+    $path_conf_path   = nginx_proxy_conf_path();
+    $domain_conf_path = nginx_domain_proxy_conf_path();
+    $path_result      = @file_put_contents($path_conf_path, $path_conf, LOCK_EX);
+    $domain_result    = @file_put_contents($domain_conf_path, $domain_conf, LOCK_EX);
 
-    if ($result === false) {
+    if ($path_result === false || $domain_result === false) {
         return [
             'ok'   => false,
-            'msg'  => "写入配置文件失败：{$conf_path}，请检查 www-data 是否有写入权限",
-            'conf' => $conf,
+            'msg'  => "写入配置文件失败：{$path_conf_path} 或 {$domain_conf_path}，请检查 www-data 是否有写入权限",
+            'path_conf' => $path_conf,
+            'domain_conf' => $domain_conf,
         ];
     }
 
-    return ['ok' => true, 'msg' => "配置已写入 {$conf_path}", 'conf' => $conf];
+    return [
+        'ok' => true,
+        'msg' => "配置已写入 {$path_conf_path} 和 {$domain_conf_path}",
+        'path_conf' => $path_conf,
+        'domain_conf' => $domain_conf,
+    ];
 }
 
 /**
@@ -798,8 +880,10 @@ function nginx_generate_proxy_conf(): array {
  * @return array ['ok'=>bool,'msg'=>string]
  */
 function nginx_apply_proxy_conf(bool $reload = false): array {
-    $conf_path = nginx_proxy_conf_path();
-    $old_conf  = file_exists($conf_path) ? @file_get_contents($conf_path) : null;
+    $conf_path        = nginx_proxy_conf_path();
+    $domain_conf_path = nginx_domain_proxy_conf_path();
+    $old_conf         = file_exists($conf_path) ? @file_get_contents($conf_path) : null;
+    $old_domain_conf  = file_exists($domain_conf_path) ? @file_get_contents($domain_conf_path) : null;
 
     $gen = nginx_generate_proxy_conf();
     if (!$gen['ok']) {
@@ -818,6 +902,9 @@ function nginx_apply_proxy_conf(bool $reload = false): array {
     // reload 失败：回滚到旧配置并尝试恢复 reload
     if ($old_conf !== null) {
         @file_put_contents($conf_path, $old_conf, LOCK_EX);
+        if ($old_domain_conf !== null) {
+            @file_put_contents($domain_conf_path, $old_domain_conf, LOCK_EX);
+        }
         $rollback_rel = nginx_reload();
         if ($rollback_rel['ok']) {
             return ['ok' => false, 'msg' => 'Reload 失败，已自动回滚到上一次可用配置：' . $rel['msg']];
@@ -842,9 +929,10 @@ function nginx_bin(): string {
     foreach ($candidates as $path) {
         if (is_executable($path)) return $path;
     }
-    // 最后尝试 which
-    $which = trim(shell_exec('which nginx 2>/dev/null') ?? '');
-    return $which ?: '/usr/sbin/nginx';
+    // 最后尝试 command -v
+    $which = admin_run_command('command -v nginx');
+    $bin = trim($which['output']);
+    return $which['ok'] && $bin !== '' ? $bin : '/usr/sbin/nginx';
 }
 
 /**
@@ -858,6 +946,18 @@ function nginx_proxy_conf_path(): string {
         return '/www/server/nginx/conf/nav-proxy.conf';
     }
     return '/etc/nginx/conf.d/nav-proxy.conf';
+}
+
+/**
+ * 自动检测 Nginx 子域名反代配置文件路径
+ * 宝塔：/www/server/nginx/conf/nav-proxy-domains.conf
+ * 标准：/etc/nginx/http.d/nav-proxy-domains.conf
+ */
+function nginx_domain_proxy_conf_path(): string {
+    if (is_dir('/www/server/nginx/conf')) {
+        return '/www/server/nginx/conf/nav-proxy-domains.conf';
+    }
+    return '/etc/nginx/http.d/nav-proxy-domains.conf';
 }
 
 /**
@@ -878,29 +978,26 @@ function nginx_reload(): array {
 
     // 先测试 nginx 是否运行正常
     if ($use_wrapper) {
-        $test_output = [];
-        $test_code   = 0;
-        exec('/usr/local/bin/nginx-test 2>&1', $test_output, $test_code);
-        $test_msg = implode("\n", $test_output);
+        $test = admin_run_command('/usr/local/bin/nginx-test');
+        $test_msg = $test['output'];
         // supervisorctl status 返回 0 且包含 RUNNING 即正常
-        if ($test_code !== 0 || strpos($test_msg, 'RUNNING') === false) {
+        if (!$test['ok'] || strpos($test_msg, 'RUNNING') === false) {
             return [
                 'ok'          => false,
                 'msg'         => 'Nginx 未正常运行，中止 reload',
                 'test_output' => $test_msg,
             ];
         }
-        // 写入触发文件，让 watcher 执行 HUP
-        $reload_output = [];
-        $reload_code   = 0;
-        exec('/usr/local/bin/nginx-reload 2>&1', $reload_output, $reload_code);
-        if ($reload_code !== 0) {
+
+        $reload = admin_run_command('/usr/local/bin/nginx-reload');
+        if (!$reload['ok']) {
             return [
                 'ok'          => false,
                 'msg'         => 'nginx reload 触发失败',
-                'test_output' => implode("\n", $reload_output),
+                'test_output' => $reload['output'],
             ];
         }
+
         return [
             'ok'          => true,
             'msg'         => 'Nginx 已成功 reload',
@@ -910,27 +1007,27 @@ function nginx_reload(): array {
 
     // 降级：使用 sudo
     $nginx = nginx_bin();
-    $test_output = [];
-    $test_code   = 0;
-    exec('sudo ' . escapeshellcmd($nginx) . ' -t 2>&1', $test_output, $test_code);
-    $test_msg = implode("\n", $test_output);
-    if ($test_code !== 0) {
+    $safe_nginx = escapeshellarg($nginx);
+
+    $test = admin_run_command('sudo ' . $safe_nginx . ' -t');
+    $test_msg = $test['output'];
+    if (!$test['ok']) {
         return [
             'ok'          => false,
             'msg'         => 'Nginx 配置语法错误，已中止 reload，请检查配置',
             'test_output' => $test_msg,
         ];
     }
-    $reload_output = [];
-    $reload_code   = 0;
-    exec('sudo ' . escapeshellcmd($nginx) . ' -s reload 2>&1', $reload_output, $reload_code);
-    if ($reload_code !== 0) {
+
+    $reload = admin_run_command('sudo ' . $safe_nginx . ' -s reload');
+    if (!$reload['ok']) {
         return [
             'ok'          => false,
             'msg'         => 'nginx reload 执行失败',
-            'test_output' => implode("\n", $reload_output),
+            'test_output' => $reload['output'],
         ];
     }
+
     return [
         'ok'          => true,
         'msg'         => 'Nginx 已成功 reload',

@@ -1,0 +1,14 @@
+{
+    "admin": {
+        "password_hash": "$2y$10$..l.bsf6SL9paPqUt6qvHuSgm7sSOxz..UjrFjXzNt6wcHnH2tNPy",
+        "role": "admin",
+        "created_at": "2026-03-25 20:07:00",
+        "updated_at": "2026-03-25 20:07:00"
+    },
+    "smokeuser": {
+        "password_hash": "$2y$10$y32Da5YLOIVGCpqzu5nsZe8RE4Fr8JsCxBF05GjZnHRVud\/0Q49ca",
+        "updated_at": "2026-03-25 20:07:02",
+        "created_at": "2026-03-25 20:07:02",
+        "role": "user"
+    }
+}

@@ -7,7 +7,7 @@
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
-if (file_exists(INSTALLED_FLAG)) {
+if (!auth_needs_setup()) {
     http_response_code(404);
     exit('404 Not Found');
 }
@@ -35,23 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = '站点名称不能为空';
 
     if (empty($errors)) {
-        // ── 自动生成 AUTH_SECRET_KEY（如果仍是默认值）──
-        $auth_file = __DIR__ . '/../shared/auth.php';
-        $auth_src  = file_get_contents($auth_file);
-        $default_key_pattern = '/define\(\s*\'AUTH_SECRET_KEY\'\s*,\s*\'CHANGE_THIS[^\']*\'(?:\s*\.\s*[^;]+)?;/m';
-        if (preg_match($default_key_pattern, $auth_src)) {
-            // 生成 64 字节的随机密钥（hex 输出为 128 字符）
-            $new_key = bin2hex(random_bytes(64));
-            $auth_src = preg_replace(
-                $default_key_pattern,
-                "define('AUTH_SECRET_KEY',   '" . $new_key . "');",
-                $auth_src
-            );
-            file_put_contents($auth_file, $auth_src, LOCK_EX);
-            // 重新加载常量（本次请求内生效）
-            // AUTH_SECRET_KEY 已通过 define() 固化，用变量传给 Token 生成
-            // 后续请求会从更新后的文件读取
-        }
+        // 首次安装时确保生成实例私有的认证密钥文件
+        auth_ensure_secret_key();
 
         // 创建必要目录并设置权限
         // data/ 主目录：750（www-data 可读写，外部不可访问）
@@ -116,9 +101,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         // 写安装锁
         auth_mark_installed();
-        // 若本次请求自动生成了新密钥，AUTH_SECRET_KEY 常量仍是旧值，
-        // 自动登录生成的 Token 会在下次请求时验证失败（新密钥不匹配）。
-        // 因此跳转到登录页，由用户使用新密钥完成登录。
         auth_write_log('SETUP', $username, get_client_ip(), 'initial_setup');
         $step = 'done';
         $nav_domain_preview = $nav_domain ?: 'nav.yourdomain.com';
