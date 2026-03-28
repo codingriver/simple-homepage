@@ -11,6 +11,8 @@ require_once __DIR__ . '/functions.php';
 
 // 验证管理员权限（未登录或非admin跳转）
 $current_admin = auth_require_admin();
+// 提前建立 Session，避免输出后再 session_start 导致 CSRF 失效
+csrf_token();
 
 // 当前页面文件名（用于导航高亮）
 $current_page = basename($_SERVER['PHP_SELF']);

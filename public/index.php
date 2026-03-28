@@ -67,14 +67,14 @@ function homepage_pending_proxy_sites(): array {
 
 $_pending_proxy = homepage_pending_proxy_sites();
 
-// 前台管理员执行 Reload 按钮需要提前建立 Session，避免输出后再 session_start 导致 CSRF 失效
-if ($is_admin && !empty($_pending_proxy)) {
+// 前台含退出/管理操作需要提前建立 Session，避免输出后再 session_start 导致 CSRF 失效
+if ($user) {
     csrf_token();
 }
 
 // 无登录、无公开分组、且无待生效提示时才跳转登录
 if (!$user && !$has_public && empty($_pending_proxy)) {
-    $r = urlencode(auth_request_scheme() . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']);
+    $r = urlencode($_SERVER['REQUEST_URI'] ?? '/');
     header('Location: login.php?redirect='.$r); exit;
 }
 

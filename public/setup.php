@@ -232,8 +232,6 @@ text-decoration:none;margin-top:8px}
   <div class="done-icon">✅</div>
   <h2>安装完成！</h2>
   <div class="ds">账户已创建，安全密钥已自动生成并保存。<br>请用你设置的密码登录。</div>
-  <div class="nginx"><?= htmlspecialchars($nginx_cfg) ?></div>
-  <div class="ht" style="margin-bottom:14px">将以上配置保存到 /etc/nginx/sites-available/nav.conf 并 reload Nginx</div>
   <a href="/login.php" class="go">前往登录 →</a>
 </div>
 <?php endif; ?>

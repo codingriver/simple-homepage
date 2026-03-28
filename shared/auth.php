@@ -57,15 +57,24 @@ function auth_default_config(): array {
 
 /**
  * 安全清洗 redirect 参数：仅允许站内相对路径
+ * 若传入绝对 URL（如 IP 直连场景），自动提取路径部分。
  */
 function auth_sanitize_redirect(string $redirect): string {
     $redirect = trim($redirect);
     if ($redirect === '') return '';
 
+    // 若是绝对 URL（http:// 或 https://），提取其中的 path+query+fragment
+    if (preg_match('/^https?:\/\//i', $redirect)) {
+        $parsed = parse_url($redirect);
+        if (!$parsed) return '';
+        $redirect = ($parsed['path'] ?? '/');
+        if (!empty($parsed['query']))    $redirect .= '?' . $parsed['query'];
+        if (!empty($parsed['fragment'])) $redirect .= '#' . $parsed['fragment'];
+    }
+
     // 必须是以 / 开头的相对路径，拒绝 //、\、绝对 URL
-    if ($redirect[0] !== '/') return '';
+    if ($redirect === '' || $redirect[0] !== '/') return '';
     if (strpos($redirect, '//') === 0 || strpos($redirect, '\\') !== false) return '';
-    if (preg_match('/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//', $redirect)) return '';
 
     return $redirect;
 }
@@ -462,9 +471,7 @@ function auth_save_user(string $username, string $password, string $role = 'admi
 function auth_require_login(): array {
     $user = auth_get_current_user();
     if (!$user) {
-        $redirect = urlencode(auth_request_scheme()
-            . '://' . auth_current_host()
-            . ($_SERVER['REQUEST_URI'] ?? '/'));
+        $redirect = urlencode($_SERVER['REQUEST_URI'] ?? '/');
         header('Location: ' . auth_current_login_url() . '?redirect=' . $redirect);
         exit;
     }
@@ -497,7 +504,8 @@ function ip_locks_load(): array {
     $now = time();
     $changed = false;
     foreach ($data as $ip => $info) {
-        if (($info['locked_until'] ?? 0) < $now && ($info['fails'] ?? 0) > 0) {
+        $locked_until = (int)($info['locked_until'] ?? 0);
+        if ($locked_until > 0 && $locked_until < $now && ($info['fails'] ?? 0) > 0) {
             // 锁定已过期，重置
             $data[$ip] = ['fails' => 0, 'locked_until' => 0, 'last_fail' => $info['last_fail'] ?? 0];
             $changed = true;
