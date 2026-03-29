@@ -3,19 +3,31 @@
 .env.local
 local/.env
 
-# 数据目录（运行时生成，不提交）
+# 数据目录（运行时生成）— shared/auth.php DATA_DIR、public/setup.php、manage_users.php
 data/
+
+# 若误在仓库根目录创建与 data 下子目录同名的目录（不应提交）
 backups/
 favicon_cache/
 logs/
+bg/
 nginx-conf/
 misplaced-data-backup/
 nav-data/
+
+# 冒烟测试：smoke/smoke-test.sh、smoke2.sh 等产生的临时目录与报告
+.smoke_tmp_*/
+.smoke*_data/
+smoke-report*.txt
 
 # 临时文件
 *.tmp
 *.zip
 .cache/
+
+# 若将来引入 PHP 工具链
+.phpunit.result.cache
+.php-cs-fixer.cache
 
 # IDE
 .vscode/
