@@ -1,6 +1,6 @@
 # Nav Portal Full Smoke Test Report
 time: 2026-03-25T11:52:16Z
-image: local/nav-portal:smoke-20260325
+image: local/simple-homepage:smoke-20260325
 
 ## Summary
 total: 48

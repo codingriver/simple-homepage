@@ -304,16 +304,16 @@ docker exec -it simple-homepage sh
 
 ```bash
 # 列出所有用户
-docker exec simple-homepage php /var/www/nav/data/manage_users.php list
+docker exec simple-homepage php /var/www/nav/manage_users.php list
 
 # 添加管理员账户
-docker exec simple-homepage php /var/www/nav/data/manage_users.php add admin 新密码
+docker exec simple-homepage php /var/www/nav/manage_users.php add admin 新密码
 
 # 修改密码
-docker exec simple-homepage php /var/www/nav/data/manage_users.php passwd admin 新密码
+docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
 
 # 完整重置（清空所有数据，重新触发安装向导）
-docker exec simple-homepage php /var/www/nav/data/manage_users.php reset
+docker exec simple-homepage php /var/www/nav/manage_users.php reset
 ```
 
 ---
@@ -457,7 +457,7 @@ docker exec simple-homepage chmod -R 755 /var/www/nav/data
 ### ❽ 完全重置，回到安装向导
 
 ```bash
-docker exec simple-homepage php /var/www/nav/data/manage_users.php reset
+docker exec simple-homepage php /var/www/nav/manage_users.php reset
 ```
 
 执行后立即访问首页，完成安装向导，否则处于未保护状态。
@@ -468,11 +468,11 @@ docker exec simple-homepage php /var/www/nav/data/manage_users.php reset
 
 ```bash
 # 方法一：修改密码
-docker exec simple-homepage php /var/www/nav/data/manage_users.php passwd admin 新密码
+docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
 
 # 方法二：重新添加账户（先删除再添加）
-docker exec simple-homepage php /var/www/nav/data/manage_users.php del admin
-docker exec simple-homepage php /var/www/nav/data/manage_users.php add admin 新密码
+docker exec simple-homepage php /var/www/nav/manage_users.php del admin
+docker exec simple-homepage php /var/www/nav/manage_users.php add admin 新密码
 ```
 
 ---

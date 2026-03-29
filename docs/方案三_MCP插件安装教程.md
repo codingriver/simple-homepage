@@ -82,7 +82,7 @@ mkdir -p ~/.cursor
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/volume3/storage/docker/nav-portal"
+        "/volume3/storage/docker/simple-homepage"
       ]
     }
   }
@@ -100,7 +100,7 @@ mkdir -p ~/.cursor
 
 在 Cursor 聊天框输入：
 ```
-用 MCP 工具列出 /volume3/storage/docker/nav-portal 目录的文件
+用 MCP 工具列出 /volume3/storage/docker/simple-homepage 目录的文件
 ```
 
 如果 AI 能直接列出文件，说明 MCP 已正常工作。
@@ -116,16 +116,16 @@ mkdir -p ~/.cursor
 **AI 可以做的事**：
 ```bash
 # 同步文件到容器（AI 自动执行）
-base64 /path/to/file | docker exec -i nav-portal sh -c 'base64 -d > /var/www/nav/file'
+base64 /path/to/file | docker exec -i simple-homepage sh -c 'base64 -d > /var/www/nav/file'
 
 # 重置数据（AI 自动执行）
-docker exec nav-portal rm -f /var/www/nav/data/.installed
+docker exec simple-homepage rm -f /var/www/nav/data/.installed
 
 # 查看错误日志（AI 自动执行）
-docker exec nav-portal cat /var/log/nginx/error.log
+docker exec simple-homepage cat /var/log/nginx/error.log
 
 # 验证 MD5（AI 自动执行）
-docker exec nav-portal md5sum /var/www/nav/public/login.php
+docker exec simple-homepage md5sum /var/www/nav/public/login.php
 ```
 
 **安装命令**：
@@ -160,7 +160,7 @@ npx -y @modelcontextprotocol/server-fetch
 
 **安装命令**：
 ```bash
-npx -y @modelcontextprotocol/server-filesystem /volume3/storage/docker/nav-portal
+npx -y @modelcontextprotocol/server-filesystem /volume3/storage/docker/simple-homepage
 ```
 
 ---
@@ -170,10 +170,10 @@ npx -y @modelcontextprotocol/server-filesystem /volume3/storage/docker/nav-porta
 在项目根目录创建 `.cursor/mcp.json`，包含项目特定变量：
 
 ```bash
-mkdir -p /volume3/storage/docker/nav-portal/.cursor
+mkdir -p /volume3/storage/docker/simple-homepage/.cursor
 ```
 
-创建 `/volume3/storage/docker/nav-portal/.cursor/mcp.json`：
+创建 `/volume3/storage/docker/simple-homepage/.cursor/mcp.json`：
 
 ```json
 {
@@ -182,8 +182,8 @@ mkdir -p /volume3/storage/docker/nav-portal/.cursor
       "command": "npx",
       "args": ["-y", "@wonderwhy-er/desktop-commander"],
       "env": {
-        "NAV_CONTAINER": "nav-portal",
-        "NAV_HOST_SRC": "/volume3/storage/docker/nav-portal/nav-portal",
+        "NAV_CONTAINER": "simple-homepage",
+        "NAV_HOST_SRC": "/volume3/storage/docker/simple-homepage/simple-homepage",
         "NAV_CONTAINER_SRC": "/var/www/nav",
         "NAV_BASE_URL": "http://192.168.2.2:58080"
       }
@@ -211,7 +211,7 @@ mkdir -p /volume3/storage/docker/nav-portal/.cursor
 创建 `.cursor/rules/nav-mcp.md`：
 
 ```bash
-mkdir -p /volume3/storage/docker/nav-portal/.cursor/rules
+mkdir -p /volume3/storage/docker/simple-homepage/.cursor/rules
 ```
 
 内容：
@@ -220,8 +220,8 @@ mkdir -p /volume3/storage/docker/nav-portal/.cursor/rules
 # Nav Portal MCP 工具使用规范
 
 ## 环境变量
-- 容器名：nav-portal
-- 宿主机源码：/volume3/storage/docker/nav-portal/nav-portal
+- 容器名：simple-homepage
+- 宿主机源码：/volume3/storage/docker/simple-homepage/simple-homepage
 - 容器内路径：/var/www/nav
 - 访问地址：http://192.168.2.2:58080
 - 测试账号：admin / Admin@2026!
@@ -229,10 +229,10 @@ mkdir -p /volume3/storage/docker/nav-portal/.cursor/rules
 ## 文件同步（使用 nav-shell MCP）
 修改 PHP 文件后，立即执行：
 ```bash
-base64 {宿主机文件路径} | docker exec -i nav-portal sh -c 'base64 -d > {容器内路径}'
+base64 {宿主机文件路径} | docker exec -i simple-homepage sh -c 'base64 -d > {容器内路径}'
 # 验证
 H1=$(md5sum {宿主机路径} | cut -d' ' -f1)
-H2=$(docker exec nav-portal md5sum {容器内路径} | cut -d' ' -f1)
+H2=$(docker exec simple-homepage md5sum {容器内路径} | cut -d' ' -f1)
 [ "$H1" = "$H2" ] && echo "✅ 同步成功" || echo "❌ 同步失败"
 ```
 
@@ -244,7 +244,7 @@ H2=$(docker exec nav-portal md5sum {容器内路径} | cut -d' ' -f1)
 
 ## 数据重置（使用 nav-shell MCP）
 ```bash
-docker exec nav-portal rm -f \
+docker exec simple-homepage rm -f \
   /var/www/nav/data/.installed \
   /var/www/nav/data/users.json \
   /var/www/nav/data/config.json \
@@ -253,8 +253,8 @@ docker exec nav-portal rm -f \
 
 ## 错误排查顺序
 1. 检查文件是否同步（MD5 对比）
-2. 检查 PHP 语法：`docker exec nav-portal php -l /var/www/nav/{文件}`
-3. 检查 nginx 日志：`docker exec nav-portal cat /var/log/nginx/error.log`
+2. 检查 PHP 语法：`docker exec simple-homepage php -l /var/www/nav/{文件}`
+3. 检查 nginx 日志：`docker exec simple-homepage cat /var/log/nginx/error.log`
 4. 用 fetch MCP 直接请求接口看响应
 5. 用 curl -v 查看完整请求响应头
 
@@ -336,4 +336,4 @@ npm install -g @modelcontextprotocol/server-filesystem
 | `PHP开发注意事项.md` | PHP 开发规范，11个主题 |
 | `自动化测试与修复方案.md` | 三方案对比与 Makefile |
 | `方案三_MCP插件安装教程.md` | 本文档 |
-| `/volume3/storage/docker/nav-portal/http_test.py` | 22个测试用例的 HTTP 测试脚本 |
+| `/volume3/storage/docker/simple-homepage/http_test.py` | 22个测试用例的 HTTP 测试脚本 |

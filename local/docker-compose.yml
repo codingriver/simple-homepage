@@ -26,7 +26,7 @@ services:
         NO_PROXY: "localhost,127.0.0.1,::1"
         no_proxy: "localhost,127.0.0.1,::1"
     image: codingriver/simple-homepage:latest
-    container_name: ${CONTAINER_NAME:-nav-portal}
+    container_name: ${CONTAINER_NAME:-simple-homepage}
     restart: unless-stopped
 
     ports:
@@ -38,7 +38,7 @@ services:
 
     volumes:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──
-      - ${DATA_DIR:-../nav-data}:/var/www/nav/data
+      - ${DATA_DIR:-../data}:/var/www/nav/data
 
       # ── 可选：挂载自定义 Nginx 反代配置 ──
       # - ../nav-proxy.conf:/etc/nginx/conf.d/nav-proxy.conf
@@ -52,8 +52,8 @@ services:
       disable: true
 
     labels:
-      - "com.nav-portal.version=latest"
-      - "com.nav-portal.description=Nav Portal Navigation Site"
+      - "com.simple-homepage.version=latest"
+      - "com.simple-homepage.description=Simple Homepage navigation site"
 
 # ============================================================
 # 常用命令

@@ -1,6 +1,7 @@
 <?php
 /**
- * 用户管理命令行工具 data/manage_users.php
+ * 用户管理命令行工具（仓库根目录：manage_users.php）
+ * Docker 内路径：/var/www/nav/manage_users.php（与 COPY 位置一致，勿写成 data/ 下）
  * 只能通过 CLI 运行，Web 访问返回 403
  *
  * 用法：
@@ -18,7 +19,14 @@ if (php_sapi_name() !== 'cli') {
     die('403 Forbidden: 此脚本只允许命令行运行。');
 }
 
-require_once __DIR__ . '/../shared/auth.php';
+if (is_file(__DIR__ . '/shared/auth.php')) {
+    require_once __DIR__ . '/shared/auth.php';
+} elseif (is_file(__DIR__ . '/../shared/auth.php')) {
+    require_once __DIR__ . '/../shared/auth.php';
+} else {
+    fwrite(STDERR, "找不到 shared/auth.php（请将本脚本放在项目根目录或 data/ 下运行）。\n");
+    exit(1);
+}
 
 $args = array_slice($argv, 1);
 $cmd  = $args[0] ?? 'help';

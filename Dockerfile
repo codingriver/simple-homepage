@@ -20,8 +20,8 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=${NO_PROXY} \
     no_proxy=${no_proxy}
 
-LABEL maintainer="nav-portal" \
-      description="Nav Portal - PHP Navigation Site" \
+LABEL maintainer="simple-homepage" \
+      description="Simple Homepage - PHP navigation site" \
       version="latest"
 
 # ── 切换 Alpine 软件源（构建环境访问官方源不稳定时使用国内镜像）──

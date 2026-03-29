@@ -1,7 +1,7 @@
 # AI 开发指令规范
 
 > 使用此规范，让 AI 完成「需求→开发→测试→验收」全自动闭环。
-> 适用于已配置 nav-portal MCP Server 的环境。
+> 适用于已配置 simple-homepage MCP Server 的环境。
 
 ---
 
@@ -164,9 +164,9 @@ MCP run_test 运行测试
 # 开发工作流规范
 
 每次修改代码后必须：
-1. nav-portal MCP sync_file 同步修改的文件（含 MD5 验证）
-2. nav-portal MCP php_lint 检查语法
-3. nav-portal MCP run_test 运行测试
+1. simple-homepage MCP sync_file 同步修改的文件（含 MD5 验证）
+2. simple-homepage MCP php_lint 检查语法
+3. simple-homepage MCP run_test 运行测试
 4. 测试失败则继续修复，不要停下来问用户
 5. 全部通过后才汇报结果
 
@@ -209,10 +209,10 @@ MCP run_test 运行测试
 
 ## 关联文件
 
-- MCP Server: /volume3/storage/docker/nav-portal/mcp-server/server.js
-- 测试脚本: /volume3/storage/docker/nav-portal/http_test.py
-- PHP规范: nav-portal/PHP开发注意事项.md
-- 自动化方案: nav-portal/自动化测试与修复方案.md
+- MCP Server: /volume3/storage/docker/simple-homepage/mcp-server/server.js
+- 测试脚本: /volume3/storage/docker/simple-homepage/http_test.py
+- PHP规范: simple-homepage/PHP开发注意事项.md
+- 自动化方案: simple-homepage/自动化测试与修复方案.md
 
 
 ---
@@ -266,7 +266,7 @@ MCP run_test 运行测试
 
 ## 关联文件
 
-MCP Server: /volume3/storage/docker/nav-portal/mcp-server/server.js
-测试脚本: /volume3/storage/docker/nav-portal/http_test.py
-PHP规范: nav-portal/PHP开发注意事项.md
-自动化方案: nav-portal/自动化测试与修复方案.md
+MCP Server: /volume3/storage/docker/simple-homepage/mcp-server/server.js
+测试脚本: /volume3/storage/docker/simple-homepage/http_test.py
+PHP规范: simple-homepage/PHP开发注意事项.md
+自动化方案: simple-homepage/自动化测试与修复方案.md

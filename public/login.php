@@ -90,9 +90,9 @@ $site_name   = $cfg['site_name'] ?? '导航中心';
   <?php if ($users_empty): ?>
   <div class="rescue">
     ⚠️ 账户数据异常，无法登录。请通过 SSH 执行以下命令恢复：
-    <code>php /var/www/nav/data/manage_users.php add admin 新密码</code>
+    <code>php /var/www/nav/manage_users.php add admin 新密码</code>
     或重新触发安装向导：
-    <code>php /var/www/nav/data/manage_users.php setup</code>
+    <code>php /var/www/nav/manage_users.php setup</code>
   </div>
   <?php endif; ?>
 </div>

@@ -13,7 +13,6 @@ logs/
 bg/
 nginx-conf/
 misplaced-data-backup/
-nav-data/
 
 # 冒烟测试：smoke/smoke-test.sh、smoke2.sh 等产生的临时目录与报告
 .smoke_tmp_*/
