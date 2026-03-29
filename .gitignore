@@ -5,6 +5,11 @@ local/.env
 
 # 数据目录（运行时生成）— shared/auth.php DATA_DIR、public/setup.php、manage_users.php
 data/
+# 旧版目录名（迁移到 data/ 前本地可能仍存在）
+nav-data/
+
+# 手动冒烟/调试时复制的 data 目录（含密钥与账户，切勿提交）
+.smoke_manual*/
 
 # 若误在仓库根目录创建与 data 下子目录同名的目录（不应提交）
 backups/
