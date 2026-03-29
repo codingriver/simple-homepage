@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nav Portal Full Smoke Test
+# Simple Homepage 全量冒烟测试
 # 所有 HTTP 请求均通过 docker exec 在容器内执行，避免宿主机端口映射问题
 set -ue
 
@@ -8,14 +8,14 @@ echo "[smoke] IMAGE=${2:-local/smoke:test}"
 
 REPORT_PATH="${1:-smoke-report.txt}"
 IMAGE_TAG="${2:-local/smoke:test}"
-CONTAINER_NAME="nav-smoke-test"
+CONTAINER_NAME="simple-homepage-smoke-test"
 HOST_PORT="58081"
 BASE="http://127.0.0.1:58080"   # 容器内访问地址
 CJ="/tmp/smoke_cj.txt"           # 容器内 cookie jar
 
 # 宿主机临时目录（用于挂载数据卷和导出文件）
 SMOKE_TMPDIR="$(pwd)/.smoke_tmp_$$"
-DATA_DIR="${SMOKE_TMPDIR}/nav_data"
+DATA_DIR="${SMOKE_TMPDIR}/data"
 EXPORT_FILE_HOST="${SMOKE_TMPDIR}/export.json"
 EXPORT_FILE_INNER="/tmp/smoke_export.json"  # 容器内路径
 # 单页 GET 总耗时上限（秒，curl time_total）；超出则 load_* 用例失败，便于发现慢页面
@@ -28,7 +28,7 @@ docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 mkdir -p "${DATA_DIR}/logs" "${DATA_DIR}/favicon_cache" "${DATA_DIR}/bg" "${DATA_DIR}/backups"
 chmod -R 777 "${DATA_DIR}"
 
-printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\nsmoke_load_max_sec: %s\n' \
+printf '# Simple Homepage Full Smoke Test Report\ntime: %s\nimage: %s\nsmoke_load_max_sec: %s\n' \
   "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$IMAGE_TAG" "$SMOKE_LOAD_MAX_SEC" > "$REPORT_PATH"
 
 cleanup() {
