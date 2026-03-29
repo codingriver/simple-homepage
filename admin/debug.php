@@ -15,7 +15,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: text/plain; charset=utf-8');
             echo '（未登录或无权限）'; exit;
         }
-        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm'])
+        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm','request_timing'], true)
                  ? $_GET['type'] : 'nginx_access';
         $lines = min(500, max(10, (int)($_GET['lines'] ?? 100)));
         header('Content-Type: text/plain; charset=utf-8');
@@ -127,6 +127,7 @@ $cfg = load_config();
     <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_error">Nginx 错误日志</button>
     <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_main">Nginx 主错误日志</button>
     <button class="btn btn-secondary btn-sm log-tab" data-log="php_fpm">PHP-FPM 日志</button>
+    <button class="btn btn-secondary btn-sm log-tab" data-log="request_timing">请求耗时 (recv/done)</button>
     <button class="btn btn-secondary btn-sm" onclick="refreshLog()">🔄 刷新</button>
     <button class="btn btn-sm" onclick="clearAllLogs()" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:#ff6b6b">🗑 清空所有日志</button>
     <select id="logLines" onchange="refreshLog()" style="background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:5px 10px;color:var(--tx);font-size:12px">

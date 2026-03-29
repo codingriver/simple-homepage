@@ -26,6 +26,9 @@ define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
 define('AUTH_LOG_MAX_LINES', 10);
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 
+// 请求收到/响应结束耗时日志（data/logs/request_timing.log），关闭：环境变量 NAV_REQUEST_TIMING=0
+require_once __DIR__ . '/request_timing.php';
+
 /**
  * 系统配置默认值（单一来源）
  */
@@ -788,7 +791,14 @@ function is_allowed_proxy_target(string $url): bool {
 
 if (!function_exists('csrf_token')) {
     function csrf_token(): string {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+        // 后台 header 在输出 HTML 前会 session_write_close()，之后不能再 session_start；
+        // 同一请求内后续 csrf_field() 使用此处缓存的 token（见 admin/shared/header.php）
+        if (isset($GLOBALS['_nav_csrf_token']) && is_string($GLOBALS['_nav_csrf_token']) && $GLOBALS['_nav_csrf_token'] !== '') {
+            return $GLOBALS['_nav_csrf_token'];
+        }
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
         if (empty($_SESSION['csrf_token'])) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }

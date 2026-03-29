@@ -296,15 +296,16 @@ function debug_set_display_errors(bool $on): array {
 
 /**
  * 读取日志文件内容（倒序，最新在前）
- * @param string $type  nginx_access | nginx_error | php_fpm
+ * @param string $type  nginx_access | nginx_error | nginx_main | php_fpm | request_timing
  * @param int    $lines 读取行数
  */
 function debug_read_log(string $type, int $lines = 100): string {
     $map = [
-        'nginx_access' => '/var/log/nginx/nav.access.log',
-        'nginx_error'  => '/var/log/nginx/nav.error.log',
-        'nginx_main'   => '/var/log/nginx/error.log',
-        'php_fpm'      => '/var/log/php-fpm/error.log',
+        'nginx_access'   => '/var/log/nginx/nav.access.log',
+        'nginx_error'    => '/var/log/nginx/nav.error.log',
+        'nginx_main'     => '/var/log/nginx/error.log',
+        'php_fpm'        => '/var/log/php-fpm/error.log',
+        'request_timing' => DATA_DIR . '/logs/request_timing.log',
     ];
     $path = $map[$type] ?? '';
     if (!$path)              return '（未知日志类型）';

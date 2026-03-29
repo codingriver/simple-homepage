@@ -17,6 +17,9 @@ csrf_token();
 // 读取 Flash（须在 session_write_close 之前：需写入以清除 flash）
 $flash = flash_get();
 
+// 缓存 CSRF，关闭 Session 后表单里的 csrf_field() 仍可用（避免已输出 HTML 再 session_start）
+$GLOBALS['_nav_csrf_token'] = $_SESSION['csrf_token'] ?? csrf_token();
+
 // 释放 Session 锁，避免同浏览器多标签刷新时互相阻塞
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();

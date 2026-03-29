@@ -47,10 +47,11 @@ docker run -d \
 
 ### 方式二：docker compose（推荐，便于管理）
 
-1. 新建一个目录，进入该目录：
+1. 新建一个目录并进入，同时创建 **`data`** 目录（用于挂载持久化数据，与下方 `volumes` 中的 `./data` 对应）：
 
 ```bash
 mkdir simple-homepage && cd simple-homepage
+mkdir -p data
 ```
 
 2. 创建 `docker-compose.yml` 文件（内容如下）：
@@ -76,11 +77,19 @@ services:
       start_period: 20s
 ```
 
-3. 启动：
+3. 启动（**Docker Compose V2** 与 **V1** 任选其一，能执行哪个用哪个）：
 
 ```bash
 docker compose up -d
 ```
+
+若提示 `docker compose` 不存在或报错，可改用旧式独立命令：
+
+```bash
+docker-compose up -d
+```
+
+> 也可一行尝试：`docker compose up -d || docker-compose up -d`（先执行前者，失败则执行后者）。
 
 启动后访问：`http://你的服务器IP:58080`
 
@@ -510,8 +519,13 @@ docker run -d \
 **docker compose 方式升级：**
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d
+```
+
+若本机没有 `docker compose` 子命令，请改用：
+
+```bash
+docker-compose pull && docker-compose up -d
 ```
 
 > **升级前建议**：先在后台手动备份一次，以防万一。
