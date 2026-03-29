@@ -85,7 +85,54 @@ $page_title = '调试工具';
 require_once __DIR__ . '/shared/header.php';
 
 $cfg = load_config();
+$build_info = nav_read_build_info();
 ?>
+
+<!-- 镜像构建元数据（CI 注入，便于与 GitHub 对照） -->
+<div class="card" id="build-meta">
+  <div class="card-title">📦 镜像构建信息</div>
+  <?php if ($build_info && ($build_info['git_commit'] ?? '') !== '' && ($build_info['git_commit'] ?? '') !== 'unknown'): ?>
+  <p style="color:var(--tm);font-size:13px;margin:0 0 12px">以下为构建镜像时写入的数据。可与 GitHub 上 <code>main</code> 最新提交对比，判断是否已拉取最新镜像。</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;font-family:var(--mono,monospace)">
+    <tr><td style="padding:6px 8px;color:var(--tm);width:140px">git commit</td><td style="padding:6px 8px;word-break:break-all"><?= htmlspecialchars($build_info['git_commit']) ?></td></tr>
+    <tr><td style="padding:6px 8px;color:var(--tm)">git ref</td><td style="padding:6px 8px;word-break:break-all"><?= htmlspecialchars($build_info['git_ref']) ?></td></tr>
+    <tr><td style="padding:6px 8px;color:var(--tm)">build_date (UTC)</td><td style="padding:6px 8px"><?= htmlspecialchars($build_info['build_date']) ?></td></tr>
+    <tr><td style="padding:6px 8px;color:var(--tm)">source</td><td style="padding:6px 8px;word-break:break-all"><?= htmlspecialchars($build_info['source']) ?></td></tr>
+  </table>
+  <p style="margin:12px 0 0;font-size:13px">
+    <a href="<?= htmlspecialchars(rtrim($build_info['source'], '/')) ?>/commit/<?= htmlspecialchars($build_info['git_commit']) ?>" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">在 GitHub 打开该提交</a>
+    <span id="gh-compare-hint" style="margin-left:10px;color:var(--tm)"></span>
+  </p>
+  <script type="application/json" id="nav-build-info-json"><?= json_encode($build_info, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+  <script>
+  (function(){
+    var el = document.getElementById('gh-compare-hint');
+    var raw = document.getElementById('nav-build-info-json');
+    if (!el || !raw) return;
+    var bi;
+    try { bi = JSON.parse(raw.textContent || '{}'); } catch (e) { return; }
+    if (!bi.git_commit || bi.git_commit === 'unknown') { el.textContent = ''; return; }
+    fetch('https://api.github.com/repos/codingriver/simple-homepage/commits/main', { headers: { 'Accept': 'application/vnd.github+json' } })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j || !j.sha) { el.textContent = '（无法获取 GitHub main 最新提交）'; return; }
+        var remote = j.sha;
+        var local = String(bi.git_commit);
+        if (remote.indexOf(local) === 0 || local.indexOf(remote) === 0) {
+          el.innerHTML = '<span style="color:var(--green)">✓ 与 GitHub <code>main</code> 最新提交一致</span>';
+        } else {
+          el.innerHTML = '<span style="color:var(--yellow)">⚠ 与当前 <code>main</code> 不一致：远程 <code>' + remote.substring(0, 7) + '</code>，镜像 <code>' + local.substring(0, 7) + '</code> — 请考虑 <code>docker pull</code> 重建</span>';
+        }
+      })
+      .catch(function(){ el.textContent = '（无法连接 GitHub API 对比，请手动核对）'; });
+  })();
+  </script>
+  <?php elseif ($build_info): ?>
+  <p style="color:var(--tm);font-size:13px">已存在构建信息文件，但 <code>git_commit</code> 为 <code>unknown</code>（多为本地构建未传参数）。命令行可查看：<code>docker inspect &lt;容器名&gt; --format '{{json .Config.Labels}}'</code></p>
+  <?php else: ?>
+  <p style="color:var(--tm);font-size:13px">未找到 <code>/var/www/nav/.build-info.json</code>。使用 GitHub Actions 构建的镜像会包含该文件；本地 <code>docker build</code> 可传入 <code>--build-arg GIT_COMMIT=...</code>。</p>
+  <?php endif; ?>
+</div>
 
 <!-- 调试工具 -->
 <div class="card" id="debug">

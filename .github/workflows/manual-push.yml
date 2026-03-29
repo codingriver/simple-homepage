@@ -59,6 +59,10 @@ jobs:
           echo "[push] Will push tags: ${TAGS}"
           echo "[push] Platforms: ${{ steps.platforms.outputs.list }}"
 
+      - name: Build timestamp (UTC ISO)
+        id: ts
+        run: echo "iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -67,6 +71,11 @@ jobs:
           push: true
           platforms: ${{ steps.platforms.outputs.list }}
           tags: ${{ steps.tags.outputs.list }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            GIT_REF=${{ github.ref }}
+            BUILD_DATE=${{ steps.ts.outputs.iso }}
+            GIT_REPO_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Update Docker Hub Description
         uses: peter-evans/dockerhub-description@v4

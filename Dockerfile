@@ -20,10 +20,6 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=${NO_PROXY} \
     no_proxy=${no_proxy}
 
-LABEL maintainer="simple-homepage" \
-      description="Simple Homepage - PHP navigation site" \
-      version="latest"
-
 # ── 切换 Alpine 软件源（构建环境访问官方源不稳定时使用国内镜像）──
 RUN printf '%s\n%s\n' \
     'https://mirrors.aliyun.com/alpine/v3.23/main' \
@@ -79,6 +75,25 @@ COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/entrypoint.sh    /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
+
+# ── 构建元数据（GitHub Actions 传入；本地 docker build 未传则为 unknown）──
+ARG GIT_COMMIT=unknown
+ARG GIT_REF=unknown
+ARG BUILD_DATE=unknown
+ARG GIT_REPO_URL=https://github.com/codingriver/simple-homepage
+
+LABEL org.opencontainers.image.title="simple-homepage" \
+      org.opencontainers.image.description="Simple Homepage - PHP navigation site" \
+      org.opencontainers.image.version="latest" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="${GIT_REPO_URL}" \
+      org.opencontainers.image.url="${GIT_REPO_URL}" \
+      maintainer="simple-homepage"
+
+# 供后台调试页读取；路径在 public 外，避免命中 nginx 对 .json 的 deny
+RUN echo "{\"git_commit\":\"${GIT_COMMIT}\",\"git_ref\":\"${GIT_REF}\",\"build_date\":\"${BUILD_DATE}\",\"source\":\"${GIT_REPO_URL}\"}" > /var/www/nav/.build-info.json \
+    && chown navwww:navwww /var/www/nav/.build-info.json
 
 # ── 创建必要目录结构 ──
 RUN mkdir -p \

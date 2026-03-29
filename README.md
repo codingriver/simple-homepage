@@ -548,6 +548,17 @@ bash local/docker-build.sh
 
 访问：`http://localhost:58080`
 
+### 镜像与 Git 提交对照
+
+由 **GitHub Actions** 构建并推送的镜像会注入构建元数据：
+
+- **OCI 标签**：`org.opencontainers.image.revision`、`org.opencontainers.image.created` 等，可在宿主机执行  
+  `docker inspect <容器名> --format '{{json .Config.Labels}}'` 查看。
+- **容器内文件**：`/var/www/nav/.build-info.json`（含 `git_commit`、`build_date` 等）。
+- **后台界面**：登录管理员后打开 **调试工具**，页面顶部会展示上述信息，并在浏览器中请求 GitHub API，与 **`main` 分支最新提交** 对比，便于判断当前运行镜像是否为「最新」。
+
+本地仅用 `docker build` 且未传 `GIT_COMMIT` 等 build-arg 时，多为 `unknown`，属正常现象。
+
 ### 标签策略
 
 - 日常提交推送到 `latest`

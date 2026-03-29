@@ -256,6 +256,32 @@ function get_stats(): array {
 // ── 调试设置 ──
 
 /**
+ * 读取 Docker 构建时写入的元数据（项目根 /.build-info.json），未注入则为 null
+ *
+ * @return array{git_commit:string,git_ref:string,build_date:string,source:string}|null
+ */
+function nav_read_build_info(): ?array {
+    $path = dirname(__DIR__, 2) . '/.build-info.json';
+    if (!is_readable($path)) {
+        return null;
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false || $raw === '') {
+        return null;
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        return null;
+    }
+    return [
+        'git_commit' => (string)($data['git_commit'] ?? ''),
+        'git_ref'    => (string)($data['git_ref'] ?? ''),
+        'build_date' => (string)($data['build_date'] ?? ''),
+        'source'     => (string)($data['source'] ?? ''),
+    ];
+}
+
+/**
  * 读取 PHP display_errors 运行时 ini 文件状态
  */
 function debug_get_display_errors(): bool {

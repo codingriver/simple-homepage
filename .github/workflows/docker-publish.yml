@@ -65,6 +65,10 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Build timestamp (UTC ISO)
+        id: ts
+        run: echo "iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -83,6 +87,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            GIT_REF=${{ github.ref }}
+            BUILD_DATE=${{ steps.ts.outputs.iso }}
+            GIT_REPO_URL=${{ github.server_url }}/${{ github.repository }}
 
       - name: Docker Hub Description
         uses: peter-evans/dockerhub-description@v4

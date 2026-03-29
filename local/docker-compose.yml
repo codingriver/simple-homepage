@@ -25,6 +25,11 @@ services:
         https_proxy: ${BUILD_PROXY_URL:-}
         NO_PROXY: "localhost,127.0.0.1,::1"
         no_proxy: "localhost,127.0.0.1,::1"
+        # 可选：与 GitHub Actions 一致注入，便于镜像内显示构建 commit（默认 unknown）
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_REF: ${GIT_REF:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        GIT_REPO_URL: ${GIT_REPO_URL:-https://github.com/codingriver/simple-homepage}
     image: codingriver/simple-homepage:latest
     container_name: ${CONTAINER_NAME:-simple-homepage}
     restart: unless-stopped
