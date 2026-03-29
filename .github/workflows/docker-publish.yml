@@ -29,8 +29,8 @@ jobs:
   #         tags: local/smoke:test
   #     - name: Run smoke test
   #       run: |
-  #         chmod +x .github/scripts/smoke-test.sh
-  #         ./.github/scripts/smoke-test.sh smoke-report.txt local/smoke:test
+  #         chmod +x smoke/smoke-test.sh
+  #         ./smoke/smoke-test.sh smoke-report.txt local/smoke:test
   #     - name: Publish smoke summary
   #       if: always()
   #       run: |

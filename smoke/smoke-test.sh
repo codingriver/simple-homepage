@@ -18,6 +18,8 @@ SMOKE_TMPDIR="$(pwd)/.smoke_tmp_$$"
 DATA_DIR="${SMOKE_TMPDIR}/nav_data"
 EXPORT_FILE_HOST="${SMOKE_TMPDIR}/export.json"
 EXPORT_FILE_INNER="/tmp/smoke_export.json"  # 容器内路径
+# 单页 GET 总耗时上限（秒，curl time_total）；超出则 load_* 用例失败，便于发现慢页面
+SMOKE_LOAD_MAX_SEC="${SMOKE_LOAD_MAX_SEC:-3.0}"
 
 PASS=0; FAIL=0; SKIP=0
 DETAILS=""
@@ -26,8 +28,8 @@ docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 mkdir -p "${DATA_DIR}/logs" "${DATA_DIR}/favicon_cache" "${DATA_DIR}/bg" "${DATA_DIR}/backups"
 chmod -R 777 "${DATA_DIR}"
 
-printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\n' \
-  "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$IMAGE_TAG" > "$REPORT_PATH"
+printf '# Nav Portal Full Smoke Test Report\ntime: %s\nimage: %s\nsmoke_load_max_sec: %s\n' \
+  "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$IMAGE_TAG" "$SMOKE_LOAD_MAX_SEC" > "$REPORT_PATH"
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
@@ -101,6 +103,35 @@ assert_body() {
 assert_body_not() {
   local b; b=$(hbody "$2")
   echo "$b" | grep -qF "$3" && log_case "$1" FAIL "'$3' should be absent" || log_case "$1" PASS
+}
+
+# 记录页面 GET 总耗时（curl %{time_total}，含 TTFB+下载）；超过 SMOKE_LOAD_MAX_SEC 则失败
+# LOAD_TIMINGS_FILE 在 [4b/11] 中赋值后再调用 record_load_time*
+record_load_time() {
+  local name="$1" url="$2"
+  local t
+  t=$(docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" \
+    -o /dev/null -w '%{time_total}' --max-time 30 "$url" 2>/dev/null || echo "999")
+  printf '%s\t%s\t%s\n' "$name" "$url" "$t" >> "$LOAD_TIMINGS_FILE"
+  if awk -v t="$t" -v m="$SMOKE_LOAD_MAX_SEC" 'BEGIN{exit (t+0 > m+0 || t+0 >= 900) ? 0 : 1}'; then
+    log_case "load_${name}" FAIL "${t}s > max ${SMOKE_LOAD_MAX_SEC}s"
+  else
+    log_case "load_${name}" PASS
+  fi
+}
+
+record_load_time_ajax() {
+  local name="$1" url="$2"
+  local t
+  t=$(docker exec "$CONTAINER_NAME" curl -s -b "$CJ" -c "$CJ" \
+    -H 'X-Requested-With: XMLHttpRequest' \
+    -o /dev/null -w '%{time_total}' --max-time 30 "$url" 2>/dev/null || echo "999")
+  printf '%s\t%s\t%s\n' "$name" "(ajax) $url" "$t" >> "$LOAD_TIMINGS_FILE"
+  if awk -v t="$t" -v m="$SMOKE_LOAD_MAX_SEC" 'BEGIN{exit (t+0 > m+0 || t+0 >= 900) ? 0 : 1}'; then
+    log_case "load_${name}" FAIL "${t}s > max ${SMOKE_LOAD_MAX_SEC}s"
+  else
+    log_case "load_${name}" PASS
+  fi
 }
 
 # 容器内 POST（application/x-www-form-urlencoded）
@@ -244,6 +275,25 @@ assert_body "admin_index_stats"   "${BASE}/admin/index.php"    "站点数量"
 assert_body "admin_settings_form" "${BASE}/admin/settings.php" "站点名称"
 assert_body "admin_backups_btn"   "${BASE}/admin/backups.php"  "立即备份"
 assert_body "admin_users_add"     "${BASE}/admin/users.php"    "添加用户"
+
+echo ""; echo "[4b/11] Page load timings (curl time_total, max ${SMOKE_LOAD_MAX_SEC}s)..."
+LOAD_TIMINGS_FILE="${SMOKE_TMPDIR}/load_timings.tsv"
+: > "$LOAD_TIMINGS_FILE"
+record_load_time "public_index" "${BASE}/index.php"
+record_load_time "public_login" "${BASE}/login.php"
+record_load_time "admin_index" "${BASE}/admin/index.php"
+record_load_time "admin_groups" "${BASE}/admin/groups.php"
+record_load_time "admin_sites" "${BASE}/admin/sites.php"
+record_load_time "admin_users" "${BASE}/admin/users.php"
+record_load_time "admin_backups" "${BASE}/admin/backups.php"
+record_load_time "admin_settings" "${BASE}/admin/settings.php"
+record_load_time "admin_debug" "${BASE}/admin/debug.php"
+record_load_time_ajax "admin_login_logs_json" "${BASE}/admin/login_logs.php"
+record_load_time_ajax "admin_settings_ajax_nginx" "${BASE}/admin/settings_ajax.php?action=nginx_sudo"
+record_load_time "admin_health_status" "${BASE}/admin/health_check.php?ajax=status"
+
+echo "[smoke] page load timings (slowest first, max ${SMOKE_LOAD_MAX_SEC}s):"
+sort -t $'\t' -k3 -nr "$LOAD_TIMINGS_FILE" | while IFS=$'\t' read -r _n _u _t; do echo "  ${_t}s  ${_n}"; done
 
 # ------- 5. Group CRUD -------
 echo ""; echo "[5/11] Group CRUD..."
@@ -672,6 +722,15 @@ HSTAT=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/
 
 # ------- Final report -------
 TOTAL=$((PASS+FAIL+SKIP))
+if [ -n "${LOAD_TIMINGS_FILE:-}" ] && [ -f "$LOAD_TIMINGS_FILE" ] && [ -s "$LOAD_TIMINGS_FILE" ]; then
+  printf '\n## Page load timings (seconds, sorted slowest first)\n' >> "$REPORT_PATH"
+  printf 'name\turl\ttime_total\n' >> "$REPORT_PATH"
+  sort -t $'\t' -k3 -nr "$LOAD_TIMINGS_FILE" >> "$REPORT_PATH" || true
+  MAX_LINE=$(sort -t $'\t' -k3 -nr "$LOAD_TIMINGS_FILE" | head -1 || true)
+  if [ -n "$MAX_LINE" ]; then
+    printf '\n## Page load slowest: %s\n' "$MAX_LINE" >> "$REPORT_PATH"
+  fi
+fi
 printf '\n## Summary\ntotal: %d\npass:  %d\nfail:  %d\nskip:  %d\n' "$TOTAL" "$PASS" "$FAIL" "$SKIP" >> "$REPORT_PATH"
 printf '\n## Results\n' >> "$REPORT_PATH"
 printf '%b' "$DETAILS" >> "$REPORT_PATH"
