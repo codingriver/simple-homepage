@@ -1,10 +1,9 @@
 /**
  * 后台管理统一样式 admin.css
  * 主题：Obsidian Terminal — 极客风深色，精准克制
- * 字体：JetBrains Mono (code) + Outfit (UI)
+ * 字体：仅用系统栈（PingFang SC / Microsoft YaHei / Consolas），不请求外网。
+ * 曾用 Google Fonts @import，在国内/无代理环境会阻塞整份 CSS 解析，出现黑屏很久才出布局。
  */
-
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ── CSS 变量 ── */
 :root {
@@ -31,8 +30,8 @@
   --r: 8px;
   --r2: 12px;
   --sidebar: 228px;
-  --fn:   'Outfit', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'JetBrains Mono', 'Consolas', monospace;
+  --fn:   'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'Consolas', 'JetBrains Mono', monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

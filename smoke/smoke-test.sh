@@ -716,9 +716,14 @@ fi
 
 # ------- 13. Health check -------
 echo ""; echo "[13/13] Docker health check..."
-sleep 35
-HSTAT=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo unknown)
-[ "$HSTAT" = "healthy" ] && log_case "docker_healthcheck" PASS || log_case "docker_healthcheck" FAIL "status=$HSTAT"
+HSTAT=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}disabled{{end}}' "$CONTAINER_NAME" 2>/dev/null || echo unknown)
+if [ "$HSTAT" = "disabled" ]; then
+  log_case "docker_healthcheck" SKIP "healthcheck disabled"
+else
+  sleep 35
+  HSTAT=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo unknown)
+  [ "$HSTAT" = "healthy" ] && log_case "docker_healthcheck" PASS || log_case "docker_healthcheck" FAIL "status=$HSTAT"
+fi
 
 # ------- Final report -------
 TOTAL=$((PASS+FAIL+SKIP))

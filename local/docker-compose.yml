@@ -47,12 +47,9 @@ services:
       # - ../logs/nginx:/var/log/nginx
       # - ../logs/php-fpm:/var/log/php-fpm
 
+    # 关闭健康检查（不周期性请求 /login.php，避免写 request_timing 等）
     healthcheck:
-      test: ["CMD-SHELL", "test -S /run/php-fpm.sock && curl -fsS http://127.0.0.1:$${NAV_PORT:-58080}/login.php >/dev/null || exit 1"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      disable: true
 
     labels:
       - "com.nav-portal.version=latest"
