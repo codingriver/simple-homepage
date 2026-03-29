@@ -13,10 +13,22 @@ define('MAX_BACKUPS',  20); // 最多保留备份数
 
 // ── 站点数据 ──
 
-/** 读取站点配置 */
+/** 读取站点配置（同一请求内缓存；文件变更后按 mtime 自动失效） */
 function load_sites(): array {
-    if (!file_exists(SITES_FILE)) return ['groups' => []];
-    return json_decode(file_get_contents(SITES_FILE), true) ?? ['groups' => []];
+    static $cache = null;
+    static $cache_mtime = null;
+    $mtime = file_exists(SITES_FILE) ? filemtime(SITES_FILE) : 0;
+    if ($cache !== null && $mtime === $cache_mtime) {
+        return $cache;
+    }
+    if (!file_exists(SITES_FILE)) {
+        $cache = ['groups' => []];
+        $cache_mtime = 0;
+        return $cache;
+    }
+    $cache = json_decode(file_get_contents(SITES_FILE), true) ?? ['groups' => []];
+    $cache_mtime = $mtime;
+    return $cache;
 }
 
 /** 写入站点配置 */
@@ -161,6 +173,15 @@ function backup_list(): array {
     // 按时间倒序
     usort($result, function($a, $b) { return strcmp($b['created_at'], $a['created_at']); });
     return $result;
+}
+
+/** 备份文件数量（不解析 JSON，供控制台等仅需数量的场景） */
+function backup_count(): int {
+    if (!is_dir(BACKUPS_DIR)) {
+        return 0;
+    }
+    $files = glob(BACKUPS_DIR . '/backup_*.json');
+    return $files ? count($files) : 0;
 }
 
 /**
@@ -920,6 +941,10 @@ function nginx_apply_proxy_conf(bool $reload = false): array {
  * 按优先级检测：宝塔路径 → 标准路径 → which 命令
  */
 function nginx_bin(): string {
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
     $candidates = [
         '/www/server/nginx/sbin/nginx', // 宝塔面板
         '/usr/sbin/nginx',              // Ubuntu/Debian 标准
@@ -927,12 +952,16 @@ function nginx_bin(): string {
         '/usr/local/bin/nginx',         // macOS Homebrew
     ];
     foreach ($candidates as $path) {
-        if (is_executable($path)) return $path;
+        if (is_executable($path)) {
+            $cached = $path;
+            return $cached;
+        }
     }
-    // 最后尝试 command -v
+    // 最后尝试 command -v（缓存结果，避免 settings 等页面重复 exec）
     $which = admin_run_command('command -v nginx');
     $bin = trim($which['output']);
-    return $which['ok'] && $bin !== '' ? $bin : '/usr/sbin/nginx';
+    $cached = ($which['ok'] && $bin !== '') ? $bin : '/usr/sbin/nginx';
+    return $cached;
 }
 
 /**
@@ -1052,7 +1081,7 @@ function nginx_mark_applied(): void {
  * @return array  [['name'=>..., 'proxy_domain'=>..., 'group'=>...], ...]
  */
 function nginx_pending_sites(): array {
-    $cfg          = load_config();
+    $cfg          = auth_get_config();
     $last_applied = (int)($cfg['nginx_last_applied'] ?? 0);
     $sites_mtime  = file_exists(SITES_FILE) ? filemtime(SITES_FILE) : 0;
 

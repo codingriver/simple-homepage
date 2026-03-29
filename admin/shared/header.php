@@ -14,18 +14,23 @@ $current_admin = auth_require_admin();
 // 提前建立 Session，避免输出后再 session_start 导致 CSRF 失效
 csrf_token();
 
+// 读取 Flash（须在 session_write_close 之前：需写入以清除 flash）
+$flash = flash_get();
+
+// 释放 Session 锁，避免同浏览器多标签刷新时互相阻塞
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 // 当前页面文件名（用于导航高亮）
 $current_page = basename($_SERVER['PHP_SELF']);
 
-// 读取配置（站点名称等）
-$cfg_admin = load_config();
+// 与 auth_get_config 共用静态缓存，避免重复读 config.json
+$cfg_admin = auth_get_config();
 $site_name_admin = $cfg_admin['site_name'] ?? '导航中心';
 
 // 检测未生效的 proxy 站点
 $_pending_proxy = nginx_pending_sites();
-
-// 读取 Flash 消息
-$flash = flash_get();
 
 // 导航菜单项定义
 $nav_items = [

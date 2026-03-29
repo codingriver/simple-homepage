@@ -22,6 +22,8 @@ define('CONFIG_FILE',       DATA_DIR . '/config.json');
 define('IP_LOCKS_FILE',     DATA_DIR . '/ip_locks.json');
 define('INSTALLED_FLAG',    DATA_DIR . '/.installed');
 define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
+/** 登录日志最多保留条数（仅 tail，写入后自动裁剪，避免读全文件） */
+define('AUTH_LOG_MAX_LINES', 10);
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 
 /**
@@ -610,7 +612,65 @@ function ip_reset_fails(string $ip): void {
 // ============================================================
 
 /**
- * 写入登录日志
+ * 从文件末尾向前读取，收集最多 $need 条非空行，顺序为最新在前
+ */
+function auth_read_log_collect_newest(string $path, int $need): array {
+    if ($need <= 0 || !is_readable($path)) {
+        return [];
+    }
+    $size = filesize($path);
+    if ($size === false || $size === 0) {
+        return [];
+    }
+    $chunk  = 8192;
+    $result = [];
+    $buf    = '';
+    $fp     = fopen($path, 'rb');
+    if (!$fp) {
+        return [];
+    }
+    $pos = $size;
+    while ($pos > 0 && count($result) < $need) {
+        $read = min($chunk, $pos);
+        $pos -= $read;
+        fseek($fp, $pos);
+        $buf = fread($fp, $read) . $buf;
+        $parts = explode("\n", $buf);
+        $buf = array_shift($parts);
+        foreach (array_reverse($parts) as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            $result[] = $line;
+            if (count($result) >= $need) {
+                break;
+            }
+        }
+    }
+    fclose($fp);
+    if (count($result) < $need && trim($buf) !== '') {
+        $result[] = $buf;
+    }
+    return $result;
+}
+
+/**
+ * 仅保留最近 $max 条（从尾部读取，不写满全文件）
+ */
+function auth_log_prune_to_max(int $max): void {
+    if (!file_exists(AUTH_LOG_FILE)) {
+        return;
+    }
+    $newest = auth_read_log_collect_newest(AUTH_LOG_FILE, $max);
+    if ($newest === []) {
+        return;
+    }
+    $chronological = array_reverse($newest);
+    file_put_contents(AUTH_LOG_FILE, implode("\n", $chronological) . "\n", LOCK_EX);
+}
+
+/**
+ * 写入登录日志（追加后裁剪为最近 AUTH_LOG_MAX_LINES 条，读盘仅尾部）
  * @param string $type     SUCCESS / FAIL / IP_LOCKED
  * @param string $username 用户名（可能为空）
  * @param string $ip       客户端IP
@@ -618,7 +678,9 @@ function ip_reset_fails(string $ip): void {
  */
 function auth_write_log(string $type, string $username, string $ip, string $note = ''): void {
     $dir = dirname(AUTH_LOG_FILE);
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
     $line = sprintf(
         "[%s] %s user=%s ip=%s%s\n",
         date('Y-m-d H:i:s'),
@@ -628,6 +690,7 @@ function auth_write_log(string $type, string $username, string $ip, string $note
         $note ? " note=$note" : ''
     );
     file_put_contents(AUTH_LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+    auth_log_prune_to_max(AUTH_LOG_MAX_LINES);
     // 触发 Webhook 通知（webhook_send 由 admin/shared/functions.php 提供，仅在已加载时调用）
     if (function_exists('webhook_send')) {
         webhook_send($type, $username, $ip, $note);
@@ -636,15 +699,28 @@ function auth_write_log(string $type, string $username, string $ip, string $note
 
 /**
  * 读取最近 N 条登录日志（从文件末尾倒序，最新在前）
+ * 磁盘上最多 AUTH_LOG_MAX_LINES 条，读取为轻量小文件
  * @param int $lines  每页行数
  * @param int $offset 跳过行数（分页）
  * @return array ['total' => int, 'rows' => string[]]
  */
 function auth_read_log(int $lines = 100, int $offset = 0): array {
-    if (!file_exists(AUTH_LOG_FILE)) return ['total' => 0, 'rows' => []];
+    if (!file_exists(AUTH_LOG_FILE)) {
+        return ['total' => 0, 'rows' => []];
+    }
+
+    // 历史超大文件：用尾部多取 1 条判断是否需迁移裁剪（不扫描全文件）
+    $sample = auth_read_log_collect_newest(AUTH_LOG_FILE, AUTH_LOG_MAX_LINES + 1);
+    if (count($sample) > AUTH_LOG_MAX_LINES) {
+        auth_log_prune_to_max(AUTH_LOG_MAX_LINES);
+    }
+
     $all = file(AUTH_LOG_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if (!$all) return ['total' => 0, 'rows' => []];
-    $all = array_reverse($all); // 最新在前
+    if (!$all) {
+        return ['total' => 0, 'rows' => []];
+    }
+    $all = array_reverse($all);
+
     return ['total' => count($all), 'rows' => array_slice($all, $offset, $lines)];
 }
 

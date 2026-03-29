@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $page_title = '系统设置';
 require_once __DIR__ . '/shared/header.php';
 
-$cfg = load_config();
+$cfg = auth_get_config();
 ?>
 
 <!-- 基础设置 -->
@@ -521,29 +521,8 @@ function selectPPM(val) {
     <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">方案A：自动生成配置 + reload</span>
   </div>
 
-  <!-- sudo 白名单状态检测 -->
-  <?php
-  // 检测 web 用户是否有执行 nginx -t 的权限（优先检测 setuid 包装脚本）
-  $nginx_bin = nginx_bin();
-  $sudo_ok = false;
-  if (is_executable('/usr/local/bin/nginx-test')) {
-      exec('/usr/local/bin/nginx-test 2>/dev/null', $_, $sc);
-      $sudo_ok = ($sc === 0);
-  } else {
-      exec('sudo -n ' . escapeshellcmd($nginx_bin) . ' -v 2>/dev/null', $_, $sc);
-      $sudo_ok = ($sc === 0);
-  }
-  ?>
-  <?php if (!$sudo_ok): ?>
-  <div class="alert alert-warn">
-    ⚠️ 未检测到 sudo 权限，Reload 功能将无法使用。请在服务器上执行以下命令配置白名单：
-    <pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto"><?= htmlspecialchars(
-      'NGINX_BIN=' . nginx_bin() . "\n" .
-      'echo "$(id -un) ALL=(ALL) NOPASSWD: $NGINX_BIN" > /etc/sudoers.d/nav-nginx' . "\n" .
-      'chmod 440 /etc/sudoers.d/nav-nginx'
-    ) ?></pre>
-  </div>
-  <?php endif; ?>
+  <!-- sudo 白名单：首屏不 exec，进入本区域时异步检测 -->
+  <div id="nginx-sudo-banner" style="min-height:0"></div>
 
   <!-- 当前配置预览 -->
   <?php
@@ -649,44 +628,12 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   </div>
 </div>
 
-<!-- 登录日志 -->
+<!-- 登录日志（惰性：进入视口或 #logs 锚点时再请求） -->
 <div class="card" id="logs">
   <div class="card-title">📋 登录日志
-    <span style="font-size:12px;color:var(--tm);font-weight:400;margin-left:8px">共 <?= $log_total ?> 条</span></div>
-  <?php if (empty($log_data['rows'])): ?>
-    <p style="color:var(--tm);font-size:13px">暂无日志</p>
-  <?php else: ?>
-  <div class="table-wrap"><table>
-    <tr><th>时间</th><th>类型</th><th>用户</th><th>IP</th><th>备注</th></tr>
-    <?php foreach ($log_data['rows'] as $row):
-      preg_match('/\[(.+?)\]\s+(\S+)\s+user=(\S+)\s+ip=(\S+)(?:\s+note=(\S+))?/', $row, $m);
-      $bc = [
-        'SUCCESS'   => 'badge-green',
-        'FAIL'      => 'badge-red',
-        'IP_LOCKED' => 'badge-yellow',
-        'LOGOUT'    => 'badge-blue',
-        'SETUP'     => 'badge-purple',
-      ][$m[2] ?? ''] ?? 'badge-gray';
-    ?>
-    <tr>
-      <td style="font-family:monospace;font-size:11px;white-space:nowrap"><?= htmlspecialchars($m[1]??'-') ?></td>
-      <td><span class="badge <?=$bc?>"><?= htmlspecialchars($m[2]??'-') ?></span></td>
-      <td><?= htmlspecialchars($m[3]??'-') ?></td>
-      <td style="font-family:monospace;font-size:11px"><?= htmlspecialchars($m[4]??'-') ?></td>
-      <td style="font-size:11px;color:var(--tm)"><?= htmlspecialchars($m[5]??'') ?></td>
-    </tr>
-    <?php endforeach; ?>
-  </table></div>
-  <!-- 分页 -->
-  <?php if ($log_pages > 1): ?>
-  <div class="pagination">
-    <?php for ($p=1;$p<=$log_pages;$p++): ?>
-      <?php if($p===$log_page):?><span class="cur"><?=$p?></span>
-      <?php else:?><a href="?logp=<?=$p?>#logs"><?=$p?></a><?php endif;?>
-    <?php endfor; ?>
-  </div>
-  <?php endif; ?>
-  <?php endif; ?>
+    <span id="logs_total_label" style="font-size:12px;color:var(--tm);font-weight:400;margin-left:8px"></span></div>
+  <div id="logs_lazy_state" style="color:var(--tm);font-size:13px">向下滚动到此处或从控制台链接进入时将自动加载…</div>
+  <div id="logs_lazy_content" style="display:none"></div>
 </div>
 
 <!-- Webhook 通知 -->
@@ -824,65 +771,142 @@ function loadHealthStatus() {
     });
 }
 
+function loadHealthSitesMeta(cb) {
+    if (window.__healthSitesMeta) { cb(window.__healthSitesMeta); return; }
+    fetch('settings_ajax.php?action=health_sites_meta', {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function(r){ return r.json(); }).then(function(d){
+        if (d.ok && d.sites) { window.__healthSitesMeta = d.sites; cb(d.sites); }
+        else { cb([]); }
+    }).catch(function(){ cb([]); });
+}
+
 function renderHealthResults(data) {
-    var sites = <?= json_encode(
-        array_merge(...array_map(function($g){
-            return array_map(function($s) use ($g) {
-                return [
-                    'name' => $s['name'],
-                    'type' => $s['type'] ?? 'external',
-                    'url'  => ($s['type'] ?? '') === 'proxy' ? ($s['proxy_target'] ?? '') : ($s['url'] ?? ''),
-                ];
-            }, $g['sites'] ?? []);
-        }, load_sites()['groups'] ?? [])),
-        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG
-    ) ?>;
+    loadHealthSitesMeta(function(sites) {
+        var tbody = '';
+        var checked_any = false;
+        sites.forEach(function(s) {
+            if (!s.url) return;
+            var h = data[s.url];
+            if (!h) return;
+            checked_any = true;
+            var dot = h.status === 'up'
+                ? '<span style="color:#4ade80;font-size:16px" title="在线">●</span>'
+                : '<span style="color:#f87171;font-size:16px" title="离线">●</span>';
+            var ms   = h.ms   != null ? h.ms + ' ms'  : '-';
+            var code = h.code ? h.code : '-';
+            var t    = h.checked_at ? new Date(h.checked_at * 1000).toLocaleTimeString() : '-';
+            var url_short = s.url.length > 40 ? s.url.substring(0,40)+'…' : s.url;
+            tbody += '<tr>'
+                + '<td>' + escHtml(s.name) + '</td>'
+                + '<td><span class="badge badge-' + (s.type==='proxy'?'yellow':s.type==='internal'?'purple':'gray') + '">' + escHtml(s.type) + '</span></td>'
+                + '<td style="font-size:11px;font-family:monospace" title="' + escHtml(s.url) + '">' + escHtml(url_short) + '</td>'
+                + '<td>' + dot + ' ' + (h.status==='up'?'在线':'离线') + '</td>'
+                + '<td style="font-family:monospace">' + code + '</td>'
+                + '<td style="font-family:monospace">' + ms + '</td>'
+                + '<td style="font-size:11px;color:var(--tm)">' + t + '</td>'
+                + '</tr>';
+        });
 
-    var tbody = '';
-    var checked_any = false;
-    sites.forEach(function(s) {
-        if (!s.url) return;
-        var h = data[s.url];
-        if (!h) return;
-        checked_any = true;
-        var dot = h.status === 'up'
-            ? '<span style="color:#4ade80;font-size:16px" title="在线">●</span>'
-            : '<span style="color:#f87171;font-size:16px" title="离线">●</span>';
-        var ms   = h.ms   != null ? h.ms + ' ms'  : '-';
-        var code = h.code ? h.code : '-';
-        var t    = h.checked_at ? new Date(h.checked_at * 1000).toLocaleTimeString() : '-';
-        var url_short = s.url.length > 40 ? s.url.substring(0,40)+'…' : s.url;
-        tbody += '<tr>'
-            + '<td>' + escHtml(s.name) + '</td>'
-            + '<td><span class="badge badge-' + (s.type==='proxy'?'yellow':s.type==='internal'?'purple':'gray') + '">' + escHtml(s.type) + '</span></td>'
-            + '<td style="font-size:11px;font-family:monospace" title="' + escHtml(s.url) + '">' + escHtml(url_short) + '</td>'
-            + '<td>' + dot + ' ' + (h.status==='up'?'在线':'离线') + '</td>'
-            + '<td style="font-family:monospace">' + code + '</td>'
-            + '<td style="font-family:monospace">' + ms + '</td>'
-            + '<td style="font-size:11px;color:var(--tm)">' + t + '</td>'
-            + '</tr>';
+        if (!checked_any) {
+            document.getElementById('health_empty').textContent = '没有可检测的站点（站点需配置有效的 URL）。';
+            document.getElementById('health_empty').style.display = 'block';
+            document.getElementById('health_results').style.display = 'none';
+            return;
+        }
+        document.getElementById('health_table').tBodies[0]
+            ? document.getElementById('health_table').tBodies[0].innerHTML = tbody
+            : document.getElementById('health_table').innerHTML += '<tbody>' + tbody + '</tbody>';
+        document.getElementById('health_results').style.display = 'block';
+        document.getElementById('health_empty').style.display = 'none';
+        document.getElementById('health_last_check').textContent = '上次刷新：' + new Date().toLocaleTimeString();
     });
-
-    if (!checked_any) {
-        document.getElementById('health_empty').textContent = '没有可检测的站点（站点需配置有效的 URL）。';
-        document.getElementById('health_empty').style.display = 'block';
-        document.getElementById('health_results').style.display = 'none';
-        return;
-    }
-    document.getElementById('health_table').tBodies[0]
-        ? document.getElementById('health_table').tBodies[0].innerHTML = tbody
-        : document.getElementById('health_table').innerHTML += '<tbody>' + tbody + '</tbody>';
-    document.getElementById('health_results').style.display = 'block';
-    document.getElementById('health_empty').style.display = 'none';
-    document.getElementById('health_last_check').textContent = '上次刷新：' + new Date().toLocaleTimeString();
 }
 
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// 页面加载时拉取缓存状态
-loadHealthStatus();
+// ── 惰性：登录日志、Nginx sudo 检测（进入视口或锚点时再请求，首屏不读日志、不 exec）──
+(function initSettingsLazy() {
+    var logsLoaded = false;
+    function loadLoginLogsOnce() {
+        if (logsLoaded) return;
+        logsLoaded = true;
+        var st = document.getElementById('logs_lazy_state');
+        if (st) st.textContent = '加载中…';
+        fetch('login_logs.php', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if (!d.ok) { if (st) st.textContent = d.msg || '加载失败'; return; }
+                var lbl = document.getElementById('logs_total_label');
+                if (lbl) lbl.textContent = '共 ' + d.total + ' 条（最多保留 ' + d.max + ' 条）';
+                var wrap = document.getElementById('logs_lazy_content');
+                if (st) st.style.display = 'none';
+                if (wrap) {
+                    wrap.style.display = 'block';
+                    if (!d.rows || !d.rows.length) {
+                        wrap.innerHTML = '<p style="color:var(--tm);font-size:13px">暂无日志</p>';
+                        return;
+                    }
+                    var bc = { SUCCESS:'badge-green', FAIL:'badge-red', IP_LOCKED:'badge-yellow', LOGOUT:'badge-blue', SETUP:'badge-purple' };
+                    var rows = '';
+                    d.rows.forEach(function(row) {
+                        var m = row.match(/^\[(.+?)\]\s+(\S+)\s+user=(\S+)\s+ip=(\S+)(?:\s+note=(\S+))?/);
+                        var t = m ? m[1] : '-', ty = m ? m[2] : '-', u = m ? m[3] : '-', ip = m ? m[4] : '-', note = m ? (m[5]||'') : '';
+                        var bcc = bc[ty] || 'badge-gray';
+                        rows += '<tr><td style="font-family:monospace;font-size:11px;white-space:nowrap">' + escHtml(t) + '</td>'
+                            + '<td><span class="badge ' + bcc + '">' + escHtml(ty) + '</span></td>'
+                            + '<td>' + escHtml(u) + '</td>'
+                            + '<td style="font-family:monospace;font-size:11px">' + escHtml(ip) + '</td>'
+                            + '<td style="font-size:11px;color:var(--tm)">' + escHtml(note) + '</td></tr>';
+                    });
+                    wrap.innerHTML = '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>用户</th><th>IP</th><th>备注</th></tr>' + rows + '</table></div>';
+                }
+            })
+            .catch(function(){
+                if (st) st.textContent = '加载失败，请刷新重试';
+            });
+    }
+
+    var nginxLoaded = false;
+    function loadNginxSudoOnce() {
+        if (nginxLoaded) return;
+        nginxLoaded = true;
+        var el = document.getElementById('nginx-sudo-banner');
+        if (!el) return;
+        fetch('settings_ajax.php?action=nginx_sudo', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if (!d.ok) return;
+                if (d.sudo_ok) { el.innerHTML = ''; return; }
+                el.innerHTML = '<div class="alert alert-warn">⚠️ 未检测到 sudo 权限，Reload 功能将无法使用。请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre></div>';
+            });
+    }
+
+    var logs = document.getElementById('logs');
+    var nginx = document.getElementById('nginx');
+    if (window.IntersectionObserver) {
+        if (logs) {
+            var io1 = new IntersectionObserver(function(entries){
+                entries.forEach(function(e){ if (e.isIntersecting) loadLoginLogsOnce(); });
+            }, { rootMargin: '80px' });
+            io1.observe(logs);
+        }
+        if (nginx) {
+            var io2 = new IntersectionObserver(function(entries){
+                entries.forEach(function(e){ if (e.isIntersecting) loadNginxSudoOnce(); });
+            }, { rootMargin: '80px' });
+            io2.observe(nginx);
+        }
+    } else {
+        if (logs) loadLoginLogsOnce();
+        if (nginx) loadNginxSudoOnce();
+    }
+    if (location.hash === '#logs') loadLoginLogsOnce();
+    if (location.hash === '#nginx') loadNginxSudoOnce();
+})();
 </script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>
