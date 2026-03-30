@@ -45,7 +45,8 @@ mkdir -p \
     /var/www/nav/data/backups \
     /var/www/nav/data/logs \
     /var/www/nav/data/favicon_cache \
-    /var/www/nav/data/bg
+    /var/www/nav/data/bg \
+    /var/spool/cron/crontabs
 
 # ── 修正权限（挂载外部卷时属主可能变化）──
 chown -R navwww:navwww /var/www/nav/data
@@ -58,6 +59,8 @@ chmod 755 /var/www/nav/data/bg \
 for f in /var/www/nav/data/users.json \
          /var/www/nav/data/config.json \
          /var/www/nav/data/sites.json \
+         /var/www/nav/data/scheduled_tasks.json \
+         /var/www/nav/data/dns_config.json \
          /var/www/nav/data/ip_locks.json \
          /var/www/nav/data/.installed; do
     [ -f "$f" ] && chown navwww:navwww "$f" && chmod 644 "$f"
@@ -82,9 +85,9 @@ if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
 fi
 
 # ── 创建 nginx 操作包装脚本（供 PHP 后台调用）──
-printf '#!/bin/busybox sh\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
+printf '#!/bin/busybox sh\nif [ ! -f /run/nginx/nginx.pid ]; then\n  echo "nginx pid not found"\n  exit 1\nfi\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
 chmod 755 /usr/local/bin/nginx-reload
-printf '#!/bin/busybox sh\n/usr/bin/supervisorctl -c /etc/supervisord.conf status nginx 2>&1\n' > /usr/local/bin/nginx-test
+printf '#!/bin/busybox sh\nexec /usr/sbin/nginx -t\n' > /usr/local/bin/nginx-test
 chmod 755 /usr/local/bin/nginx-test
 
 # ── 运行时目录 ──
@@ -105,6 +108,9 @@ chown navwww:navwww /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
 chmod 664 /var/log/nginx/nav.access.log /var/log/nginx/nav.error.log \
           /var/log/nginx/access.log /var/log/nginx/error.log \
           /var/log/php-fpm/error.log
+
+touch /var/log/crond.log
+chown navwww:navwww /var/log/crond.log 2>/dev/null || true
 
 echo "[entrypoint] 初始化完成，启动服务..."
 

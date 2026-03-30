@@ -10,7 +10,7 @@
  *   php manage_users.php add <user> <pwd>        添加管理员账户
  *   php manage_users.php passwd <user> <pwd>    修改密码
  *   php manage_users.php del <user>             删除用户
- *   php manage_users.php reset                   完整重置并重新激活Web安装向导
+ *   php manage_users.php reset                   完整重置并重新激活Web安装向导（保留备份）
  */
 
 // 禁止 Web 访问
@@ -92,7 +92,7 @@ switch ($cmd) {
         echo "OK: '{$username}' 的密码已修改。\n";
         break;
 
-    // ── 完整重置（等同 setup + 清空站点/分组/反代配置）──
+    // ── 完整重置（等同 setup + 清空站点/分组/反代配置，保留备份）──
     case 'reset':
         echo "\n╔══════════════════════════════════════════════════════════╗\n";
         echo "║  🔄  开始完整重置...                                     ║\n";
@@ -148,13 +148,12 @@ switch ($cmd) {
             echo "[7/10] ⏭  登录日志不存在，跳过\n";
         }
 
-        // [8] 清空备份目录
+        // [8] 保留备份目录
         $backup_dir = DATA_DIR . '/backups';
         if (is_dir($backup_dir)) {
             $bak_files = glob($backup_dir . '/backup_*.json');
-            $bak_count = 0;
-            foreach ($bak_files as $bf) { unlink($bf); $bak_count++; }
-            echo "[8/10] ✅ 备份文件已清空（共删除 {$bak_count} 个）\n";
+            $bak_count = is_array($bak_files) ? count($bak_files) : 0;
+            echo "[8/10] ✅ 备份文件已保留（当前 {$bak_count} 个，未清理）\n";
         } else {
             echo "[8/10] ⏭  备份目录不存在，跳过\n";
         }
@@ -379,7 +378,7 @@ PPFEOF;
         echo "║    • AUTH_SECRET_KEY 已更换为新随机密钥                  ║\n";
         echo "║    • 站点与分组配置已清空                                ║\n";
         echo "║    • 登录日志 auth.log 已清空                            ║\n";
-        echo "║    • 备份文件已清空                                      ║\n";
+        echo "║    • 备份文件已保留（未清空）                            ║\n";
         echo "║    • 反代 nginx 配置已清空                               ║\n";
         echo "║    • proxy_params_full 已检查/创建                       ║\n";
         echo "║                                                          ║\n";
@@ -407,7 +406,7 @@ PPFEOF;
         echo "  php manage_users.php add <用户名> <密码>     添加管理员账户\n";
         echo "  php manage_users.php passwd <用户名> <新密码> 修改密码\n";
         echo "  php manage_users.php del <用户名>            删除用户\n";
-        echo "  php manage_users.php reset                   完整重置：清空用户/安装锁/登录日志/站点分组/反代配置/IP锁定，并检查创建 proxy_params_full\n";
+        echo "  php manage_users.php reset                   完整重置：清空用户/安装锁/登录日志/站点分组/反代配置/IP锁定，保留备份，并检查创建 proxy_params_full\n";
         echo "\n注意：此脚本只能命令行运行，Web 访问返回 403。\n\n";
         break;
 }
