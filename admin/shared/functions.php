@@ -129,11 +129,15 @@ function backup_create(string $trigger = 'manual'): string {
     $sites_data  = file_exists(SITES_FILE)  ? file_get_contents(SITES_FILE)  : '{}';
     $config_data = file_exists(CONFIG_FILE) ? file_get_contents(CONFIG_FILE) : '{}';
 
+    $st_file = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file = DATA_DIR . '/dns_config.json';
     $backup = [
         'created_at' => date('Y-m-d H:i:s'),
         'trigger'    => $trigger,
         'sites'      => json_decode($sites_data, true)  ?? [],
         'config'     => json_decode($config_data, true) ?? [],
+        'scheduled_tasks' => file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [],
+        'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
     ];
 
     $filename = 'backup_' . date('Ymd_His') . '_' . $trigger . '.json';
@@ -209,6 +213,16 @@ function backup_restore(string $filename): bool {
     if (isset($data['config'])) {
         file_put_contents(CONFIG_FILE,
             json_encode($data['config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    }
+    $st_file = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file = DATA_DIR . '/dns_config.json';
+    if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
+        file_put_contents($st_file,
+            json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    }
+    if (isset($data['dns_config']) && is_array($data['dns_config'])) {
+        file_put_contents($dns_file,
+            json_encode($data['dns_config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
     }
     return true;
 }
@@ -992,6 +1006,66 @@ function nginx_bin(): string {
 }
 
 /**
+ * 检测当前环境是否具备可用的 Nginx reload 执行能力
+ * 优先级：sudo 白名单 -> 容器内包装脚本
+ *
+ * @return array{ok:bool,method:string,msg:string,hint:string,test_output:string,nginx_bin:string}
+ */
+function nginx_reload_capability(): array {
+    $nginx = nginx_bin();
+    $safe_nginx = escapeshellarg($nginx);
+    $hint = 'NGINX_BIN=' . $nginx . "\n"
+        . 'USER_NAME=$(id -un)' . "\n"
+        . 'printf \'%s ALL=(ALL) NOPASSWD: %s -t\n\' "$USER_NAME" "$NGINX_BIN" > /etc/sudoers.d/nav-nginx' . "\n"
+        . 'printf \'%s ALL=(ALL) NOPASSWD: %s -s reload\n\' "$USER_NAME" "$NGINX_BIN" >> /etc/sudoers.d/nav-nginx' . "\n"
+        . 'chmod 440 /etc/sudoers.d/nav-nginx';
+
+    $sudo_test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
+    if ($sudo_test['ok']) {
+        return [
+            'ok' => true,
+            'method' => 'sudo',
+            'msg' => '已检测到 sudo 白名单，可直接执行 Nginx 语法检测与 Reload。',
+            'hint' => $hint,
+            'test_output' => $sudo_test['output'],
+            'nginx_bin' => $nginx,
+        ];
+    }
+
+    $has_wrapper = is_executable('/usr/local/bin/nginx-reload') && is_executable('/usr/local/bin/nginx-test');
+    if ($has_wrapper) {
+        $wrapper_test = admin_run_command('/usr/local/bin/nginx-test');
+        if ($wrapper_test['ok']) {
+            return [
+                'ok' => true,
+                'method' => 'wrapper',
+                'msg' => '已检测到容器内 Reload 包装器，可直接执行 Nginx 语法检测与 Reload。',
+                'hint' => '',
+                'test_output' => $wrapper_test['output'],
+                'nginx_bin' => $nginx,
+            ];
+        }
+        return [
+            'ok' => false,
+            'method' => 'wrapper',
+            'msg' => '已检测到容器内 Reload 包装器，但当前 Nginx 配置语法检测未通过。',
+            'hint' => '',
+            'test_output' => $wrapper_test['output'],
+            'nginx_bin' => $nginx,
+        ];
+    }
+
+    return [
+        'ok' => false,
+        'method' => 'none',
+        'msg' => '未检测到可用的 Nginx reload 执行权限。',
+        'hint' => $hint,
+        'test_output' => $sudo_test['output'],
+        'nginx_bin' => $nginx,
+    ];
+}
+
+/**
  * 自动检测 Nginx 反代配置文件路径
  * 宝塔：/www/server/nginx/conf/nav-proxy.conf
  * 标准：/etc/nginx/conf.d/nav-proxy.conf
@@ -1018,42 +1092,34 @@ function nginx_domain_proxy_conf_path(): string {
 
 /**
  * 执行 nginx -t 语法检测 + nginx -s reload
- * 需要 web 用户有 sudo 权限执行这两个命令
+ * 优先使用 sudo 白名单；容器环境可退回到包装脚本
  *
  * sudo 白名单配置（在服务器上执行一次，限定具体参数防提权）：
  *   NGINX_BIN=$(which nginx || echo /usr/sbin/nginx)
- *   echo "www-data ALL=(ALL) NOPASSWD: $NGINX_BIN -t" > /etc/sudoers.d/nav-nginx
- *   echo "www-data ALL=(ALL) NOPASSWD: $NGINX_BIN -s reload" >> /etc/sudoers.d/nav-nginx
+ *   USER_NAME=$(id -un)
+ *   printf '%s ALL=(ALL) NOPASSWD: %s -t\n' "$USER_NAME" "$NGINX_BIN" > /etc/sudoers.d/nav-nginx
+ *   printf '%s ALL=(ALL) NOPASSWD: %s -s reload\n' "$USER_NAME" "$NGINX_BIN" >> /etc/sudoers.d/nav-nginx
  *   chmod 440 /etc/sudoers.d/nav-nginx
  *
  * @return array ['ok' => bool, 'msg' => string, 'test_output' => string]
  */
 function nginx_reload(): array {
-    // 优先使用包装脚本（容器内无 sudo 时的替代方案）
-    $use_wrapper = is_executable('/usr/local/bin/nginx-reload') && is_executable('/usr/local/bin/nginx-test');
+    $capability = nginx_reload_capability();
+    $nginx = $capability['nginx_bin'];
+    $safe_nginx = escapeshellarg($nginx);
 
-    // 先测试 nginx 是否运行正常
-    if ($use_wrapper) {
-        $test = admin_run_command('/usr/local/bin/nginx-test');
-        $test_msg = $test['output'];
-        // supervisorctl status 返回 0 且包含 RUNNING 即正常
-        if (!$test['ok'] || strpos($test_msg, 'RUNNING') === false) {
-            return [
-                'ok'          => false,
-                'msg'         => 'Nginx 未正常运行，中止 reload',
-                'test_output' => $test_msg,
-            ];
-        }
-
-        $reload = admin_run_command('/usr/local/bin/nginx-reload');
+    // 优先使用 sudo 直接执行真实的 nginx -t / nginx -s reload
+    $test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
+    $test_msg = $test['output'];
+    if ($test['ok']) {
+        $reload = admin_run_command('sudo -n ' . $safe_nginx . ' -s reload');
         if (!$reload['ok']) {
             return [
                 'ok'          => false,
-                'msg'         => 'nginx reload 触发失败',
+                'msg'         => 'nginx reload 执行失败',
                 'test_output' => $reload['output'],
             ];
         }
-
         return [
             'ok'          => true,
             'msg'         => 'Nginx 已成功 reload',
@@ -1061,32 +1127,39 @@ function nginx_reload(): array {
         ];
     }
 
-    // 降级：使用 sudo
-    $nginx = nginx_bin();
-    $safe_nginx = escapeshellarg($nginx);
+    // 降级：使用包装脚本（容器内无 sudo 时的替代方案）
+    $use_wrapper = ($capability['method'] === 'wrapper')
+        || (is_executable('/usr/local/bin/nginx-reload') && is_executable('/usr/local/bin/nginx-test'));
+    if ($use_wrapper) {
+        $wrapperTest = admin_run_command('/usr/local/bin/nginx-test');
+        $wrapperMsg = $wrapperTest['output'];
+        if (!$wrapperTest['ok']) {
+            return [
+                'ok'          => false,
+                'msg'         => 'Nginx 配置语法错误，已中止 reload，请检查配置',
+                'test_output' => $wrapperMsg !== '' ? $wrapperMsg : $test_msg,
+            ];
+        }
 
-    $test = admin_run_command('sudo ' . $safe_nginx . ' -t');
-    $test_msg = $test['output'];
-    if (!$test['ok']) {
-        return [
-            'ok'          => false,
-            'msg'         => 'Nginx 配置语法错误，已中止 reload，请检查配置',
-            'test_output' => $test_msg,
-        ];
-    }
+        $reload = admin_run_command('/usr/local/bin/nginx-reload');
+        if (!$reload['ok']) {
+            return [
+                'ok'          => false,
+                'msg'         => 'nginx reload 执行失败',
+                'test_output' => $reload['output'],
+            ];
+        }
 
-    $reload = admin_run_command('sudo ' . $safe_nginx . ' -s reload');
-    if (!$reload['ok']) {
         return [
-            'ok'          => false,
-            'msg'         => 'nginx reload 执行失败',
-            'test_output' => $reload['output'],
+            'ok'          => true,
+            'msg'         => 'Nginx 已成功 reload',
+            'test_output' => $wrapperMsg,
         ];
     }
 
     return [
-        'ok'          => true,
-        'msg'         => 'Nginx 已成功 reload',
+        'ok'          => false,
+        'msg'         => 'Nginx 配置检测失败，且未找到可用的 reload 执行方式',
         'test_output' => $test_msg,
     ];
 }

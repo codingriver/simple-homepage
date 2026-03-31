@@ -45,6 +45,8 @@ $nav_items = [
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
+    ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
+    ['file' => 'dns.php', 'icon' => '🌐', 'label' => '域名解析'],
 
 ];
 ?>

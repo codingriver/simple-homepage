@@ -22,23 +22,16 @@ if (!$user || ($user['role'] ?? '') !== 'admin') {
 $action = $_GET['action'] ?? '';
 
 if ($action === 'nginx_sudo') {
-    $nginx_bin = nginx_bin();
-    $sudo_ok = false;
-    if (is_executable('/usr/local/bin/nginx-test')) {
-        exec('/usr/local/bin/nginx-test 2>/dev/null', $_, $sc);
-        $sudo_ok = ($sc === 0);
-    } else {
-        exec('sudo -n ' . escapeshellcmd($nginx_bin) . ' -v 2>/dev/null', $_, $sc);
-        $sudo_ok = ($sc === 0);
-    }
-    $hint = 'NGINX_BIN=' . $nginx_bin . "\n"
-        . 'echo "$(id -un) ALL=(ALL) NOPASSWD: $NGINX_BIN" > /etc/sudoers.d/nav-nginx' . "\n"
-        . 'chmod 440 /etc/sudoers.d/nav-nginx';
+    $capability = nginx_reload_capability();
     echo json_encode([
-        'ok'        => true,
-        'sudo_ok'   => $sudo_ok,
-        'nginx_bin' => $nginx_bin,
-        'sudo_hint' => $hint,
+        'ok' => true,
+        'reload_ok' => $capability['ok'],
+        'sudo_ok' => $capability['ok'] && $capability['method'] === 'sudo',
+        'method' => $capability['method'],
+        'message' => $capability['msg'],
+        'nginx_bin' => $capability['nginx_bin'],
+        'sudo_hint' => $capability['hint'],
+        'test_output' => $capability['test_output'],
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

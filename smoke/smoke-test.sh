@@ -268,13 +268,15 @@ docker exec "$CONTAINER_NAME" curl -sL -b "$CJ" -c "$CJ" --max-time 10 \
 
 # ------- 4. Admin pages -------
 echo ""; echo "[4/11] Admin page GET checks..."
-for P in index groups sites users backups settings; do
+for P in index groups sites users backups settings scheduled_tasks dns; do
   assert_code "admin_${P}_200" "${BASE}/admin/${P}.php" "200"
 done
 assert_body "admin_index_stats"   "${BASE}/admin/index.php"    "站点数量"
 assert_body "admin_settings_form" "${BASE}/admin/settings.php" "站点名称"
 assert_body "admin_backups_btn"   "${BASE}/admin/backups.php"  "立即备份"
 assert_body "admin_users_add"     "${BASE}/admin/users.php"    "添加用户"
+assert_body "admin_scheduled_nav" "${BASE}/admin/scheduled_tasks.php" "计划任务"
+assert_body "admin_dns_nav"       "${BASE}/admin/dns.php" "域名解析"
 
 echo ""; echo "[4b/11] Page load timings (curl time_total, max ${SMOKE_LOAD_MAX_SEC}s)..."
 LOAD_TIMINGS_FILE="${SMOKE_TMPDIR}/load_timings.tsv"
@@ -288,6 +290,8 @@ record_load_time "admin_users" "${BASE}/admin/users.php"
 record_load_time "admin_backups" "${BASE}/admin/backups.php"
 record_load_time "admin_settings" "${BASE}/admin/settings.php"
 record_load_time "admin_debug" "${BASE}/admin/debug.php"
+record_load_time "admin_scheduled_tasks" "${BASE}/admin/scheduled_tasks.php"
+record_load_time "admin_dns" "${BASE}/admin/dns.php"
 record_load_time_ajax "admin_login_logs_json" "${BASE}/admin/login_logs.php"
 record_load_time_ajax "admin_settings_ajax_nginx" "${BASE}/admin/settings_ajax.php?action=nginx_sudo"
 record_load_time "admin_health_status" "${BASE}/admin/health_check.php?ajax=status"

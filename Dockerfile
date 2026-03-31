@@ -33,6 +33,8 @@ RUN apk add --no-cache \
     shadow \
     tzdata \
     sudo \
+    dcron \
+    python3 \
     # fileinfo 扩展依赖
     libmagic \
     file-dev \
@@ -61,7 +63,10 @@ ENV HTTP_PROXY= \
 
 # ── 创建运行用户（与 Nginx worker 统一）──
 RUN addgroup -g 1000 navwww && \
-    adduser -D -u 1000 -G navwww navwww
+    (getent group crontab >/dev/null || addgroup -S crontab) && \
+    adduser -D -u 1000 -G navwww navwww && \
+    adduser navwww crontab && \
+    adduser navwww wheel
 
 # ── 复制项目文件 ──
 COPY --chown=navwww:navwww . /var/www/nav/
@@ -101,6 +106,7 @@ RUN mkdir -p \
     /var/www/nav/data/logs \
     /var/www/nav/data/favicon_cache \
     /var/www/nav/data/bg \
+    /var/spool/cron/crontabs \
     /var/log/nginx \
     /var/log/php-fpm \
     /run/nginx \
@@ -110,6 +116,7 @@ RUN mkdir -p \
     # 配置 sudo 白名单，允许 navwww 执行 nginx -t 和 nginx -s reload
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
+    echo 'navwww ALL=(ALL) NOPASSWD: /usr/bin/crontab' >> /etc/sudoers.d/nav-nginx && \
     chmod 440 /etc/sudoers.d/nav-nginx && \
     # 创建空的反代配置文件
     touch /etc/nginx/conf.d/nav-proxy.conf /etc/nginx/http.d/nav-proxy-domains.conf && \

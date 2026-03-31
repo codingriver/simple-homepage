@@ -204,7 +204,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg['cookie_secure']      = in_array($_POST['cookie_secure'] ?? 'off', ['auto','on','off'])
                                          ? $_POST['cookie_secure'] : 'off';
             $cfg['cookie_domain']      = trim($_POST['cookie_domain'] ?? '');
-            $cfg['proxy_params_mode']  = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+            if (isset($_POST['proxy_params_mode'])) {
+                $cfg['proxy_params_mode']  = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+            }
             // ── 卡片尺寸（支持自定义）──
             $card_size_raw = $_POST['card_size'] ?? '140';
             if ($card_size_raw === 'custom' || !empty($_POST['card_size_custom'])) {
@@ -503,15 +505,34 @@ function syncCustom(field) {
 
 // ── 反代参数模式选择卡片联动 ──
 function selectPPM(val) {
-    var labels = document.querySelectorAll('input[name="proxy_params_mode"]');
-    labels.forEach(function(radio) {
-        var card = radio.parentElement;
-        var isSelected = radio.value === val;
-        radio.checked = isSelected;
+    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
+    radios.forEach(function(radio) {
+        if (val) {
+            radio.checked = radio.value === val;
+        }
+        var card = radio.closest('[data-ppm-card]');
+        if (!card) return;
+        var isSelected = !!radio.checked;
         card.style.borderColor = isSelected ? 'var(--ac)' : 'var(--bd)';
         card.style.background  = isSelected ? 'rgba(99,179,237,.08)' : 'var(--sf)';
     });
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
+    radios.forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            selectPPM();
+        });
+        var card = radio.closest('[data-ppm-card]');
+        if (!card) return;
+        card.addEventListener('click', function() {
+            radio.checked = true;
+            selectPPM();
+        });
+    });
+    selectPPM();
+});
 
 </script>
 
@@ -521,7 +542,7 @@ function selectPPM(val) {
     <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">方案A：自动生成配置 + reload</span>
   </div>
 
-  <!-- sudo 白名单：首屏不 exec，进入本区域时异步检测 -->
+  <!-- Reload 执行环境：首屏不 exec，进入本区域时异步检测 -->
   <div id="nginx-sudo-banner" style="min-height:0"></div>
 
   <!-- 当前配置预览 -->
@@ -559,17 +580,17 @@ function selectPPM(val) {
   <?php $ppm = $cfg['proxy_params_mode'] ?? 'simple'; ?>
   <div style="margin-bottom:16px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 18px">
     <div style="font-size:12px;color:var(--tm);margin-bottom:10px;font-weight:600">📦 反代参数模板</div>
-    <form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <form method="POST" id="proxy-params-mode-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="save_proxy_params_mode">
-      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('simple')">
+      <label data-ppm-card="simple" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
         <input type="radio" name="proxy_params_mode" value="simple" <?= $ppm==='simple'?'checked':'' ?> id="ppm_simple" style="margin-top:2px;accent-color:var(--ac)">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（14 条参数 · 超时 60s）</span></div>
           <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">HTTP/1.1、WebSocket 升级、Host / IP / Proto 透传、连接 10s + 读写 60s 超时、基础缓冲。<br>适合普通 Web 应用，<b>默认推荐</b>，小白首选。</div>
         </div>
       </label>
-      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s" onclick="selectPPM('full')">
+      <label data-ppm-card="full" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
         <input type="radio" name="proxy_params_mode" value="full" <?= $ppm==='full'?'checked':'' ?> id="ppm_full" style="margin-top:2px;accent-color:var(--ac)">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（60+ 条参数 · 超时 86400s）</span></div>
@@ -590,9 +611,9 @@ function selectPPM(val) {
 
   <!-- 操作按钮 -->
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-    <form method="POST" style="display:inline"><?= csrf_field() ?>
+    <form method="POST" id="nginx-reload-form" style="display:inline"><?= csrf_field() ?>
       <input type="hidden" name="action" value="nginx_reload">
-      <button class="btn btn-primary" <?= $sudo_ok ? '' : 'disabled title="需要先配置sudo白名单"' ?>>
+      <button class="btn btn-primary" id="nginx-reload-btn">
         🔄 生成配置并 Reload Nginx
       </button>
     </form>
@@ -623,9 +644,10 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   <div class="alert alert-info" style="margin-top:16px">
     ℹ️ 点击「生成配置并 Reload」将自动写入
     <code style="font-size:11px">/etc/nginx/conf.d/nav-proxy.conf</code>
-    并执行 <code style="font-size:11px">sudo nginx -t && nginx -s reload</code>。
+    并执行 Nginx 语法检测与 Reload。
     语法检测失败时会中止 reload 并显示错误信息。
   </div>
+  <div id="nginx-reload-note" class="form-hint" style="margin-top:10px">按钮始终可点击；环境检测未通过时，提交后会显示明确错误原因。</div>
 </div>
 
 <!-- 登录日志（惰性：进入视口或 #logs 锚点时再请求） -->
@@ -831,6 +853,34 @@ function escHtml(s) {
 // ── 惰性：登录日志、Nginx sudo 检测（进入视口或锚点时再请求，首屏不读日志、不 exec）──
 (function initSettingsLazy() {
     var logsLoaded = false;
+    var nginxReloadForm = document.getElementById('nginx-reload-form');
+    var nginxReloadBtn = document.getElementById('nginx-reload-btn');
+    var nginxReloadNote = document.getElementById('nginx-reload-note');
+    var nginxSubmitting = false;
+
+    function setNginxReloadUi(state, note) {
+        if (nginxReloadBtn) {
+            if (state === 'submitting') {
+                nginxReloadBtn.disabled = true;
+                nginxReloadBtn.textContent = '处理中...';
+            } else {
+                nginxReloadBtn.disabled = false;
+                nginxReloadBtn.textContent = '🔄 生成配置并 Reload Nginx';
+            }
+        }
+        if (nginxReloadNote && note) {
+            nginxReloadNote.textContent = note;
+        }
+    }
+
+    if (nginxReloadForm) {
+        nginxReloadForm.addEventListener('submit', function() {
+            if (nginxSubmitting) return false;
+            nginxSubmitting = true;
+            setNginxReloadUi('submitting', '正在生成配置并触发 Nginx Reload，请稍候...');
+        });
+    }
+
     function loadLoginLogsOnce() {
         if (logsLoaded) return;
         logsLoaded = true;
@@ -876,12 +926,29 @@ function escHtml(s) {
         nginxLoaded = true;
         var el = document.getElementById('nginx-sudo-banner');
         if (!el) return;
+        setNginxReloadUi('checking', '正在检测 Nginx reload 运行环境...');
         fetch('settings_ajax.php?action=nginx_sudo', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function(r){ return r.json(); })
             .then(function(d){
-                if (!d.ok) return;
-                if (d.sudo_ok) { el.innerHTML = ''; return; }
-                el.innerHTML = '<div class="alert alert-warn">⚠️ 未检测到 sudo 权限，Reload 功能将无法使用。请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre></div>';
+                if (!d.ok) {
+                    setNginxReloadUi('ready', '环境检测失败，但仍可尝试提交，失败时会显示具体原因。');
+                    return;
+                }
+                if (d.reload_ok) {
+                    el.innerHTML = '';
+                    setNginxReloadUi('ready', d.message || '环境检测通过，可以直接生成配置并 Reload。');
+                    return;
+                }
+                var html = '<div class="alert alert-warn">⚠️ ' + escHtml(d.message || '未检测到可用的 Nginx reload 执行权限。');
+                if (d.sudo_hint) {
+                    html += '<br>请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre>';
+                }
+                html += '</div>';
+                el.innerHTML = html;
+                setNginxReloadUi('warn', '环境检测未通过，点击按钮后会返回明确错误；也可以先按上方提示补齐执行权限。');
+            })
+            .catch(function(){
+                setNginxReloadUi('ready', '环境检测请求失败，但仍可尝试提交，失败时会显示具体原因。');
             });
     }
 
