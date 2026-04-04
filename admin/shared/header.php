@@ -41,12 +41,14 @@ $nav_items = [
     ['file' => 'sites.php',    'icon' => '🔗', 'label' => '站点管理'],
     ['file' => 'groups.php',   'icon' => '📁', 'label' => '分组管理'],
     ['sep'],
+    ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
+    ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
+    ['sep'],
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
-    ['file' => 'dns.php', 'icon' => '🌐', 'label' => '域名解析'],
 
 ];
 ?>

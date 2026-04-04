@@ -119,32 +119,91 @@ function admin_run_command(string $command): array {
 // ── 备份与恢复 ──
 
 /**
- * 创建一条备份记录（打包 sites.json + config.json）
+ * 组装与「备份下载 / 导出配置」一致的 JSON 载荷（不写文件）。
+ * 包含：sites、config、scheduled_tasks（含各任务的 command 脚本）、dns_config（域名解析账户）。
+ *
+ * @param string $trigger 触发标识：manual / export / auto_import 等
+ * @return array<string, mixed>
+ */
+function backup_collect_payload(string $trigger = 'manual'): array {
+    $sites_data  = file_exists(SITES_FILE)  ? file_get_contents(SITES_FILE)  : '{}';
+    $config_data = file_exists(CONFIG_FILE) ? file_get_contents(CONFIG_FILE) : '{}';
+
+    $st_file  = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file = DATA_DIR . '/dns_config.json';
+
+    return [
+        'created_at'      => date('Y-m-d H:i:s'),
+        'trigger'         => $trigger,
+        'sites'           => json_decode($sites_data, true) ?? [],
+        'config'          => json_decode($config_data, true) ?? [],
+        'scheduled_tasks' => file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [],
+        'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
+    ];
+}
+
+/**
+ * 将备份/导入 JSON 中的各段写入数据文件。仅处理传入的键；未提供的键不覆盖现有文件。
+ * 写入计划任务或 DNS 配置后会刷新 crontab / 清除 DNS Zone 缓存。
+ *
+ * @param array<string, mixed> $data
+ */
+function backup_apply_restored_sections(array $data): void {
+    $wrote_st  = false;
+    $wrote_dns = false;
+
+    if (isset($data['sites'])) {
+        file_put_contents(SITES_FILE,
+            json_encode($data['sites'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            LOCK_EX);
+    }
+    if (isset($data['config']) && is_array($data['config'])) {
+        file_put_contents(CONFIG_FILE,
+            json_encode($data['config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            LOCK_EX);
+    }
+
+    $st_file  = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file = DATA_DIR . '/dns_config.json';
+    if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
+        file_put_contents($st_file,
+            json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+        $wrote_st = true;
+    }
+    if (isset($data['dns_config']) && is_array($data['dns_config'])) {
+        file_put_contents($dns_file,
+            json_encode($data['dns_config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+        $wrote_dns = true;
+    }
+
+    if ($wrote_st) {
+        require_once __DIR__ . '/cron_lib.php';
+        cron_regenerate();
+    }
+    if ($wrote_dns) {
+        require_once __DIR__ . '/dns_api_lib.php';
+        dns_api_invalidate_zones_cache();
+    }
+}
+
+/**
+ * 创建一条备份记录（与导出配置使用同一载荷结构）
  * @param string $trigger  备份触发方式：manual / auto_import / auto_settings
  * @return string 备份文件路径
  */
 function backup_create(string $trigger = 'manual'): string {
-    if (!is_dir(BACKUPS_DIR)) mkdir(BACKUPS_DIR, 0755, true);
+    if (!is_dir(BACKUPS_DIR)) {
+        mkdir(BACKUPS_DIR, 0755, true);
+    }
 
-    $sites_data  = file_exists(SITES_FILE)  ? file_get_contents(SITES_FILE)  : '{}';
-    $config_data = file_exists(CONFIG_FILE) ? file_get_contents(CONFIG_FILE) : '{}';
-
-    $st_file = DATA_DIR . '/scheduled_tasks.json';
-    $dns_file = DATA_DIR . '/dns_config.json';
-    $backup = [
-        'created_at' => date('Y-m-d H:i:s'),
-        'trigger'    => $trigger,
-        'sites'      => json_decode($sites_data, true)  ?? [],
-        'config'     => json_decode($config_data, true) ?? [],
-        'scheduled_tasks' => file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [],
-        'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
-    ];
+    $backup = backup_collect_payload($trigger);
 
     $filename = 'backup_' . date('Ymd_His') . '_' . $trigger . '.json';
     $path     = BACKUPS_DIR . '/' . $filename;
     file_put_contents($path, json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
 
-    // 清理超出数量的旧备份
     backup_cleanup();
 
     return $path;
@@ -204,26 +263,7 @@ function backup_restore(string $filename): bool {
     // 恢复前先备份当前状态
     backup_create('auto_before_restore');
 
-    // 写入 sites.json
-    if (isset($data['sites'])) {
-        file_put_contents(SITES_FILE,
-            json_encode($data['sites'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-    }
-    // 写入 config.json
-    if (isset($data['config'])) {
-        file_put_contents(CONFIG_FILE,
-            json_encode($data['config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-    }
-    $st_file = DATA_DIR . '/scheduled_tasks.json';
-    $dns_file = DATA_DIR . '/dns_config.json';
-    if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
-        file_put_contents($st_file,
-            json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    }
-    if (isset($data['dns_config']) && is_array($data['dns_config'])) {
-        file_put_contents($dns_file,
-            json_encode($data['dns_config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    }
+    backup_apply_restored_sections($data);
     return true;
 }
 
@@ -336,7 +376,7 @@ function debug_set_display_errors(bool $on): array {
 
 /**
  * 读取日志文件内容（倒序，最新在前）
- * @param string $type  nginx_access | nginx_error | nginx_main | php_fpm | request_timing
+ * @param string $type  nginx_access | nginx_error | nginx_main | php_fpm | request_timing | dns | dns_python
  * @param int    $lines 读取行数
  */
 function debug_read_log(string $type, int $lines = 100): string {
@@ -346,6 +386,8 @@ function debug_read_log(string $type, int $lines = 100): string {
         'nginx_main'     => '/var/log/nginx/error.log',
         'php_fpm'        => '/var/log/php-fpm/error.log',
         'request_timing' => DATA_DIR . '/logs/request_timing.log',
+        'dns'            => DATA_DIR . '/logs/dns.log',
+        'dns_python'     => DATA_DIR . '/logs/dns_python.log',
     ];
     $path = $map[$type] ?? '';
     if (!$path)              return '（未知日志类型）';
@@ -710,11 +752,14 @@ function webhook_test(): array {
 function nginx_generate_proxy_conf(): array {
     $cfg        = load_config();
     $nav_domain = $cfg['nav_domain'] ?? 'nav.yourdomain.com';
+    $port       = (int)(getenv('NAV_PORT') ?: 58080);
     $sites_data = load_sites();
     $groups     = $sites_data['groups'] ?? [];
 
-    // proxy_params_mode: 'simple'（精简，默认）或 'full'（完整19组参数，适合流媒体/WebSocket/大文件）
+    // proxy_params_mode: 'simple'（精简）或 'full'（完整）
     $params_mode = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+    $params_files = nginx_proxy_params_file_paths();
+    $selected_params_file = ($params_mode === 'full') ? $params_files['full'] : $params_files['simple'];
 
     $path_blocks   = []; // location /p/{slug}/ 块（追加到主站 server 内，需手动 include）
     $domain_blocks = []; // 独立 server 块（子域名模式）
@@ -729,108 +774,17 @@ function nginx_generate_proxy_conf(): array {
             }
             $name   = $s['name'] ?? $s['id'];
 
-            if ($params_mode === 'full') {
-                $proxy_params_path = [
-                    "        proxy_http_version              1.1;",
-                    "        proxy_set_header                Upgrade                        \$http_upgrade;",
-                    "        proxy_set_header                Connection                     \"upgrade\";",
-                    "        proxy_set_header                Sec-WebSocket-Extensions       \$http_sec_websocket_extensions;",
-                    "        proxy_set_header                Sec-WebSocket-Key              \$http_sec_websocket_key;",
-                    "        proxy_set_header                Sec-WebSocket-Version          \$http_sec_websocket_version;",
-                    "        proxy_set_header                Host                           \$host;",
-                    "        proxy_set_header                X-Real-IP                      \$remote_addr;",
-                    "        proxy_set_header                REMOTE-HOST                    \$remote_addr;",
-                    "        proxy_set_header                X-Forwarded-For                \$proxy_add_x_forwarded_for;",
-                    "        proxy_set_header                X-Forwarded-Proto              \$scheme;",
-                    "        proxy_set_header                X-Forwarded-Host               \$host;",
-                    "        proxy_set_header                X-Forwarded-Port               \$server_port;",
-                    "        proxy_set_header                X-Original-URI                 \$request_uri;",
-                    "        proxy_set_header                Authorization                  \$http_authorization;",
-                    "        proxy_set_header                Cookie                         \$http_cookie;",
-                    "        proxy_pass_header               Set-Cookie;",
-                    "        proxy_pass_request_headers      on;",
-                    "        proxy_pass_request_body         on;",
-                    "        proxy_set_header                Range                          \$http_range;",
-                    "        proxy_set_header                If-Range                       \$http_if_range;",
-                    "        proxy_set_header                Accept                         \$http_accept;",
-                    "        proxy_set_header                Accept-Encoding                \$http_accept_encoding;",
-                    "        proxy_set_header                Accept-Language                \$http_accept_language;",
-                    "        proxy_set_header                Origin                         \$http_origin;",
-                    "        proxy_set_header                Referer                        \$http_referer;",
-                    "        proxy_set_header                User-Agent                     \$http_user_agent;",
-                    "        proxy_set_header                Cache-Control                  \$http_cache_control;",
-                    "        proxy_set_header                If-Modified-Since              \$http_if_modified_since;",
-                    "        proxy_set_header                If-None-Match                  \$http_if_none_match;",
-                    "        proxy_set_header                Access-Control-Request-Headers \$http_access_control_request_headers;",
-                    "        proxy_set_header                Access-Control-Request-Method  \$http_access_control_request_method;",
-                    "        client_max_body_size            0;",
-                    "        client_body_timeout             86400s;",
-                    "        proxy_request_buffering         off;",
-                    "        proxy_buffering                 off;",
-                    "        proxy_buffer_size               16k;",
-                    "        proxy_buffers                   4 32k;",
-                    "        proxy_busy_buffers_size         64k;",
-                    "        proxy_max_temp_file_size        0;",
-                    "        proxy_cache                     off;",
-                    "        proxy_no_cache                  1;",
-                    "        proxy_cache_bypass              1;",
-                    "        proxy_connect_timeout           600s;",
-                    "        proxy_send_timeout              86400s;",
-                    "        proxy_read_timeout              86400s;",
-                    "        keepalive_timeout               600s;",
-                    "        send_timeout                    86400s;",
-                    "        proxy_intercept_errors          off;",
-                    "        proxy_redirect                  off;",
-                    "        proxy_hide_header               X-Powered-By;",
-                    "        proxy_pass_header               Server;",
-                    "        proxy_pass_header               Content-Type;",
-                    "        proxy_pass_header               Content-Length;",
-                    "        proxy_pass_header               Content-Encoding;",
-                    "        proxy_pass_header               Content-Range;",
-                    "        proxy_pass_header               Accept-Ranges;",
-                    "        proxy_pass_header               ETag;",
-                    "        proxy_pass_header               Last-Modified;",
-                    "        proxy_pass_header               Location;",
-                    "        proxy_pass_header               WWW-Authenticate;",
-                    "        proxy_pass_header               Access-Control-Allow-Origin;",
-                    "        proxy_pass_header               Access-Control-Allow-Methods;",
-                    "        proxy_pass_header               Access-Control-Allow-Headers;",
-                    "        proxy_pass_header               Access-Control-Allow-Credentials;",
-                    "        proxy_pass_header               Access-Control-Expose-Headers;",
-                    "        proxy_pass_header               Access-Control-Max-Age;",
-                ];
-                $proxy_params_domain = $proxy_params_path; // 子域名模式复用相同参数
-            } else {
-                // 精简模式（默认）
-                $proxy_params_path = [
-                    "        proxy_http_version 1.1;",
-                    "        proxy_set_header  Upgrade \$http_upgrade;",
-                    "        proxy_set_header  Connection \$connection_upgrade;",
-                    "        proxy_set_header  Host \$host;",
-                    "        proxy_set_header  X-Real-IP \$remote_addr;",
-                    "        proxy_set_header  X-Forwarded-For \$proxy_add_x_forwarded_for;",
-                    "        proxy_set_header  X-Forwarded-Proto \$scheme;",
-                    "        proxy_connect_timeout 10s;",
-                    "        proxy_send_timeout    60s;",
-                    "        proxy_read_timeout    60s;",
-                    "        proxy_buffering       on;",
-                    "        proxy_buffer_size     8k;",
-                    "        proxy_buffers         8 16k;",
-                    "        proxy_busy_buffers_size 32k;",
-                ];
-                $proxy_params_domain = $proxy_params_path;
-            }
-
             if (($s['proxy_mode'] ?? 'path') === 'path') {
                 $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
                 $block_lines = [
                     "    # {$name}",
                     "    location /p/{$slug}/ {",
+                    "        if (\$cookie_nav_session = \"\") { return 302 /login.php?redirect=\$request_uri; }",
                     "        auth_request      /auth/verify.php;",
                     "        error_page 401  = @login_redirect;",
                     "        proxy_pass        {$target}/;",
+                    "        include           {$selected_params_file};",
                 ];
-                foreach ($proxy_params_path as $pl) $block_lines[] = $pl;
                 $block_lines[] = "    }";
                 $path_blocks[] = implode("\n", $block_lines);
             } else {
@@ -839,31 +793,37 @@ function nginx_generate_proxy_conf(): array {
                 if (!$pd) continue;
                 $block_lines = [
                     "server {",
-                    "    listen 443 ssl http2;",
+                    "    listen {$port};",
+                    "    listen [::]:{$port};",
                     "    server_name {$pd};",
-                    "    # 复用主站证书（需通配符证书）或单独申请",
-                    "    ssl_certificate     /etc/letsencrypt/live/{$nav_domain}/fullchain.pem;",
-                    "    ssl_certificate_key /etc/letsencrypt/live/{$nav_domain}/privkey.pem;",
                     "",
                     "    location = /auth/verify {",
                     "        internal;",
-                    "        proxy_pass https://{$nav_domain}/auth/verify.php;",
-                    "        proxy_pass_request_body off;",
-                    "        proxy_set_header Content-Length \"\";",
-                    "        proxy_set_header Cookie \$http_cookie;",
+                    "        fastcgi_pass unix:/run/php-fpm.sock;",
+                    "        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/auth/verify.php;",
+                    "        fastcgi_pass_request_body off;",
+                    "        fastcgi_param CONTENT_LENGTH \"\";",
+                    "        include fastcgi_params;",
+                    "        fastcgi_param HTTP_X_REAL_IP \$remote_addr;",
+                    "        fastcgi_param HTTP_X_FORWARDED_FOR \$proxy_add_x_forwarded_for;",
+                    "        fastcgi_param HTTP_X_FORWARDED_PROTO \$http_x_forwarded_proto;",
+                    "        fastcgi_connect_timeout 10s;",
+                    "        fastcgi_send_timeout 30s;",
+                    "        fastcgi_read_timeout 30s;",
                     "    }",
                     "",
                     "    location / {",
+                    "        if (\$cookie_nav_session = \"\") { return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri; }",
                     "        auth_request /auth/verify;",
                     "        error_page 401 = @nav_login;",
                     "        proxy_pass {$target};",
+                    "        include {$selected_params_file};",
                 ];
-                foreach ($proxy_params_domain as $pl) $block_lines[] = '    ' . ltrim($pl);
                 $block_lines = array_merge($block_lines, [
                     "    }",
                     "",
                     "    location @nav_login {",
-                    "        return 302 https://{$nav_domain}/login.php?redirect=\$request_uri;",
+                    "        return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri;",
                     "    }",
                     "}",
                 ]);
@@ -912,6 +872,16 @@ function nginx_generate_proxy_conf(): array {
 
     $path_conf   = implode("\n", $path_lines);
     $domain_conf = implode("\n", $domain_lines);
+
+    $templateResult = nginx_write_proxy_params_templates();
+    if (!$templateResult['ok']) {
+        return [
+            'ok' => false,
+            'msg' => $templateResult['msg'],
+            'path_conf' => $path_conf,
+            'domain_conf' => $domain_conf,
+        ];
+    }
 
     // 写入配置文件
     $path_conf_path   = nginx_proxy_conf_path();
@@ -979,7 +949,7 @@ function nginx_apply_proxy_conf(bool $reload = false): array {
 
 /**
  * 自动检测 Nginx 可执行文件路径
- * 按优先级检测：宝塔路径 → 标准路径 → which 命令
+ * 按优先级检测：标准路径 → which 命令
  */
 function nginx_bin(): string {
     static $cached = null;
@@ -987,7 +957,6 @@ function nginx_bin(): string {
         return $cached;
     }
     $candidates = [
-        '/www/server/nginx/sbin/nginx', // 宝塔面板
         '/usr/sbin/nginx',              // Ubuntu/Debian 标准
         '/usr/local/sbin/nginx',        // 编译安装
         '/usr/local/bin/nginx',         // macOS Homebrew
@@ -1066,28 +1035,281 @@ function nginx_reload_capability(): array {
 }
 
 /**
- * 自动检测 Nginx 反代配置文件路径
- * 宝塔：/www/server/nginx/conf/nav-proxy.conf
- * 标准：/etc/nginx/conf.d/nav-proxy.conf
+ * Nginx 反代配置文件路径
  */
 function nginx_proxy_conf_path(): string {
-    // 宝塔环境
-    if (is_dir('/www/server/nginx/conf')) {
-        return '/www/server/nginx/conf/nav-proxy.conf';
-    }
     return '/etc/nginx/conf.d/nav-proxy.conf';
 }
 
 /**
- * 自动检测 Nginx 子域名反代配置文件路径
- * 宝塔：/www/server/nginx/conf/nav-proxy-domains.conf
- * 标准：/etc/nginx/http.d/nav-proxy-domains.conf
+ * Nginx 子域名反代配置文件路径
  */
 function nginx_domain_proxy_conf_path(): string {
-    if (is_dir('/www/server/nginx/conf')) {
-        return '/www/server/nginx/conf/nav-proxy-domains.conf';
-    }
     return '/etc/nginx/http.d/nav-proxy-domains.conf';
+}
+
+/**
+ * 反代参数文件路径（精简 / 完整）
+ * 通过 include 引入，便于模式切换与审计
+ * @return array{simple:string,full:string}
+ */
+function nginx_proxy_params_file_paths(): array {
+    $baseDataDir = realpath(DATA_DIR) ?: DATA_DIR;
+    $dir = rtrim($baseDataDir, '/') . '/nginx';
+    return [
+        'simple' => $dir . '/proxy-params-simple.conf',
+        'full' => $dir . '/proxy-params-full.conf',
+    ];
+}
+
+/**
+ * 生成并写入反代参数模板文件
+ * full：使用 nginx-conf/proxy_params_full.conf
+ * simple：使用 nginx-conf/proxy_params_simple.conf
+ * @return array{ok:bool,msg:string}
+ */
+function nginx_write_proxy_params_templates(): array {
+    $paths = nginx_proxy_params_file_paths();
+    $dir = dirname($paths['simple']);
+    if (!is_dir($dir)) {
+        if (!@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['ok' => false, 'msg' => '创建反代参数模板目录失败：' . $dir];
+        }
+    }
+
+    $projectRoot = dirname(__DIR__, 2);
+    $simpleTemplatePath = $projectRoot . '/nginx-conf/proxy_params_simple.conf';
+    $fullTemplatePath = $projectRoot . '/nginx-conf/proxy_params_full.conf';
+
+    $simpleContent = @file_get_contents($simpleTemplatePath);
+    if ($simpleContent === false || trim($simpleContent) === '') {
+        return ['ok' => false, 'msg' => '读取精简模板失败：' . $simpleTemplatePath];
+    }
+
+    $fullContent = @file_get_contents($fullTemplatePath);
+    if ($fullContent === false || trim($fullContent) === '') {
+        return ['ok' => false, 'msg' => '读取完整模板失败：' . $fullTemplatePath];
+    }
+
+    $okSimple = @file_put_contents($paths['simple'], rtrim($simpleContent) . "\n", LOCK_EX);
+    $okFull = @file_put_contents($paths['full'], rtrim($fullContent) . "\n", LOCK_EX);
+    if ($okSimple === false || $okFull === false) {
+        return ['ok' => false, 'msg' => '写入反代参数模板文件失败，请检查 Nginx 配置目录写入权限'];
+    }
+    return ['ok' => true, 'msg' => 'ok'];
+}
+
+
+/**
+ * 主配置路径（优先运行环境，其次仓库 docker 示例）
+ */
+function nginx_main_conf_path(): string {
+    $runtime = '/etc/nginx/nginx.conf';
+    if (is_file($runtime)) {
+        return $runtime;
+    }
+    return dirname(__DIR__, 2) . '/docker/nginx.conf';
+}
+
+/**
+ * HTTP 模块编辑入口（当前与主配置同文件）
+ */
+function nginx_http_conf_path(): string {
+    return nginx_main_conf_path();
+}
+
+/**
+ * 可编辑目标定义
+ * @return array<string,array{label:string,path:string}>
+ */
+function nginx_editable_targets(): array {
+    return [
+        'main' => [
+            'label' => 'Nginx 主配置',
+            'path' => nginx_main_conf_path(),
+        ],
+        'http' => [
+            'label' => 'Nginx HTTP 模块',
+            'path' => nginx_http_conf_path(),
+        ],
+        'proxy_path' => [
+            'label' => 'Nginx 反代配置（路径模式）',
+            'path' => nginx_proxy_conf_path(),
+        ],
+        'proxy_domain' => [
+            'label' => 'Nginx 反代配置（子域名模式）',
+            'path' => nginx_domain_proxy_conf_path(),
+        ],
+        'proxy_params_simple' => [
+            'label' => 'Nginx 反代参数模板（精简模式）',
+            'path' => nginx_proxy_params_file_paths()['simple'],
+        ],
+        'proxy_params_full' => [
+            'label' => 'Nginx 反代参数模板（完整模式）',
+            'path' => nginx_proxy_params_file_paths()['full'],
+        ],
+    ];
+}
+
+/**
+ * 解析 nginx.conf 内 http { ... } 的边界
+ * @return array{open:int,close:int,inner_start:int,inner_end:int}|null
+ */
+function nginx_http_block_bounds(string $content): ?array {
+    if (!preg_match('/\bhttp\s*\{/i', $content, $m, PREG_OFFSET_CAPTURE)) {
+        return null;
+    }
+    $start = (int)$m[0][1];
+    $openPos = strpos($content, '{', $start);
+    if ($openPos === false) {
+        return null;
+    }
+    $len = strlen($content);
+    $depth = 0;
+    for ($i = $openPos; $i < $len; $i++) {
+        $ch = $content[$i];
+        if ($ch === '{') {
+            $depth++;
+        } elseif ($ch === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return [
+                    'open' => $openPos,
+                    'close' => $i,
+                    'inner_start' => $openPos + 1,
+                    'inner_end' => $i - 1,
+                ];
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 读取指定编辑目标内容
+ * @return array{ok:bool,msg:string,content:string,path:string,label:string}
+ */
+function nginx_read_target(string $target): array {
+    $targets = nginx_editable_targets();
+    if (!isset($targets[$target])) {
+        return ['ok' => false, 'msg' => '未知配置目标', 'content' => '', 'path' => '', 'label' => ''];
+    }
+    $path = $targets[$target]['path'];
+    $label = $targets[$target]['label'];
+
+    if (($target === 'proxy_params_simple' || $target === 'proxy_params_full') && !is_file($path)) {
+        $initResult = nginx_write_proxy_params_templates();
+        if (!$initResult['ok']) {
+            return ['ok' => false, 'msg' => $initResult['msg'], 'content' => '', 'path' => $path, 'label' => $label];
+        }
+    }
+
+    if (!is_file($path)) {
+        return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'content' => '', 'path' => $path, 'label' => $label];
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        return ['ok' => false, 'msg' => '读取配置文件失败：' . $path, 'content' => '', 'path' => $path, 'label' => $label];
+    }
+
+    if ($target !== 'http') {
+        return ['ok' => true, 'msg' => '', 'content' => $raw, 'path' => $path, 'label' => $label];
+    }
+
+    $bounds = nginx_http_block_bounds($raw);
+    if (!$bounds) {
+        return ['ok' => false, 'msg' => '未找到 http { ... } 模块', 'content' => '', 'path' => $path, 'label' => $label];
+    }
+    $inner = substr($raw, $bounds['inner_start'], $bounds['inner_end'] - $bounds['inner_start'] + 1);
+    return ['ok' => true, 'msg' => '', 'content' => $inner, 'path' => $path, 'label' => $label];
+}
+
+/**
+ * 写入指定编辑目标内容
+ * @return array{ok:bool,msg:string,path:string}
+ */
+function nginx_write_target(string $target, string $content): array {
+    $targets = nginx_editable_targets();
+    if (!isset($targets[$target])) {
+        return ['ok' => false, 'msg' => '未知配置目标', 'path' => ''];
+    }
+
+    // 防止异常超大提交导致内存/磁盘压力
+    if (strlen($content) > 2 * 1024 * 1024) {
+        return ['ok' => false, 'msg' => '配置内容过大（超过 2MB）', 'path' => $targets[$target]['path'] ?? ''];
+    }
+
+    $path = $targets[$target]['path'];
+
+    if (($target === 'proxy_params_simple' || $target === 'proxy_params_full') && !is_file($path)) {
+        $initResult = nginx_write_proxy_params_templates();
+        if (!$initResult['ok']) {
+            return ['ok' => false, 'msg' => $initResult['msg'], 'path' => $path];
+        }
+    }
+
+    if (!is_file($path)) {
+        return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'path' => $path];
+    }
+
+    if ($target === 'http') {
+        $raw = @file_get_contents($path);
+        if ($raw === false) {
+            return ['ok' => false, 'msg' => '读取配置文件失败：' . $path, 'path' => $path];
+        }
+        $bounds = nginx_http_block_bounds($raw);
+        if (!$bounds) {
+            return ['ok' => false, 'msg' => '未找到 http { ... } 模块', 'path' => $path];
+        }
+        $newRaw = substr($raw, 0, $bounds['inner_start'])
+            . "\n" . rtrim($content) . "\n"
+            . substr($raw, $bounds['close']);
+        $ok = @file_put_contents($path, $newRaw, LOCK_EX);
+        return $ok === false
+            ? ['ok' => false, 'msg' => '写入失败，请检查文件权限：' . $path, 'path' => $path]
+            : ['ok' => true, 'msg' => '已保存：' . $path, 'path' => $path];
+    }
+
+    $ok = @file_put_contents($path, $content, LOCK_EX);
+    return $ok === false
+        ? ['ok' => false, 'msg' => '写入失败，请检查文件权限：' . $path, 'path' => $path]
+        : ['ok' => true, 'msg' => '已保存：' . $path, 'path' => $path];
+}
+
+/**
+ * 仅执行 nginx -t 语法检测
+ * @return array{ok:bool,msg:string,test_output:string}
+ */
+function nginx_test_config(): array {
+    $capability = nginx_reload_capability();
+    $nginx = $capability['nginx_bin'];
+    $safe_nginx = escapeshellarg($nginx);
+
+    $test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
+    if ($test['ok']) {
+        return [
+            'ok' => true,
+            'msg' => 'Nginx 配置语法检测通过',
+            'test_output' => $test['output'],
+        ];
+    }
+
+    $use_wrapper = ($capability['method'] === 'wrapper')
+        || (is_executable('/usr/local/bin/nginx-test'));
+    if ($use_wrapper) {
+        $wrapperTest = admin_run_command('/usr/local/bin/nginx-test');
+        return [
+            'ok' => $wrapperTest['ok'],
+            'msg' => $wrapperTest['ok'] ? 'Nginx 配置语法检测通过' : 'Nginx 配置语法检测失败',
+            'test_output' => $wrapperTest['output'],
+        ];
+    }
+
+    return [
+        'ok' => false,
+        'msg' => '未检测到可用的 Nginx 语法检测执行方式',
+        'test_output' => $test['output'],
+    ];
 }
 
 /**

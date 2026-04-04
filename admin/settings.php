@@ -14,14 +14,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $action = $_POST['action'] ?? '';
 
-        // ── 导出配置（统一备份格式：sites + config）──
+        // ── 导出配置（与备份下载、backup_create 同一载荷：含计划任务与 DNS 账户）──
         if ($action === 'export_sites' || $action === 'export_config') {
-            $export = [
-                'created_at' => date('Y-m-d H:i:s'),
-                'trigger'    => 'export',
-                'sites'      => load_sites(),
-                'config'     => load_config(),
-            ];
+            $export = backup_collect_payload('export');
             $json = json_encode($export, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             header('Content-Type: application/json; charset=utf-8');
             header('Content-Disposition: attachment; filename="nav_export_' . date('Ymd_His') . '.json"');
@@ -35,8 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('error', '请选择要导入的文件');
                 header('Location: settings.php'); exit;
             }
-            if ($_FILES['import_file']['size'] > 2 * 1024 * 1024) {
-                flash_set('error', '文件过大，配置文件不应超过 2MB');
+            if ($_FILES['import_file']['size'] > 4 * 1024 * 1024) {
+                flash_set('error', '文件过大，配置文件不应超过 4MB');
                 header('Location: settings.php'); exit;
             }
             $raw = file_get_contents($_FILES['import_file']['tmp_name']);
@@ -54,15 +49,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // 识别格式：新备份格式 {created_at, trigger, sites:{groups:[]}, config:{}}
             //           旧格式 {groups:[]}
             if (isset($obj['sites']['groups']) && is_array($obj['sites']['groups'])) {
-                // 新统一格式
-                file_put_contents(SITES_FILE, json_encode($obj['sites'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-                if (!empty($obj['config']) && is_array($obj['config'])) {
-                    // 合并默认值，避免旧备份缺少新字段导致 Warning
-                    $merged_cfg = array_merge(auth_default_config(), $obj['config']);
-                    file_put_contents(CONFIG_FILE, json_encode($merged_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+                // 新统一格式（与备份恢复一致，可选含 scheduled_tasks、dns_config）
+                $merged_cfg = !empty($obj['config']) && is_array($obj['config'])
+                    ? array_merge(auth_default_config(), $obj['config'])
+                    : auth_default_config();
+                $apply = [
+                    'sites'  => $obj['sites'],
+                    'config' => $merged_cfg,
+                ];
+                if (isset($obj['scheduled_tasks']) && is_array($obj['scheduled_tasks'])) {
+                    $apply['scheduled_tasks'] = $obj['scheduled_tasks'];
                 }
+                if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
+                    $apply['dns_config'] = $obj['dns_config'];
+                }
+                backup_apply_restored_sections($apply);
                 $gc = count($obj['sites']['groups']);
-                flash_set('success', '导入成功（完整备份格式），共 ' . $gc . ' 个分组，旧配置已自动备份');
+                $parts = [$gc . ' 个分组'];
+                if (isset($apply['scheduled_tasks']) && is_array($apply['scheduled_tasks'])) {
+                    $tc = count($apply['scheduled_tasks']['tasks'] ?? []);
+                    $parts[] = $tc . ' 条计划任务';
+                }
+                if (isset($apply['dns_config'])) {
+                    $parts[] = 'DNS 账户已同步';
+                }
+                flash_set('success', '导入成功（完整格式）：' . implode('，', $parts) . '；旧配置已自动备份');
             } elseif (isset($obj['groups']) && is_array($obj['groups'])) {
                 // 旧 sites-only 格式
                 file_put_contents(SITES_FILE, json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
@@ -443,7 +454,7 @@ $cfg = auth_get_config();
     </form>
     <a href="backups.php" class="btn btn-secondary">📋 备份管理</a>
   </div>
-  <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」格式完全一致，导入时自动识别格式。</div>
+  <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」为同一 JSON 结构（站点、系统配置、计划任务含脚本、DNS 解析账户）。不含用户账户、任务日志、<code>data/tasks/</code> 下任务工作区文件等。导入时自动识别格式。</div>
 </div>
 
 <script>
@@ -451,8 +462,8 @@ $cfg = auth_get_config();
 function handleImportFile(input) {
     if (!input.files || !input.files.length) return;
     var file = input.files[0];
-    if (file.size > 2 * 1024 * 1024) {
-        showToast('文件过大，配置文件不应超过 2MB', 'error');
+    if (file.size > 4 * 1024 * 1024) {
+        showToast('文件过大，配置文件不应超过 4MB', 'error');
         input.value = '';
         return;
     }
@@ -465,7 +476,16 @@ function handleImportFile(input) {
             if (obj && obj.sites && Array.isArray(obj.sites.groups)) {
                 // 新统一格式（备份/导出）
                 groupCount = obj.sites.groups.length;
-                formatLabel = '完整备份格式，含 ' + groupCount + ' 个分组及系统配置';
+                var extras = [];
+                var tasks = obj.scheduled_tasks && obj.scheduled_tasks.tasks;
+                if (Array.isArray(tasks) && tasks.length) {
+                    extras.push('计划任务 ' + tasks.length + ' 条（含脚本）');
+                }
+                if (obj.dns_config && typeof obj.dns_config === 'object') {
+                    extras.push('DNS 账户');
+                }
+                formatLabel = '完整备份格式，' + groupCount + ' 个分组及系统配置' +
+                    (extras.length ? '，另含 ' + extras.join('、') : '');
             } else if (obj && Array.isArray(obj.groups)) {
                 // 旧 sites-only 格式
                 groupCount = obj.groups.length;
@@ -540,6 +560,11 @@ document.addEventListener('DOMContentLoaded', function() {
 <div class="card" id="nginx">
   <div class="card-title">🔀 Nginx 反代管理
     <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">方案A：自动生成配置 + reload</span>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px">
+    <div style="font-size:12px;color:var(--tx2)">Nginx 已拆分为独立后台模块，可在专用编辑器中查看/编辑主配置、HTTP 模块和全部反代配置。</div>
+    <a href="nginx.php" class="btn btn-secondary">打开 Nginx 管理</a>
   </div>
 
   <!-- Reload 执行环境：首屏不 exec，进入本区域时异步检测 -->

@@ -1,32 +1,49 @@
-# Docker 构建时排除的文件
+# Docker 构建时排除的文件（生产镜像）
 # ============================================================
 
 # 运行时数据（通过 Volume 挂载，不打入镜像）
-data/users.json
-data/config.json
-data/sites.json
-data/ip_locks.json
-data/.installed
-data/backups/
-data/logs/
-data/favicon_cache/
-data/bg/
+data/
+# 旧版目录名（迁移到 data/ 前本地可能仍存在）
+nav-data/
 
 # 环境配置（敏感信息）
 .env
+.env.*
 
-# Git
+# Git / CI 元数据
 .git/
 .gitignore
+.github/
 
-# 文档
+# 文档与说明
+# 仅保留 docs；运行时需要的 nginx-conf 模板必须打包进镜像
 docs/
 *.md
 
-# 开发工具
-.vscode/
-.idea/
+# 本地开发与测试文件
+local/
+smoke/
+
+# 可能在宿主机生成的日志目录/文件
+logs/
 *.log
 
-# 打包脚本（不需要打入镜像）
+# 开发工具与临时缓存
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+.cache/
+
+# Python 缓存
+python/__pycache__/
+*.pyc
+
+# 开发专用配置（生产不用）
+local/php-dev.ini
+
+# 部署编排/调试脚本（不需要打入运行镜像）
+docker-compose.yml
 pack.sh
+

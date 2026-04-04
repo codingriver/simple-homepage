@@ -543,11 +543,18 @@ cd simple-homepage
 # 复制本地配置
 cp local/.env.example local/.env
 
-# 一键构建并启动
+# 一键构建并启动（生产式本地镜像，无源码挂载）
 bash local/docker-build.sh
+
+# 日常开发（源码热更新、开发 PHP 配置、内置测试账号）— 推荐
+bash local/docker-build.sh dev
 ```
 
-访问：`http://localhost:58080`
+详见 `local/README.md`。
+
+**无人值守安装**：在 `local/.env` 或 Compose 环境中设置合法 `ADMIN`，`PASSWORD` 可留空，可选 `NAME`、`DOMAIN`；若 `ADMIN` 为空或非法则强制走安装向导（详见 `local/README.md`）。
+
+访问：`http://localhost:58080`（端口以 `local/.env` 中 `NAV_PORT` 为准）
 
 ### 镜像与 Git 提交对照
 
@@ -603,3 +610,5 @@ bash local/docker-build.sh
 ---
 
 *文档版本：v0.0.1 | 最后更新：2026-03-24* 
+>参考:
+>引用： <https://github.com/ajaxorg/ace-builds.git>

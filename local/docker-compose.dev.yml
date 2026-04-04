@@ -1,0 +1,22 @@
+# ============================================================
+# 导航网站 Docker Compose 开发覆盖配置（代码热更新）
+# 推荐入口（在项目根目录）：
+#   bash local/docker-build.sh dev
+# 说明：local/README.md
+# ============================================================
+
+services:
+  nav:
+    environment:
+      # 开发模式：启用内置测试管理员 qatest / qatest2026（生产 compose 勿设置）
+      NAV_DEV_MODE: "1"
+
+    volumes:
+      # 开发模式：挂载整个项目代码，修改 PHP/CSS/JS 后可直接生效
+      - ..:/var/www/nav
+
+      # 保持数据目录独立持久化（覆盖上面的 /var/www/nav/data）
+      - ${DATA_DIR:-../data}:/var/www/nav/data
+
+      # 开发环境 PHP 配置（仅开发模式生效）
+      - ./php-dev.ini:/usr/local/etc/php/conf.d/98-nav-dev.ini

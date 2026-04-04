@@ -386,7 +386,7 @@ $CSRF = csrf_field();
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
             style="font-family:var(--mono);font-size:12px;resize:vertical;
                    min-height:120px;max-height:400px;overflow-y:auto;line-height:1.55"></textarea>
-          <span class="form-hint">新建任务会默认打印基础命令结果和 bash 启动前注入的环境变量，方便直接观察与修改。</span>
+          <span class="form-hint">新建任务会默认打印基础命令结果和 bash 启动前注入的环境变量，方便直接观察与修改。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
         </div>
       </form>
     </div>

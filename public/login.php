@@ -10,9 +10,11 @@ require_once __DIR__ . '/../admin/shared/functions.php';
 // 检测是否需要安装
 auth_check_setup();
 
-// 已登录则跳转首页
+// 已登录则跳转到目标地址（若有），否则回首页
 if (auth_get_current_user()) {
-    header('Location: index.php');
+    $redirect = $_GET['redirect'] ?? $_POST['redirect'] ?? '';
+    $safe_redirect = auth_sanitize_redirect((string)$redirect);
+    header('Location: ' . ($safe_redirect !== '' ? $safe_redirect : 'index.php'));
     exit;
 }
 
@@ -81,12 +83,19 @@ $site_name   = $cfg['site_name'] ?? '导航中心';
       <input type="text" name="username" required autofocus autocomplete="username"
              value="<?= htmlspecialchars($_POST['username'] ?? '') ?>"></div>
     <div class="fg"><label>密码</label>
-      <input type="password" name="password" required autocomplete="current-password"></div>
+      <input type="password" name="password" autocomplete="current-password"></div>
     <label class="rm"><input type="checkbox" name="remember_me" value="1"
       <?= !empty($_POST['remember_me']) ? 'checked' : '' ?>>
       记住我<span><?= (int)(auth_get_config()['remember_me_days'] ?? 60) ?> 天免登录</span></label>
     <button type="submit" class="btn">登 录</button>
   </form>
+  <?php if (auth_dev_mode_enabled()): ?>
+  <p style="margin-top:14px;font-size:12px;color:#64748b;line-height:1.5">
+    <strong>开发模式</strong>：内置管理员 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">qatest</code>
+    / <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">qatest2026</code>
+    （数据卷中已有同名用户时以文件为准；生产环境请勿设置 <code>NAV_DEV_MODE</code>）
+  </p>
+  <?php endif; ?>
   <?php if ($users_empty): ?>
   <div class="rescue">
     ⚠️ 账户数据异常，无法登录。请通过 SSH 执行以下命令恢复：

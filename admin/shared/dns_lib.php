@@ -5,7 +5,27 @@
 require_once __DIR__ . '/../../shared/auth.php';
 
 define('DNS_CONFIG_FILE', DATA_DIR . '/dns_config.json');
+define('DNS_LOG_FILE', DATA_DIR . '/logs/dns.log');
+define('DNS_PYTHON_LOG_FILE', DATA_DIR . '/logs/dns_python.log');
 
+function dns_log_write(string $channel, string $level, string $message, array $context = []): void {
+    $path = $channel === 'python' ? DNS_PYTHON_LOG_FILE : DNS_LOG_FILE;
+    $dir = dirname($path);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+
+    $line = '[' . date('Y-m-d H:i:s') . ']'
+        . ' [' . strtoupper($channel) . ']'
+        . ' [' . strtoupper($level) . '] '
+        . $message;
+
+    if (!empty($context)) {
+        $line .= ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    @file_put_contents($path, $line . "\n", FILE_APPEND | LOCK_EX);
+}
 function dns_provider_catalog(): array {
     return [
         'aliyun' => [
@@ -36,11 +56,11 @@ function dns_provider_catalog(): array {
             'credential_fields' => [
                 [
                     'name' => 'api_token',
-                    'label' => 'API Token',
+                    'label' => 'API Token（无需邮箱）',
                     'type' => 'password',
                     'required' => true,
                     'placeholder' => '留空则保持不变',
-                    'help' => '只粘贴 Token 本体，不要带 Bearer 前缀或换行；至少需要 Zone 读取权限，编辑记录时还需要 DNS 读写权限。',
+                    'help' => '当前使用 Cloudflare API Token 接入，只需填写 Token 本体，不需要邮箱，也不要带 Bearer 前缀或换行；至少需要 Zone Read 权限。若域名列表只显示 1 个但你实际有多个域名，请在 Cloudflare Token 的 Zone Resources 中改为 Include: All zones。编辑解析记录还需要 DNS Read / DNS Write 权限。',
                 ],
             ],
         ],
@@ -226,6 +246,16 @@ function dns_cli_script_path(): string {
 
 function dns_cli_call(array $payload): array {
     $script = dns_cli_script_path();
+    $action = (string)($payload['action'] ?? 'unknown');
+    $startedAt = microtime(true);
+
+    dns_log_write('app', 'info', 'DNS CLI call start', [
+        'action' => $action,
+        'account_id' => (string)($payload['account']['id'] ?? ''),
+        'zone_id' => (string)($payload['zone']['id'] ?? ''),
+        'zone_name' => (string)($payload['zone']['name'] ?? ''),
+    ]);
+
     $cmd = ['python3', $script];
     $desc = [
         0 => ['pipe', 'r'],
@@ -238,6 +268,10 @@ function dns_cli_call(array $payload): array {
     ];
     $proc = proc_open($cmd, $desc, $pipes, dirname($script), $env);
     if (!is_resource($proc)) {
+        dns_log_write('app', 'error', 'Unable to start Python DNS process', [
+            'action' => $action,
+            'script' => $script,
+        ]);
         return ['ok' => false, 'msg' => '无法启动 Python DNS 核心进程'];
     }
 
@@ -251,20 +285,75 @@ function dns_cli_call(array $payload): array {
 
     $stdout = trim((string)$stdout);
     $stderr = trim((string)$stderr);
+    $durationMs = (int)round((microtime(true) - $startedAt) * 1000);
+
+    dns_log_write('python', 'info', 'Python process finished', [
+        'action' => $action,
+        'exit_code' => $code,
+        'duration_ms' => $durationMs,
+        'stdout_length' => strlen($stdout),
+        'stderr_length' => strlen($stderr),
+    ]);
+
+    if ($stderr !== '') {
+        dns_log_write('python', 'error', 'Python stderr output', [
+            'action' => $action,
+            'exit_code' => $code,
+            'duration_ms' => $durationMs,
+            'stderr' => $stderr,
+        ]);
+    }
+
     if ($code !== 0 && $stdout === '') {
-        return ['ok' => false, 'msg' => $stderr !== '' ? $stderr : ('DNS 核心退出码 ' . $code)];
+        $msg = $stderr !== '' ? $stderr : ('DNS 核心退出码 ' . $code);
+        dns_log_write('app', 'error', 'DNS CLI call failed (no stdout)', [
+            'action' => $action,
+            'exit_code' => $code,
+            'duration_ms' => $durationMs,
+            'message' => $msg,
+        ]);
+        return ['ok' => false, 'msg' => $msg];
     }
 
     $json = json_decode($stdout, true);
     if (!is_array($json)) {
-        return ['ok' => false, 'msg' => $stderr !== '' ? $stderr : 'DNS 核心返回了无效 JSON'];
+        $msg = $stderr !== '' ? $stderr : 'DNS 核心返回了无效 JSON';
+        dns_log_write('app', 'error', 'DNS CLI returned invalid JSON', [
+            'action' => $action,
+            'exit_code' => $code,
+            'duration_ms' => $durationMs,
+            'stdout' => $stdout,
+            'message' => $msg,
+        ]);
+        return ['ok' => false, 'msg' => $msg];
     }
     if (!isset($json['ok'])) {
+        dns_log_write('app', 'error', 'DNS CLI response missing ok field', [
+            'action' => $action,
+            'exit_code' => $code,
+            'duration_ms' => $durationMs,
+            'stdout_json' => $json,
+        ]);
         return ['ok' => false, 'msg' => 'DNS 核心响应缺少状态字段'];
     }
     if (!$json['ok']) {
-        return ['ok' => false, 'msg' => (string)($json['msg'] ?? 'DNS 操作失败')];
+        $msg = (string)($json['msg'] ?? 'DNS 操作失败');
+        dns_log_write('app', 'error', 'DNS CLI returned business failure', [
+            'action' => $action,
+            'exit_code' => $code,
+            'duration_ms' => $durationMs,
+            'message' => $msg,
+            'response_data' => $json['data'] ?? null,
+        ]);
+        return ['ok' => false, 'msg' => $msg];
     }
+
+    dns_log_write('app', 'info', 'DNS CLI call success', [
+        'action' => $action,
+        'exit_code' => $code,
+        'duration_ms' => $durationMs,
+    ]);
+
     return [
         'ok' => true,
         'msg' => (string)($json['msg'] ?? ''),

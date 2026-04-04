@@ -21,7 +21,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     else{
       if($orig&&$orig!==$un){$users[$un]=$users[$orig]??[];unset($users[$orig]);}
       if(!isset($users[$un]))$users[$un]=[];
-      if($pw){$users[$un]['password_hash']=password_hash($pw,PASSWORD_BCRYPT,['cost'=>10]);$users[$un]['updated_at']=date('Y-m-d H:i:s');}
+      if($pw){$users[$un]['password_hash']=password_hash($pw,PASSWORD_BCRYPT,['cost'=>10]);$users[$un]['updated_at']=date('Y-m-d H:i:s');unset($users[$un]['__dev_virtual']);}
       if(!isset($users[$un]['created_at']))$users[$un]['created_at']=date('Y-m-d H:i:s');
       $users[$un]['role']=$role;
       auth_write_users($users);flash_set('success',"用户 '{$un}' 已保存");
@@ -65,7 +65,7 @@ $flash_msg=flash_get();
   <th>用户名</th><th>角色</th><th>创建时间</th><th>更新时间</th><th>操作</th>
 </tr></thead><tbody>
 <?php foreach($users as $un=>$u):?><tr>
-  <td><strong><?=htmlspecialchars($un)?></strong><?php if($un===$current_admin['username']):?> <span class="badge badge-purple">我</span><?php endif;?></td>
+  <td><strong><?=htmlspecialchars($un)?></strong><?php if($un===$current_admin['username']):?> <span class="badge badge-purple">我</span><?php endif;?><?php if(!empty($u['__dev_virtual'])):?> <span class="badge badge-gray" title="开发模式内置，不写入 users.json">dev</span><?php endif;?></td>
   <td><span class="badge <?=($u['role']??'')==='admin'?'badge-red':'badge-green'?>"><?=htmlspecialchars($u['role']??'user')?></span></td>
   <td><?=htmlspecialchars($u['created_at']??'-')?></td>
   <td><?=htmlspecialchars($u['updated_at']??'-')?></td>

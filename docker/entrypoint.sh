@@ -40,6 +40,15 @@ else
     echo "[entrypoint][WARN] 建议使用：-v ./data:/var/www/nav/data"
 fi
 
+# ── 确保应用代码可读（开发模式会把宿主机整个项目挂进来，宿主机若是 700/600 权限会导致 PHP 直接 403）──
+# 仅放宽代码目录读取权限；data 目录后面会再按更严格权限单独收口
+if [ -d /var/www/nav ]; then
+    chmod 755 /var/www/nav || true
+    for d in /var/www/nav/public /var/www/nav/shared /var/www/nav/admin /var/www/nav/cli /var/www/nav/docker /var/www/nav/python /var/www/nav/subsite-middleware /var/www/nav/nginx-conf; do
+        [ -d "$d" ] && chmod -R a+rX "$d" || true
+    done
+fi
+
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p \
     /var/www/nav/data/backups \
@@ -56,24 +65,60 @@ chmod 755 /var/www/nav/data/bg \
           /var/www/nav/data/backups \
           /var/www/nav/data/logs
 # 确保关键数据文件可被 navwww 读写（迁移文件可能 root 属主）
+# ── 开发模式标记（PHP-FPM 子进程可能读不到容器环境变量，用文件供 auth_dev_mode_enabled() 检测）──
+if [ "${NAV_DEV_MODE:-}" = "1" ] || [ "${NAV_DEV_MODE:-}" = "true" ]; then
+    touch /var/www/nav/data/.nav_dev_mode
+    echo "[entrypoint] NAV_DEV_MODE 已启用（内置测试管理员 qatest，见登录页）"
+else
+    rm -f /var/www/nav/data/.nav_dev_mode
+fi
+
+# ── 无人值守首次安装：仅需非空 ADMIN（PASSWORD 可空）；仅在尚未安装时写入 JSON ──
+if [ -n "${ADMIN:-}" ]; then
+    if [ ! -f /var/www/nav/data/.installed ] && { [ ! -f /var/www/nav/data/users.json ] || [ ! -s /var/www/nav/data/users.json ]; }; then
+        export ADMIN
+        export PASSWORD="${PASSWORD:-}"
+        export NAME="${NAME:-导航中心}"
+        export DOMAIN="${DOMAIN:-}"
+        php -r '$d="/var/www/nav/data"; if(!is_dir($d)) @mkdir($d,0750,true); $j=["ADMIN"=>(string)getenv("ADMIN"),"PASSWORD"=>(string)getenv("PASSWORD"),"NAME"=>(string)(getenv("NAME")?:"导航中心"),"DOMAIN"=>(string)(getenv("DOMAIN")?:"")]; file_put_contents($d."/.initial_admin.json", json_encode($j, JSON_UNESCAPED_UNICODE));'
+        chown navwww:navwww /var/www/nav/data/.initial_admin.json 2>/dev/null || true
+        chmod 600 /var/www/nav/data/.initial_admin.json 2>/dev/null || true
+        echo "[entrypoint] 已写入 .initial_admin.json（无人值守安装，首次访问即完成初始化）"
+    fi
+fi
+
 for f in /var/www/nav/data/users.json \
          /var/www/nav/data/config.json \
          /var/www/nav/data/sites.json \
          /var/www/nav/data/scheduled_tasks.json \
          /var/www/nav/data/dns_config.json \
          /var/www/nav/data/ip_locks.json \
-         /var/www/nav/data/.installed; do
+         /var/www/nav/data/.installed \
+         /var/www/nav/data/.nav_dev_mode \
+         /var/www/nav/data/.initial_admin.json; do
     [ -f "$f" ] && chown navwww:navwww "$f" && chmod 644 "$f"
 done
 
 # ── 确保反代配置文件存在 ──
-mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
+mkdir -p /etc/nginx/conf.d /etc/nginx/http.d /var/www/nav/data/nginx
 touch /etc/nginx/conf.d/nav-proxy.conf
 touch /etc/nginx/http.d/nav-proxy-domains.conf
+touch /var/www/nav/data/nginx/proxy-params-simple.conf
+touch /var/www/nav/data/nginx/proxy-params-full.conf
 chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf
 chown navwww:navwww /etc/nginx/http.d/nav-proxy-domains.conf
+chown navwww:navwww /var/www/nav/data/nginx/proxy-params-simple.conf
+chown navwww:navwww /var/www/nav/data/nginx/proxy-params-full.conf
 chmod 664 /etc/nginx/conf.d/nav-proxy.conf
 chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
+chmod 664 /var/www/nav/data/nginx/proxy-params-simple.conf
+chmod 664 /var/www/nav/data/nginx/proxy-params-full.conf
+
+# ── 根据持久化数据预生成反代配置（容器重建后 /etc/nginx 下的动态配置会丢失）──
+if [ -f /var/www/nav/data/sites.json ]; then
+    su navwww -s /bin/sh -c 'php -r '\''require "/var/www/nav/admin/shared/functions.php"; $result = nginx_apply_proxy_conf(false); echo "[entrypoint] " . ($result["msg"] ?? "proxy config generate skipped") . PHP_EOL;'\''' || \
+        echo "[entrypoint][WARN] 反代配置预生成失败，容器将继续启动，可稍后在后台手动 Reload Nginx"
+fi
 
 # ── 删除 Alpine Nginx 自带 default.conf（会拦截所有请求返回 404）──
 rm -f /etc/nginx/http.d/default.conf

@@ -135,13 +135,14 @@ function trigger_badge(string $t): string {
 </div>
 
 <div class="card">
-  <div class="card-title">ℹ️ 备份说明</div>
+  <div class="card-title">ℹ️ 备份方案说明</div>
   <ul style="color:var(--tm);font-size:13px;line-height:2;padding-left:18px">
-    <li>每条备份包含 <code>sites.json</code>（站点配置）和 <code>config.json</code>（系统配置）</li>
-    <li>不包含用户账户（users.json）、登录日志、Favicon 缓存</li>
-    <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的</li>
-    <li>恢复操作执行前会自动备份当前状态，防止误操作</li>
-    <li>触发方式：手动（点击按钮）/ 自动-导入（导入前）/ 自动-设置（保存设置前）/ 自动-恢复前</li>
+    <li><strong>单文件 JSON</strong>：与「设置 → 导出配置」结构相同，一条记录对应一次快照。</li>
+    <li><strong>包含内容</strong>：<code>sites</code>（站点分组）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）。</li>
+    <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务运行日志（<code>data/logs/cron_*.log</code>）、DNS Zone 列表缓存；若任务使用「任务工作区」目录，<code>data/tasks/&lt;id&gt;/</code> 下的额外文件需另行备份。</li>
+    <li><strong>恢复与导入</strong>：写入计划任务后会重新生成系统 crontab；写入 DNS 配置后会清除本机 DNS Zone 缓存。</li>
+    <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的；恢复或导入前会先自动备份当前状态。</li>
+    <li>触发方式：手动 / 自动-导入 / 自动-设置 / 自动-恢复前（见列表中「触发方式」列）。</li>
   </ul>
 </div>
 

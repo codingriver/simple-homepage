@@ -16,7 +16,7 @@ define('COOKIE_DOMAIN',     '.yourdomain.com');   // 前面有点，支持所有
 define('NAV_LOGIN_URL',     'https://nav.yourdomain.com/login.php');
 
 // 数据目录（相对于本文件的上级目录）
-define('DATA_DIR',          __DIR__ . '/../data');
+define('DATA_DIR',          dirname(__DIR__) . '/data');
 define('USERS_FILE',        DATA_DIR . '/users.json');
 define('CONFIG_FILE',       DATA_DIR . '/config.json');
 define('IP_LOCKS_FILE',     DATA_DIR . '/ip_locks.json');
@@ -25,6 +25,8 @@ define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
 /** 登录日志最多保留条数（仅 tail，写入后自动裁剪，避免读全文件） */
 define('AUTH_LOG_MAX_LINES', 10);
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
+/** 开发模式标记（容器 entrypoint 根据 NAV_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
+define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
 
 // 请求收到/响应结束耗时日志（data/logs/request_timing.log），关闭：环境变量 NAV_REQUEST_TIMING=0
 require_once __DIR__ . '/request_timing.php';
@@ -61,23 +63,49 @@ function auth_default_config(): array {
 }
 
 /**
- * 安全清洗 redirect 参数：仅允许站内相对路径
- * 若传入绝对 URL（如 IP 直连场景），自动提取路径部分。
+ * 安全清洗 redirect 参数：
+ * - 允许站内相对路径
+ * - 允许当前站群（nav_domain / cookie_domain）内的绝对 URL，便于主站登录后回跳到受保护子域名
+ * - 其他绝对 URL 一律裁剪为 path 或直接拒绝
  */
 function auth_sanitize_redirect(string $redirect): string {
     $redirect = trim($redirect);
     if ($redirect === '') return '';
 
-    // 若是绝对 URL（http:// 或 https://），提取其中的 path+query+fragment
+    // 若是绝对 URL（http:// 或 https://），仅允许当前站群内地址原样保留
     if (preg_match('/^https?:\/\//i', $redirect)) {
         $parsed = parse_url($redirect);
-        if (!$parsed) return '';
+        if (!$parsed || empty($parsed['host'])) return '';
+
+        $host = strtolower((string) $parsed['host']);
+        $cfg  = auth_get_config();
+        $nav_host = strtolower((string) ($cfg['nav_domain'] ?? ''));
+        $cookie_domain = ltrim(strtolower((string) ($cfg['cookie_domain'] ?? '')), '.');
+
+        $is_same_site = false;
+        if ($nav_host !== '' && $host === $nav_host) {
+            $is_same_site = true;
+        }
+        if (!$is_same_site && $cookie_domain !== '' && ($host === $cookie_domain || str_ends_with($host, '.' . $cookie_domain))) {
+            $is_same_site = true;
+        }
+
+        if ($is_same_site) {
+            return $redirect;
+        }
+
+        // 非本站群绝对 URL：仅提取 path+query+fragment，避免开放重定向
         $redirect = ($parsed['path'] ?? '/');
         if (!empty($parsed['query']))    $redirect .= '?' . $parsed['query'];
         if (!empty($parsed['fragment'])) $redirect .= '#' . $parsed['fragment'];
     }
 
-    // 必须是以 / 开头的相对路径，拒绝 //、\、绝对 URL
+    // 允许 http(s):// 的本站群绝对 URL 直接通过
+    if (preg_match('/^https?:\/\//i', $redirect)) {
+        return $redirect;
+    }
+
+    // 其余必须是以 / 开头的相对路径，拒绝 //、\、绝对 URL
     if ($redirect === '' || $redirect[0] !== '/') return '';
     if (strpos($redirect, '//') === 0 || strpos($redirect, '\\') !== false) return '';
 
@@ -245,9 +273,13 @@ function auth_remember_expire(): int {
  * 条件：.installed 文件不存在 AND users.json 为空
  */
 function auth_needs_setup(): bool {
-    // .installed 存在 → 已安装，直接返回 false
-    if (file_exists(INSTALLED_FLAG)) return false;
-    // .installed 不存在但有用户 → 异常状态，不触发向导（有用户就能登录）
+    if (file_exists(INSTALLED_FLAG)) {
+        return false;
+    }
+    // 磁盘上已有账户 → 不强制向导（与无人值守安装、异常缺 .installed 时一致）
+    if (!empty(auth_load_users_raw())) {
+        return false;
+    }
     $users = auth_load_users();
     return empty($users);
 }
@@ -262,10 +294,247 @@ function auth_mark_installed(): void {
 }
 
 /**
+ * 仅从磁盘读取 users.json（不含开发模式虚拟用户），供安装判断与无人值守引导使用
+ *
+ * @return array<string, array>
+ */
+function auth_load_users_raw(): array {
+    if (!file_exists(USERS_FILE)) {
+        return [];
+    }
+    $users = json_decode(file_get_contents(USERS_FILE), true) ?? [];
+    return is_array($users) ? $users : [];
+}
+
+/**
+ * 无人值守安装：用户名是否与安装向导规则一致（2–32 位等）
+ */
+function auth_is_valid_initial_admin_username(string $username): bool {
+    return (bool) preg_match('/^[a-zA-Z0-9_-]{2,32}$/', $username);
+}
+
+/**
+ * 校验安装表单字段（仅安装向导 POST；无人值守不校验密码长度，允许空密码）
+ * @param string|null $password2 为 null 时不校验「两次密码一致」
+ * @return string[] 错误文案列表
+ */
+function auth_validate_setup_credentials(string $username, string $password, ?string $password2, string $site_name): array {
+    $errors = [];
+    if (!preg_match('/^[a-zA-Z0-9_-]{2,32}$/', $username)) {
+        $errors[] = '用户名只允许字母、数字、下划线、横杠，长度 2-32 位';
+    }
+    if (strlen($password) < 8) {
+        $errors[] = '密码至少 8 位';
+    }
+    if ($password2 !== null && $password !== $password2) {
+        $errors[] = '两次密码不一致';
+    }
+    if (trim($site_name) === '') {
+        $errors[] = '站点名称不能为空';
+    }
+    return $errors;
+}
+
+/**
+ * 读取无人值守安装配置：环境变量优先，否则 data/.initial_admin.json。
+ * PASSWORD 允许为空；若已设置 ADMIN 环境变量但为空或用户名非法，则视为无效并删除辅助文件，返回 null（走安装向导）。
+ *
+ * @return array{user:string,password:string,site_name:string,nav_domain:string}|null
+ */
+function auth_get_initial_admin_config(): ?array {
+    $file = DATA_DIR . '/.initial_admin.json';
+    $j    = null;
+    if (is_readable($file)) {
+        $decoded = json_decode((string) file_get_contents($file), true);
+        $j       = is_array($decoded) ? $decoded : [];
+    } else {
+        $j = [];
+    }
+
+    $adminEnv   = getenv('ADMIN');
+    $passEnv    = getenv('PASSWORD');
+    $nameEnv    = getenv('NAME');
+    $domainEnv  = getenv('DOMAIN');
+
+    // 已定义 ADMIN 环境变量（含空串）：必须非空且合法，否则整段无人值守无效
+    if ($adminEnv !== false) {
+        $user = trim((string) $adminEnv);
+        if ($user === '' || !auth_is_valid_initial_admin_username($user)) {
+            @unlink($file);
+            error_log('[nav] 环境变量 ADMIN 为空或非法，无人值守已取消，请使用安装向导');
+            return null;
+        }
+    } else {
+        $user = trim((string)($j['ADMIN'] ?? $j['user'] ?? $j['username'] ?? ''));
+        if ($user === '') {
+            return null;
+        }
+        if (!auth_is_valid_initial_admin_username($user)) {
+            @unlink($file);
+            error_log('[nav] .initial_admin.json 中 ADMIN 非法，已清除，请使用安装向导');
+            return null;
+        }
+    }
+
+    if ($passEnv !== false) {
+        $pass = (string) $passEnv;
+    } else {
+        $pass = (string)($j['PASSWORD'] ?? $j['password'] ?? '');
+    }
+
+    if ($nameEnv !== false) {
+        $site = trim((string) $nameEnv);
+    } else {
+        $site = trim((string)($j['NAME'] ?? $j['site_name'] ?? ''));
+    }
+    if ($domainEnv !== false) {
+        $dom = trim((string) $domainEnv);
+    } else {
+        $dom = trim((string)($j['DOMAIN'] ?? $j['nav_domain'] ?? ''));
+    }
+
+    if ($site === '') {
+        $site = '导航中心';
+    }
+
+    return [
+        'user'         => $user,
+        'password'     => $pass,
+        'site_name'    => $site,
+        'nav_domain'   => $dom,
+    ];
+}
+
+/**
+ * 执行首次安装的数据写入（与 setup.php 提交成功时一致）
+ */
+function auth_apply_initial_install(string $username, string $password, string $site_name, string $nav_domain): void {
+    auth_ensure_secret_key();
+
+    if (!is_dir(DATA_DIR)) {
+        mkdir(DATA_DIR, 0750, true);
+    } else {
+        chmod(DATA_DIR, 0750);
+    }
+    foreach ([
+        DATA_DIR . '/backups',
+        DATA_DIR . '/logs',
+        DATA_DIR . '/favicon_cache',
+        DATA_DIR . '/bg',
+    ] as $d) {
+        if (!is_dir($d)) {
+            mkdir($d, 0755, true);
+        }
+    }
+
+    auth_save_user($username, $password, 'admin');
+
+    $cfg = [
+        'site_name'          => $site_name,
+        'nav_domain'         => $nav_domain,
+        'token_expire_hours' => 8,
+        'remember_me_days'   => 60,
+        'login_fail_limit'   => 5,
+        'login_lock_minutes' => 15,
+        'bg_color'           => '',
+        'bg_image'           => '',
+        'cookie_secure'      => 'off',
+        'cookie_domain'      => '',
+        'card_size'          => 140,
+        'card_height'        => 0,
+        'card_show_desc'     => '1',
+        'card_layout'        => 'grid',
+        'card_direction'     => 'col',
+        'display_errors'     => '0',
+        'proxy_params_mode'  => 'simple',
+        'webhook_enabled'    => '0',
+        'webhook_type'       => 'custom',
+        'webhook_url'        => '',
+        'webhook_tg_chat'    => '',
+        'webhook_events'     => 'FAIL,IP_LOCKED',
+    ];
+    file_put_contents(
+        CONFIG_FILE,
+        json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        LOCK_EX
+    );
+
+    if (!file_exists(DATA_DIR . '/sites.json')) {
+        $sites = ['groups' => [[
+            'id'            => 'default',
+            'name'          => '我的应用',
+            'icon'          => '🌐',
+            'order'         => 0,
+            'auth_required' => true,
+            'visible_to'    => 'all',
+            'sites'         => [],
+        ]]];
+        file_put_contents(
+            DATA_DIR . '/sites.json',
+            json_encode($sites, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            LOCK_EX
+        );
+    }
+
+    auth_mark_installed();
+    auth_write_log('SETUP', $username, get_client_ip(), 'initial_setup');
+}
+
+/**
+ * 若配置了合法 ADMIN（或 .initial_admin.json）且尚未安装，则自动执行首次安装并跳过向导（PASSWORD 可为空）
+ */
+function auth_bootstrap_initial_admin_if_needed(): void {
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    if (file_exists(INSTALLED_FLAG)) {
+        return;
+    }
+    if (!empty(auth_load_users_raw())) {
+        return;
+    }
+
+    $ini = auth_get_initial_admin_config();
+    if ($ini === null) {
+        return;
+    }
+
+    $lockPath = DATA_DIR . '/.bootstrap.lock';
+    $fp       = @fopen($lockPath, 'c+');
+    if ($fp === false) {
+        return;
+    }
+    if (!flock($fp, LOCK_EX)) {
+        fclose($fp);
+        return;
+    }
+    try {
+        if (file_exists(INSTALLED_FLAG) || !empty(auth_load_users_raw())) {
+            return;
+        }
+        auth_apply_initial_install(
+            $ini['user'],
+            $ini['password'],
+            $ini['site_name'],
+            $ini['nav_domain']
+        );
+        @unlink(DATA_DIR . '/.initial_admin.json');
+    } finally {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        @unlink($lockPath);
+    }
+}
+
+/**
  * 如果需要安装则跳转到 setup.php（在各页面顶部调用）
  * @param bool $is_setup_page 是否当前就是 setup.php，避免死循环
  */
 function auth_check_setup(bool $is_setup_page = false): void {
+    auth_bootstrap_initial_admin_if_needed();
     if (!$is_setup_page && auth_needs_setup()) {
         header('Location: /setup.php');
         exit;
@@ -419,17 +688,62 @@ function auth_clear_cookie(): void {
 // ============================================================
 
 /**
- * 读取用户列表
+ * 是否启用「开发镜像」内置测试账户（环境变量 NAV_DEV_MODE=1/true，或 data/.nav_dev_mode 存在）
  */
-function auth_load_users(): array {
-    if (!file_exists(USERS_FILE)) return [];
-    return json_decode(file_get_contents(USERS_FILE), true) ?? [];
+function auth_dev_mode_enabled(): bool {
+    $env = getenv('NAV_DEV_MODE');
+    if ($env === '1' || strcasecmp((string) $env, 'true') === 0) {
+        return true;
+    }
+    return is_file(AUTH_DEV_MODE_FLAG_FILE);
 }
 
 /**
- * 写入用户列表
+ * 开发模式内置管理员（仅当磁盘上尚无同名用户时注入内存列表，不写入 users.json）
+ * 密码：qatest2026（bcrypt 预计算，避免每次请求重新哈希）
+ */
+function auth_dev_qa_user_record(): array {
+    static $hash = '$2y$10$LOX9wuOQK/gXUQaTbywdKObG.z8N587Y6guaGLJdH4RRM21C/ogh.';
+    return [
+        'password_hash' => $hash,
+        'role'          => 'admin',
+        'created_at'    => '(dev)',
+        'updated_at'    => '(dev)',
+        '__dev_virtual' => true,
+    ];
+}
+
+/**
+ * 读取用户列表
+ */
+function auth_load_users(): array {
+    $users = [];
+    if (file_exists(USERS_FILE)) {
+        $users = json_decode(file_get_contents(USERS_FILE), true) ?? [];
+    }
+    if (!is_array($users)) {
+        $users = [];
+    }
+    if (auth_dev_mode_enabled() && !isset($users['qatest'])) {
+        $users['qatest'] = auth_dev_qa_user_record();
+    }
+    return $users;
+}
+
+/**
+ * 写入用户列表（开发模式虚拟用户不会落盘）
  */
 function auth_write_users(array $users): void {
+    foreach ($users as $name => $info) {
+        if (!is_array($info)) {
+            continue;
+        }
+        if (!empty($info['__dev_virtual'])) {
+            unset($users[$name]);
+        } else {
+            unset($users[$name]['__dev_virtual']);
+        }
+    }
     $dir = dirname(USERS_FILE);
     if (!is_dir($dir)) mkdir($dir, 0700, true);
     file_put_contents(

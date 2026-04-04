@@ -15,7 +15,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Type: text/plain; charset=utf-8');
             echo '（未登录或无权限）'; exit;
         }
-        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm','request_timing'], true)
+        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm','request_timing','dns','dns_python'], true)
                  ? $_GET['type'] : 'nginx_access';
         $lines = min(500, max(10, (int)($_GET['lines'] ?? 100)));
         header('Content-Type: text/plain; charset=utf-8');
@@ -35,6 +35,8 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             'nginx_error'  => '/var/log/nginx/nav.error.log',
             'nginx_main'   => '/var/log/nginx/error.log',
             'php_fpm'      => '/var/log/php-fpm/error.log',
+            'dns'          => DATA_DIR . '/logs/dns.log',
+            'dns_python'   => DATA_DIR . '/logs/dns_python.log',
         ];
         $cleared = [];
         $failed  = [];
@@ -175,6 +177,8 @@ $build_info = nav_read_build_info();
     <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_main">Nginx 主错误日志</button>
     <button class="btn btn-secondary btn-sm log-tab" data-log="php_fpm">PHP-FPM 日志</button>
     <button class="btn btn-secondary btn-sm log-tab" data-log="request_timing">请求耗时 (recv/done)</button>
+    <button class="btn btn-secondary btn-sm log-tab" data-log="dns">DNS 应用日志</button>
+    <button class="btn btn-secondary btn-sm log-tab" data-log="dns_python">DNS Python 错误日志</button>
     <button class="btn btn-secondary btn-sm" onclick="refreshLog()">🔄 刷新</button>
     <button class="btn btn-sm" onclick="clearAllLogs()" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:#ff6b6b">🗑 清空所有日志</button>
     <select id="logLines" onchange="refreshLog()" style="background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:5px 10px;color:var(--tx);font-size:12px">

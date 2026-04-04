@@ -7,6 +7,7 @@
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
+auth_bootstrap_initial_admin_if_needed();
 if (!auth_needs_setup()) {
     http_response_code(404);
     exit('404 Not Found');
@@ -25,83 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($site_name === '') $site_name = '导航中心';
     $nav_domain = trim($_POST['nav_domain'] ?? '');
 
-    if (!preg_match('/^[a-zA-Z0-9_-]{2,32}$/', $username))
-        $errors[] = '用户名只允许字母、数字、下划线、横杠，长度 2-32 位';
-    if (strlen($password) < 8)
-        $errors[] = '密码至少 8 位';
-    if ($password !== $password2)
-        $errors[] = '两次密码不一致';
-    if (!$site_name)
-        $errors[] = '站点名称不能为空';
+    $errors = auth_validate_setup_credentials($username, $password, $password2, $site_name);
 
     if (empty($errors)) {
-        // 首次安装时确保生成实例私有的认证密钥文件
-        auth_ensure_secret_key();
-
-        // 创建必要目录并设置权限
-        // data/ 主目录：750（www-data 可读写，外部不可访问）
-        if (!is_dir(DATA_DIR)) {
-            mkdir(DATA_DIR, 0750, true);
-        } else {
-            chmod(DATA_DIR, 0750);
-        }
-        // 数据子目录：755（bg/favicon_cache 需要 PHP 写入）
-        foreach ([
-            DATA_DIR.'/backups',
-            DATA_DIR.'/logs',
-            DATA_DIR.'/favicon_cache',
-            DATA_DIR.'/bg',
-        ] as $d) {
-            if (!is_dir($d)) {
-                mkdir($d, 0755, true);
-            }
-        }
-        // 写入管理员账户
-        auth_save_user($username, $password, 'admin');
-        // 写入初始配置（含所有字段默认值，避免后台读取时出现未定义 key）
-        $cfg = [
-            'site_name'          => $site_name,
-            'nav_domain'         => $nav_domain,
-            'token_expire_hours' => 8,
-            'remember_me_days'   => 60,
-            'login_fail_limit'   => 5,
-            'login_lock_minutes' => 15,
-            'bg_color'           => '',
-            'bg_image'           => '',
-            'cookie_secure'      => 'off',
-            'cookie_domain'      => '',
-            'card_size'          => 140,
-            'card_height'        => 0,
-            'card_show_desc'     => '1',
-            'card_layout'        => 'grid',
-            'card_direction'     => 'col',
-            'display_errors'     => '0',
-            'proxy_params_mode'  => 'simple',
-            'webhook_enabled'    => '0',
-            'webhook_type'       => 'custom',
-            'webhook_url'        => '',
-            'webhook_tg_chat'    => '',
-            'webhook_events'     => 'FAIL,IP_LOCKED',
-        ];
-        file_put_contents(CONFIG_FILE,
-            json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-        // 写入初始站点配置
-        if (!file_exists(DATA_DIR.'/sites.json')) {
-            $sites = ['groups' => [[
-                'id'            => 'default',
-                'name'          => '我的应用',
-                'icon'          => '🌐',
-                'order'         => 0,
-                'auth_required' => true,
-                'visible_to'    => 'all',
-                'sites'         => [],
-            ]]];
-            file_put_contents(DATA_DIR.'/sites.json',
-                json_encode($sites, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-        }
-        // 写安装锁
-        auth_mark_installed();
-        auth_write_log('SETUP', $username, get_client_ip(), 'initial_setup');
+        auth_apply_initial_install($username, $password, $site_name, $nav_domain);
         $step = 'done';
         $nav_domain_preview = $nav_domain ?: 'nav.yourdomain.com';
     }

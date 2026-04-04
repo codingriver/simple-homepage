@@ -9,6 +9,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import socket
+import os
 
 
 class DnsError(Exception):
@@ -36,33 +38,65 @@ def read_payload() -> dict:
 
 
 def http_json(url: str, method: str = "GET", headers=None, body=None, timeout: int = 30) -> dict:
-    request = urllib.request.Request(url, data=body, method=method)
-    for key, value in (headers or {}).items():
-        request.add_header(key, value)
+    parsed_url = urllib.parse.urlparse(url)
+    host = parsed_url.hostname or "unknown-host"
+    port = parsed_url.port or (443 if (parsed_url.scheme or "https") == "https" else 80)
+
+    resolved_ip = ""
+    is_reserved_test_ip = False
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            content = response.read().decode("utf-8")
-            return {
-                "ok": True,
-                "status": response.status,
-                "text": content,
-                "json": json.loads(content) if content else {},
-            }
-    except urllib.error.HTTPError as exc:
-        content = exc.read().decode("utf-8", errors="replace")
-        parsed = None
+        resolved_ip = socket.gethostbyname(host)
+        if resolved_ip.startswith("198.18.") or resolved_ip.startswith("198.19."):
+            is_reserved_test_ip = True
+    except Exception:
+        resolved_ip = ""
+
+    if is_reserved_test_ip and str(os.getenv("DNS_ALLOW_RESERVED_IP", "0")) != "1":
+        raise DnsError(f"网络请求失败: 域名 {host} 被解析到保留地址 {resolved_ip}，疑似本地 DNS 劫持/拦截")
+
+    for attempt in range(2):
+        request = urllib.request.Request(url, data=body, method=method)
+        for key, value in (headers or {}).items():
+            request.add_header(key, value)
         try:
-            parsed = json.loads(content) if content else {}
-        except json.JSONDecodeError:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                content = response.read().decode("utf-8")
+                return {
+                    "ok": True,
+                    "status": response.status,
+                    "text": content,
+                    "json": json.loads(content) if content else {},
+                }
+        except urllib.error.HTTPError as exc:
+            content = exc.read().decode("utf-8", errors="replace")
             parsed = None
-        return {
-            "ok": False,
-            "status": exc.code,
-            "text": content,
-            "json": parsed,
-        }
-    except urllib.error.URLError as exc:
-        raise DnsError(f"网络请求失败: {exc.reason}") from exc
+            try:
+                parsed = json.loads(content) if content else {}
+            except json.JSONDecodeError:
+                parsed = None
+            return {
+                "ok": False,
+                "status": exc.code,
+                "text": content,
+                "json": parsed,
+            }
+        except urllib.error.URLError as exc:
+            reason = exc.reason
+            reason_text = str(reason)
+            is_timeout = isinstance(reason, socket.timeout) or "timed out" in reason_text.lower()
+            if is_timeout and attempt == 0:
+                continue
+            if is_timeout:
+                ip_note = f"（解析IP: {resolved_ip}）" if resolved_ip else ""
+                reserve_note = "，疑似本地 DNS 劫持/拦截" if is_reserved_test_ip else ""
+                raise DnsError(f"网络请求失败: 连接 {host}:{port} 超时（{timeout}s）{ip_note}{reserve_note}") from exc
+            raise DnsError(f"网络请求失败: {reason_text}") from exc
+        except TimeoutError as exc:
+            if attempt == 0:
+                continue
+            ip_note = f"（解析IP: {resolved_ip}）" if resolved_ip else ""
+            reserve_note = "，疑似本地 DNS 劫持/拦截" if is_reserved_test_ip else ""
+            raise DnsError(f"网络请求失败: 连接 {host}:{port} 超时（{timeout}s）{ip_note}{reserve_note}") from exc
 
 
 def relative_name(fqdn: str, zone_name: str) -> str:
