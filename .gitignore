@@ -16,7 +16,6 @@ backups/
 favicon_cache/
 logs/
 bg/
-nginx-conf/
 misplaced-data-backup/
 
 # 冒烟测试：smoke/smoke-test.sh、smoke2.sh 等产生的临时目录与报告
@@ -28,6 +27,10 @@ smoke-report*.txt
 *.tmp
 *.zip
 .cache/
+
+# Python 字节码缓存（运行时生成，勿提交）
+__pycache__/
+*.py[cod]
 
 # 若将来引入 PHP 工具链
 .phpunit.result.cache
