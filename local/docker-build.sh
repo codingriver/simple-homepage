@@ -39,6 +39,28 @@ docker compose version >/dev/null 2>&1 && COMPOSE_CMD="docker compose"
 BASE_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml")
 DEV_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.dev.yml")
 
+run_compose_build_env() {
+  BUILD_USE_PROXY="${BUILD_USE_PROXY:-0}"
+  BUILD_PROXY_URL="${BUILD_PROXY_URL:-http://192.168.2.2:7890}"
+
+  if [ "$BUILD_USE_PROXY" = "1" ]; then
+    echo "[INFO] Build proxy enabled: $BUILD_PROXY_URL"
+    HTTP_PROXY="$BUILD_PROXY_URL" \
+    HTTPS_PROXY="$BUILD_PROXY_URL" \
+    http_proxy="$BUILD_PROXY_URL" \
+    https_proxy="$BUILD_PROXY_URL" \
+    NO_PROXY="localhost,127.0.0.1,::1" \
+    no_proxy="localhost,127.0.0.1,::1" \
+    "$@"
+  else
+    echo "[INFO] Build proxy disabled"
+    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+        -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy \
+        BUILD_PROXY_URL= \
+        "$@"
+  fi
+}
+
 print_help() {
   cat <<'EOF'
 用法总览：
@@ -111,7 +133,7 @@ if [ "${1:-}" = "dev" ]; then
   # 无子命令：默认构建并启动
   if [ $# -eq 0 ]; then
     echo "[INFO] Dev mode compose: up -d --build"
-    $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
+    run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
     exit 0
   fi
 
@@ -143,26 +165,7 @@ fi
 #   - 其他参数       => 透传 docker compose
 # -----------------------------
 if [ $# -eq 0 ]; then
-  BUILD_USE_PROXY="${BUILD_USE_PROXY:-0}"
-  BUILD_PROXY_URL="${BUILD_PROXY_URL:-http://192.168.2.2:7890}"
-
-  if [ "$BUILD_USE_PROXY" = "1" ]; then
-    echo "[INFO] Build proxy enabled: $BUILD_PROXY_URL"
-    HTTP_PROXY="$BUILD_PROXY_URL" \
-    HTTPS_PROXY="$BUILD_PROXY_URL" \
-    http_proxy="$BUILD_PROXY_URL" \
-    https_proxy="$BUILD_PROXY_URL" \
-    NO_PROXY="localhost,127.0.0.1,::1" \
-    no_proxy="localhost,127.0.0.1,::1" \
-    DOCKER_BUILDKIT=0 \
-    $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" build --no-cache
-  else
-    echo "[INFO] Build proxy disabled"
-    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
-        -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy \
-        DOCKER_BUILDKIT=0 \
-        $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" build --no-cache
-  fi
+  run_compose_build_env $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" build --no-cache
 
   $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" up -d
   exit 0

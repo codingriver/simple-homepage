@@ -1,0 +1,51 @@
+services:
+  playwright-full:
+    image: docker.1ms.run/cypress/browsers:latest
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - playwright-node-modules:/work/node_modules
+      - playwright-cache:/root/.cache/ms-playwright
+    environment:
+      BASE_URL: http://nav:58080
+      CI: "1"
+      npm_config_registry: https://registry.npmmirror.com
+    command: >-
+      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:full:chromium"
+    depends_on:
+      - nav
+
+  playwright-mobile:
+    image: docker.1ms.run/cypress/browsers:latest
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - playwright-node-modules:/work/node_modules
+      - playwright-cache:/root/.cache/ms-playwright
+    environment:
+      BASE_URL: http://nav:58080
+      CI: "1"
+      npm_config_registry: https://registry.npmmirror.com
+    command: >-
+      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:full:mobile"
+    depends_on:
+      - nav
+
+  lighthouse:
+    image: docker.1ms.run/cypress/browsers:latest
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - playwright-node-modules:/work/node_modules
+    environment:
+      CI: "1"
+      npm_config_registry: https://registry.npmmirror.com
+    command: >-
+      sh -lc "if [ ! -d node_modules/@lhci/cli ]; then npm install --no-audit --no-fund --force; fi && npm run test:perf"
+    network_mode: service:nav
+    depends_on:
+      - nav
+
+volumes:
+  playwright-node-modules:
+  playwright-cache:

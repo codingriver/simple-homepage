@@ -32,6 +32,39 @@ cp local/.env.example local/.env   # 按需改端口、DATA_DIR 等
 
 `dev` 会使用 `docker-compose.yml` + `docker-compose.dev.yml`：挂载源码、启用 `NAV_DEV_MODE`、加载 `php-dev.ini`（显示错误等）。登录页可用内置管理员 **qatest / qatest2026**（详见 `shared/auth.php` 与登录页说明）。
 
+## 自动化测试（推荐方案）
+
+### 浏览器自动化：Playwright
+
+先启动开发容器：
+
+```bash
+bash local/docker-build.sh dev
+```
+
+运行核心 E2E：
+
+```bash
+docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright
+```
+
+测试产物：
+- `playwright-report/`
+- `test-results/`
+
+### 页面性能 / 加载质量：Lighthouse CI
+
+同样先保证开发容器已启动，再执行：
+
+```bash
+docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm lighthouse
+```
+
+测试产物：
+- `lighthouse-report/`
+
+当前 Lighthouse 先对公开页面做基线检测：`/login.php`、`/index.php`。
+
 ## 与「非 dev」模式的区别
 
 - `bash local/docker-build.sh`（无 `dev`）：`--no-cache` 全量构建，**不**挂载源码，适合验证生产镜像行为。

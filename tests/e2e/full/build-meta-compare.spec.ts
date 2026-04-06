@@ -1,0 +1,33 @@
+import { test, expect } from '@playwright/test';
+import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+
+test('build metadata compare hint reacts to mocked GitHub API results', async ({ page }) => {
+  const tracker = await attachClientErrorTracking(page, {
+    ignoredMessages: [
+      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
+      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+    ],
+  });
+
+  await page.route('https://api.github.com/repos/codingriver/simple-homepage/commits/main', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ sha: '1234567890abcdef1234567890abcdef12345678' }),
+    });
+  });
+
+  await loginAsDevAdmin(page);
+  await page.goto('/admin/debug.php');
+  const raw = await page.locator('#nav-build-info-json').count();
+  if (raw === 0) {
+    await expect(page.locator('#build-meta')).toBeVisible();
+    await tracker.assertNoClientErrors();
+    return;
+  }
+
+  await page.waitForTimeout(500);
+  await expect(page.locator('#gh-compare-hint')).toBeVisible();
+
+  await tracker.assertNoClientErrors();
+});

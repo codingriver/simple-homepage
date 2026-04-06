@@ -226,7 +226,7 @@ padding:28px;width:100%;max-width:520px;margin:auto">
     <input type="hidden" name="old_sid" id="fi_osid">
     <div class="form-grid">
       <div class="form-group"><label>站点ID（小写英文）</label>
-        <input type="text" name="sid" id="fi_sid" pattern="[a-z0-9_-]+" required></div>
+        <input type="text" name="sid" id="fi_sid" pattern="[a-z0-9_\-]+" required></div>
       <div class="form-group"><label>名称</label>
         <input type="text" name="name" id="fi_name" required></div>
       <div class="form-group"><label>图标（Emoji）</label>

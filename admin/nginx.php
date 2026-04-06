@@ -17,6 +17,7 @@ $lang = strtolower(trim((string)($_GET['lang'] ?? 'nginx')));
 if (!isset($langOptions[$lang])) $lang = 'nginx';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  require_once __DIR__ . '/shared/functions.php';
   csrf_check();
   $action = trim((string)($_POST['action'] ?? ''));
   $ptarget = trim((string)($_POST['target'] ?? 'main'));
@@ -253,9 +254,8 @@ $editorError = (string)($currentEditor['error'] ?? '');
   </form>
 </div>
 
-<script src="assets/ace/ace-builds/src-min-noconflict/ace.js"></script>
-<script src="assets/ace/ace-builds/src-min-noconflict/ext-searchbox.js"></script>
-<script src="assets/ace/ace-builds/src-min-noconflict/ext-language_tools.js"></script>
+<script src="assets/ace/ace.js"></script>
+<script src="assets/ace/ext-searchbox.js"></script>
 <script>
 (function(){
   var form=document.getElementById('nginx-editor-form');
@@ -297,9 +297,9 @@ $editorError = (string)($currentEditor['error'] ?? '');
     fontSize:'13px',
     showPrintMargin:false,
     useWorker:false,
-    enableBasicAutocompletion:true,
-    enableLiveAutocompletion:true,
-    enableSnippets:true
+    enableBasicAutocompletion:false,
+    enableLiveAutocompletion:false,
+    enableSnippets:false
   });
 
   function applyMode(m){var safe=['nginx','php','json','yaml','sh','ini','text']; if(safe.indexOf(m)<0)m='nginx'; editor.session.setMode('ace/mode/'+m);} 

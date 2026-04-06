@@ -43,6 +43,7 @@ $nav_items = [
     ['sep'],
     ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
+    ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
     ['sep'],
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
@@ -111,11 +112,15 @@ function showToast(msg, type) {
 <!-- 主内容区 -->
 <div class="main-wrap">
   <div class="topbar">
-    <span class="topbar-title"><?= htmlspecialchars($page_title ?? '后台') ?></span>
+    <div class="topbar-left">
+      <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="打开导航菜单" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <span class="topbar-title"><?= htmlspecialchars($page_title ?? '后台') ?></span>
+    </div>
     <div class="topbar-right">
       <span><?= date('Y-m-d H:i') ?></span>
     </div>
   </div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <div class="content">
 
 <!-- Flash 消息 -->
@@ -165,3 +170,28 @@ function showToast(msg, type) {
   <?php endif; ?>
 </div>
 <?php endif; ?>
+
+<script>
+(function(){
+  var sidebar = document.getElementById('sidebar');
+  var toggle = document.getElementById('sidebarToggle');
+  var backdrop = document.getElementById('sidebarBackdrop');
+  if (!sidebar || !toggle || !backdrop) return;
+
+  function setOpen(open) {
+    sidebar.classList.toggle('open', open);
+    backdrop.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.body.classList.toggle('sidebar-open', open);
+  }
+
+  toggle.addEventListener('click', function(){
+    setOpen(!sidebar.classList.contains('open'));
+  });
+  backdrop.addEventListener('click', function(){ setOpen(false); });
+  window.addEventListener('resize', function(){ if (window.innerWidth > 768) setOpen(false); });
+  sidebar.querySelectorAll('a, button').forEach(function(el){
+    el.addEventListener('click', function(){ if (window.innerWidth <= 768) setOpen(false); });
+  });
+})();
+</script>

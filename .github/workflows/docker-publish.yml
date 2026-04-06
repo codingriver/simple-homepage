@@ -7,43 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # smoke-test job 暂时禁用，待冒烟测试脚本修复后重新启用
-  # smoke-test:
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: read
-  #   env:
-  #     FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
-  #     - name: Build local test image
-  #       uses: docker/build-push-action@v6
-  #       with:
-  #         context: .
-  #         file: ./Dockerfile
-  #         push: false
-  #         load: true
-  #         tags: local/smoke:test
-  #     - name: Run smoke test
-  #       run: |
-  #         chmod +x smoke/smoke-test.sh
-  #         ./smoke/smoke-test.sh smoke-report.txt local/smoke:test
-  #     - name: Publish smoke summary
-  #       if: always()
-  #       run: |
-  #         echo "## 🧪 Smoke Test Report" >> "$GITHUB_STEP_SUMMARY"
-  #         cat smoke-report.txt >> "$GITHUB_STEP_SUMMARY" || true
-  #     - name: Upload smoke report
-  #       if: always()
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: smoke-report
-  #         path: smoke-report.txt
-  #         retention-days: 14
-
   docker:
     # needs: smoke-test  # 冒烟测试禁用期间去掉依赖
     runs-on: ubuntu-latest

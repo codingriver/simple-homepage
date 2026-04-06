@@ -6,6 +6,15 @@ require_once __DIR__ . '/../../shared/auth.php';
 
 define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
+define('DDNS_DISPATCHER_TASK_PREFIX', 'sys_ddns_dispatcher_');
+
+define('PHP_BIN_CANDIDATES', [
+    PHP_BINARY,
+    '/usr/local/bin/php',
+    '/usr/bin/php',
+    '/opt/homebrew/bin/php',
+    'php',
+]);
 
 function task_log_file(string $id): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
@@ -107,6 +116,151 @@ function save_scheduled_tasks(array $data): void {
         LOCK_EX);
 }
 
+function cron_is_system_task(array $task): bool {
+    return !empty($task['is_system']);
+}
+
+function cron_is_ddns_dispatcher_id(string $id): bool {
+    return str_starts_with($id, DDNS_DISPATCHER_TASK_PREFIX);
+}
+
+function cron_ddns_dispatcher_id(string $schedule): string {
+    return DDNS_DISPATCHER_TASK_PREFIX . substr(sha1($schedule), 0, 12);
+}
+
+function cron_php_binary(): string {
+    foreach (PHP_BIN_CANDIDATES as $candidate) {
+        $candidate = trim((string)$candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        if ($candidate === 'php') {
+            return 'php';
+        }
+        if (is_file($candidate) && is_executable($candidate)) {
+            return $candidate;
+        }
+    }
+    return 'php';
+}
+
+function cron_ddns_dispatcher_command(): string {
+    return escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/ddns_sync.php';
+}
+
+function cron_ddns_group_task_names(array $groupTasks): string {
+    $names = array_map(fn($row) => (string)(($row['name'] ?? '') !== '' ? $row['name'] : ($row['id'] ?? '')), $groupTasks);
+    return implode('、', array_filter($names, fn($v) => $v !== ''));
+}
+
+function cron_format_ddns_result_line(array $task, array $run): string {
+    $name = (string)($run['task_name'] ?? $task['name'] ?? $task['id'] ?? '-');
+    $state = (string)($run['final_state'] ?? ($run['ok'] ? 'updated' : 'failed'));
+    $stateLabel = match ($state) {
+        'skipped_unchanged' => 'SKIP',
+        'updated' => 'UPDATED',
+        'failed_update', 'failed_source', 'failed' => 'FAILED',
+        default => ($run['ok'] ? 'OK' : 'FAILED'),
+    };
+    $domain = (string)($run['domain'] ?? $task['target']['domain'] ?? '-');
+    $recordType = strtoupper((string)($run['record_type'] ?? $task['target']['record_type'] ?? 'A'));
+    $value = trim((string)($run['value'] ?? ''));
+    $sourceLabel = (string)($run['source_label'] ?? ddns_source_label($task));
+    $message = trim((string)($run['msg'] ?? ''));
+    $parts = [
+        '[' . date('H:i:s') . '] ',
+        $stateLabel,
+        ' | 任务=', $name,
+        ' | 来源=', $sourceLabel,
+        ' | 记录=', $domain, ' ', $recordType,
+    ];
+    if ($value !== '') {
+        $parts[] = ' | 值=';
+        $parts[] = $value;
+    }
+    if ($message !== '') {
+        $parts[] = ' | 说明=';
+        $parts[] = $message;
+    }
+    return implode('', $parts);
+}
+
+function cron_sync_ddns_dispatcher_task(): array {
+    require_once __DIR__ . '/ddns_lib.php';
+    $scheduled = load_scheduled_tasks();
+    $ddnsData = ddns_load_tasks();
+    $cronGroups = [];
+    foreach ($ddnsData['tasks'] ?? [] as $task) {
+        if (empty($task['enabled'])) {
+            continue;
+        }
+        $cron = trim((string)($task['schedule']['cron'] ?? ''));
+        if ($cron !== '' && cron_validate_schedule($cron)) {
+            $cronGroups[$cron][] = [
+                'id' => (string)($task['id'] ?? ''),
+                'name' => (string)($task['name'] ?? ''),
+            ];
+        }
+    }
+
+    $existingDispatchers = [];
+    foreach ($scheduled['tasks'] as $idx => $task) {
+        $id = (string)($task['id'] ?? '');
+        if (cron_is_ddns_dispatcher_id($id)) {
+            $existingDispatchers[$id] = ['idx' => $idx, 'task' => $task];
+        }
+    }
+
+    $desiredIds = [];
+    foreach ($cronGroups as $cron => $groupTasks) {
+        $id = cron_ddns_dispatcher_id($cron);
+        $desiredIds[$id] = true;
+        $taskRow = [
+            'id' => $id,
+            'name' => 'DDNS 调度器 [' . $cron . ']',
+            'enabled' => true,
+            'schedule' => $cron,
+            'command' => cron_ddns_dispatcher_command(),
+            'working_dir_mode' => 'project',
+            'working_dir' => '',
+            'is_system' => true,
+            'description' => '由 DDNS 页面自动维护，用于调度相同 cron 的 DDNS 任务',
+            'meta' => [
+                'ddns_crons' => [$cron],
+                'ddns_tasks' => $groupTasks,
+                'group_label' => cron_ddns_group_task_names($groupTasks),
+            ],
+        ];
+        if (isset($existingDispatchers[$id])) {
+            $existing = $existingDispatchers[$id]['task'];
+            $taskRow['last_run'] = $existing['last_run'] ?? null;
+            $taskRow['last_code'] = $existing['last_code'] ?? null;
+            $taskRow['last_output'] = $existing['last_output'] ?? null;
+            $scheduled['tasks'][$existingDispatchers[$id]['idx']] = $taskRow;
+        } else {
+            $scheduled['tasks'][] = $taskRow;
+        }
+    }
+
+    if ($existingDispatchers !== []) {
+        $scheduled['tasks'] = array_values(array_filter($scheduled['tasks'], function ($task) use ($desiredIds) {
+            $id = (string)($task['id'] ?? '');
+            if (!cron_is_ddns_dispatcher_id($id)) {
+                return true;
+            }
+            return isset($desiredIds[$id]);
+        }));
+    }
+
+    save_scheduled_tasks($scheduled);
+    ksort($cronGroups, SORT_STRING);
+    return [
+        'enabled' => $cronGroups !== [],
+        'groups' => $cronGroups,
+        'dispatcher_ids' => array_keys($desiredIds),
+    ];
+}
+
 function cron_validate_schedule(string $line): bool {
     $line = trim($line);
     if ($line === '') {
@@ -117,6 +271,7 @@ function cron_validate_schedule(string $line): bool {
 }
 
 function cron_regenerate(): array {
+    cron_sync_ddns_dispatcher_task();
     $lines   = [];
     $lines[] = '# simple-homepage generated — do not edit by hand';
     $lines[] = 'SHELL=/bin/bash';
@@ -136,7 +291,7 @@ function cron_regenerate(): array {
             continue;
         }
         $log = DATA_DIR . '/logs/cron_' . $id . '.log';
-        $cmd = '/usr/local/bin/php /var/www/nav/cli/run_scheduled_task.php ' . escapeshellarg($id);
+        $cmd = escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/run_scheduled_task.php ' . escapeshellarg($id);
         $lines[] = $sched . ' ' . $cmd . ' >> ' . $log . ' 2>&1';
     }
 
@@ -213,8 +368,46 @@ function cron_execute_task(string $id): array {
     if ($idx < 0) {
         return ['ok' => false, 'code' => -1, 'output' => '', 'msg' => '任务不存在'];
     }
-    $cmd = (string)($data['tasks'][$idx]['command'] ?? '');
     $task = $data['tasks'][$idx];
+
+    if (cron_is_ddns_dispatcher_id($id)) {
+        require_once __DIR__ . '/ddns_lib.php';
+        $targetCron = trim((string)($task['schedule'] ?? ''));
+        $results = [];
+        $hasFail = false;
+        foreach (ddns_load_tasks()['tasks'] ?? [] as $ddnsTask) {
+            if (empty($ddnsTask['enabled'])) {
+                continue;
+            }
+            $cron = trim((string)($ddnsTask['schedule']['cron'] ?? ''));
+            if ($cron !== $targetCron) {
+                continue;
+            }
+            $run = ddns_run_task($ddnsTask);
+            $results[] = cron_format_ddns_result_line($ddnsTask, $run);
+            if (!$run['ok']) {
+                $hasFail = true;
+            }
+        }
+        $output = empty($results)
+            ? '当前分组下没有可执行的 DDNS 任务'
+            : implode("\n", $results);
+        $code = $hasFail ? 1 : 0;
+        $log_dir  = DATA_DIR . '/logs';
+        $log_file = $log_dir . '/cron_' . $id . '.log';
+        if (!is_dir($log_dir)) {
+            mkdir($log_dir, 0755, true);
+        }
+        $stamp = date('[Y-m-d H:i:s]') . ' [exit:' . $code . '] --- DDNS 分组执行 ---';
+        file_put_contents($log_file, $stamp . "\n" . rtrim($output) . "\n", FILE_APPEND | LOCK_EX);
+        $data['tasks'][$idx]['last_run'] = date('Y-m-d H:i:s');
+        $data['tasks'][$idx]['last_code'] = $code;
+        $data['tasks'][$idx]['last_output'] = mb_substr($output, 0, 8000);
+        save_scheduled_tasks($data);
+        return ['ok' => $code === 0, 'code' => $code, 'output' => $output, 'msg' => $code === 0 ? '执行完成' : "退出码 $code"];
+    }
+
+    $cmd = (string)($task['command'] ?? '');
     if ($cmd === '') {
         return ['ok' => false, 'code' => -1, 'output' => '', 'msg' => '命令为空'];
     }

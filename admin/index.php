@@ -21,12 +21,12 @@ $backups = backup_count();
 <!-- 快捷操作 -->
 <div class="card">
   <div class="card-title">🚀 快捷操作</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a href="sites.php" class="btn btn-primary">＋ 添加站点</a>
-    <a href="groups.php" class="btn btn-secondary">＋ 添加分组</a>
-    <a href="settings.php" class="btn btn-secondary">⚙️ 系统设置</a>
-    <a href="backups.php" class="btn btn-secondary">💾 备份管理</a>
-    <a href="/index.php" class="btn btn-secondary" target="_blank">🌐 查看前台</a>
+  <div class="quick-actions">
+    <a href="sites.php" class="btn btn-primary quick-action">＋ 添加站点</a>
+    <a href="groups.php" class="btn btn-secondary quick-action">＋ 添加分组</a>
+    <a href="settings.php" class="btn btn-secondary quick-action">⚙️ 系统设置</a>
+    <a href="backups.php" class="btn btn-secondary quick-action">💾 备份管理</a>
+    <a href="/index.php" class="btn btn-secondary quick-action" target="_blank">🌐 查看前台</a>
   </div>
   <p style="color:var(--tm);font-size:13px;margin-top:12px;margin-bottom:0">登录记录请在「系统设置 → 登录日志」查看（进入该区域时加载）。</p>
 </div>

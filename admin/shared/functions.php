@@ -120,7 +120,7 @@ function admin_run_command(string $command): array {
 
 /**
  * 组装与「备份下载 / 导出配置」一致的 JSON 载荷（不写文件）。
- * 包含：sites、config、scheduled_tasks（含各任务的 command 脚本）、dns_config（域名解析账户）。
+ * 包含：sites、config、scheduled_tasks（含各任务的 command 脚本）、dns_config（域名解析账户）、ddns_tasks。
  *
  * @param string $trigger 触发标识：manual / export / auto_import 等
  * @return array<string, mixed>
@@ -129,8 +129,9 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $sites_data  = file_exists(SITES_FILE)  ? file_get_contents(SITES_FILE)  : '{}';
     $config_data = file_exists(CONFIG_FILE) ? file_get_contents(CONFIG_FILE) : '{}';
 
-    $st_file  = DATA_DIR . '/scheduled_tasks.json';
-    $dns_file = DATA_DIR . '/dns_config.json';
+    $st_file   = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file  = DATA_DIR . '/dns_config.json';
+    $ddns_file = DATA_DIR . '/ddns_tasks.json';
 
     return [
         'created_at'      => date('Y-m-d H:i:s'),
@@ -139,6 +140,7 @@ function backup_collect_payload(string $trigger = 'manual'): array {
         'config'          => json_decode($config_data, true) ?? [],
         'scheduled_tasks' => file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [],
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
+        'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
     ];
 }
 
@@ -149,8 +151,9 @@ function backup_collect_payload(string $trigger = 'manual'): array {
  * @param array<string, mixed> $data
  */
 function backup_apply_restored_sections(array $data): void {
-    $wrote_st  = false;
-    $wrote_dns = false;
+    $wrote_st   = false;
+    $wrote_dns  = false;
+    $wrote_ddns = false;
 
     if (isset($data['sites'])) {
         file_put_contents(SITES_FILE,
@@ -163,8 +166,9 @@ function backup_apply_restored_sections(array $data): void {
             LOCK_EX);
     }
 
-    $st_file  = DATA_DIR . '/scheduled_tasks.json';
-    $dns_file = DATA_DIR . '/dns_config.json';
+    $st_file   = DATA_DIR . '/scheduled_tasks.json';
+    $dns_file  = DATA_DIR . '/dns_config.json';
+    $ddns_file = DATA_DIR . '/ddns_tasks.json';
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
         file_put_contents($st_file,
             json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -177,6 +181,12 @@ function backup_apply_restored_sections(array $data): void {
             LOCK_EX);
         $wrote_dns = true;
     }
+    if (isset($data['ddns_tasks']) && is_array($data['ddns_tasks'])) {
+        file_put_contents($ddns_file,
+            json_encode($data['ddns_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+        $wrote_ddns = true;
+    }
 
     if ($wrote_st) {
         require_once __DIR__ . '/cron_lib.php';
@@ -185,6 +195,9 @@ function backup_apply_restored_sections(array $data): void {
     if ($wrote_dns) {
         require_once __DIR__ . '/dns_api_lib.php';
         dns_api_invalidate_zones_cache();
+    }
+    if ($wrote_ddns && !file_exists($ddns_file)) {
+        file_put_contents($ddns_file, json_encode(['version' => 1, 'tasks' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
     }
 }
 
@@ -1063,9 +1076,73 @@ function nginx_proxy_params_file_paths(): array {
 }
 
 /**
+ * 精简反代参数模板（默认内置版本）
+ */
+function nginx_default_proxy_params_simple_template(): string {
+    return implode("\n", [
+        '# Nginx 精简反代参数模板',
+        '# 适用：普通网站 / API / 常规反向代理',
+        'proxy_http_version              1.1;',
+        'proxy_set_header                Host                            $host;',
+        'proxy_set_header                X-Real-IP                       $remote_addr;',
+        'proxy_set_header                X-Forwarded-For                 $proxy_add_x_forwarded_for;',
+        'proxy_set_header                X-Forwarded-Proto               $scheme;',
+        'proxy_set_header                X-Forwarded-Host                $host;',
+        'proxy_set_header                X-Forwarded-Port                $server_port;',
+        'proxy_set_header                Upgrade                         $http_upgrade;',
+        'proxy_set_header                Connection                      "upgrade";',
+        'proxy_connect_timeout           60s;',
+        'proxy_send_timeout              60s;',
+        'proxy_read_timeout              60s;',
+        'proxy_buffering                 off;',
+        'proxy_request_buffering         off;',
+        'client_max_body_size            64m;',
+    ]);
+}
+
+/**
+ * 完整反代参数模板（优先项目模板，其次 docs 示例）
+ */
+function nginx_default_proxy_params_full_template(): string {
+    $projectRoot = dirname(__DIR__, 2);
+    $candidates = [
+        $projectRoot . '/nginx-conf/proxy_params_full.conf',
+        $projectRoot . '/docs/proxy_params_full.conf',
+    ];
+    foreach ($candidates as $path) {
+        $content = @file_get_contents($path);
+        if ($content !== false && trim($content) !== '') {
+            return rtrim($content) . "\n";
+        }
+    }
+    return implode("\n", [
+        '# Nginx 完整反代参数模板（回退版本）',
+        'proxy_http_version              1.1;',
+        'proxy_set_header                Upgrade                         $http_upgrade;',
+        'proxy_set_header                Connection                      "upgrade";',
+        'proxy_set_header                Host                            $host;',
+        'proxy_set_header                X-Real-IP                       $remote_addr;',
+        'proxy_set_header                X-Forwarded-For                 $proxy_add_x_forwarded_for;',
+        'proxy_set_header                X-Forwarded-Proto               $scheme;',
+        'proxy_set_header                X-Forwarded-Host                $host;',
+        'proxy_set_header                X-Forwarded-Port                $server_port;',
+        'proxy_set_header                Authorization                   $http_authorization;',
+        'proxy_set_header                Cookie                          $http_cookie;',
+        'proxy_pass_request_headers      on;',
+        'proxy_pass_request_body         on;',
+        'proxy_request_buffering         off;',
+        'proxy_buffering                 off;',
+        'proxy_connect_timeout           86400s;',
+        'proxy_send_timeout              86400s;',
+        'proxy_read_timeout              86400s;',
+        'client_max_body_size            0;',
+    ]);
+}
+
+/**
  * 生成并写入反代参数模板文件
- * full：使用 nginx-conf/proxy_params_full.conf
- * simple：使用 nginx-conf/proxy_params_simple.conf
+ * full：使用 nginx-conf/proxy_params_full.conf（不存在时回退 docs/ 与内置模板）
+ * simple：使用 nginx-conf/proxy_params_simple.conf（不存在时回退内置模板）
  * @return array{ok:bool,msg:string}
  */
 function nginx_write_proxy_params_templates(): array {
@@ -1079,16 +1156,14 @@ function nginx_write_proxy_params_templates(): array {
 
     $projectRoot = dirname(__DIR__, 2);
     $simpleTemplatePath = $projectRoot . '/nginx-conf/proxy_params_simple.conf';
-    $fullTemplatePath = $projectRoot . '/nginx-conf/proxy_params_full.conf';
-
     $simpleContent = @file_get_contents($simpleTemplatePath);
     if ($simpleContent === false || trim($simpleContent) === '') {
-        return ['ok' => false, 'msg' => '读取精简模板失败：' . $simpleTemplatePath];
+        $simpleContent = nginx_default_proxy_params_simple_template();
     }
 
-    $fullContent = @file_get_contents($fullTemplatePath);
-    if ($fullContent === false || trim($fullContent) === '') {
-        return ['ok' => false, 'msg' => '读取完整模板失败：' . $fullTemplatePath];
+    $fullContent = nginx_default_proxy_params_full_template();
+    if (trim($fullContent) === '') {
+        return ['ok' => false, 'msg' => '读取完整模板失败'];
     }
 
     $okSimple = @file_put_contents($paths['simple'], rtrim($simpleContent) . "\n", LOCK_EX);

@@ -148,7 +148,7 @@ padding:28px;width:100%;max-width:460px">
     <input type="hidden" name="old_id" id="fi_old">
     <div class="form-grid">
       <div class="form-group"><label>ID（小写英文）</label>
-        <input type="text" name="gid" id="fi_id" pattern="[a-z0-9_-]+" required></div>
+        <input type="text" name="gid" id="fi_id" pattern="[a-z0-9_\-]+" required></div>
       <div class="form-group"><label>名称</label>
         <input type="text" name="name" id="fi_name" required></div>
       <div class="form-group"><label>图标（Emoji）</label>

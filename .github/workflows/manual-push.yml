@@ -1,6 +1,6 @@
 name: Manual Push to Docker Hub
 
-# 手动触发：直接构建并推送 latest 到 Docker Hub，跳过冒烟测试
+# 手动触发：直接构建并推送 latest 到 Docker Hub
 on:
   workflow_dispatch:
     inputs:

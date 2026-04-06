@@ -33,6 +33,80 @@ function dns_json_response(array $payload, int $status = 200): void {
     exit;
 }
 
+function dns_pick_working_account(array $cfg, array $accounts, string $preferredAccountId = ''): ?array {
+    $ordered = [];
+    $seen = [];
+
+    $push = static function (?array $account) use (&$ordered, &$seen): void {
+        if (!is_array($account)) {
+            return;
+        }
+        $id = (string)($account['id'] ?? '');
+        if ($id === '' || isset($seen[$id])) {
+            return;
+        }
+        $seen[$id] = true;
+        $ordered[] = $account;
+    };
+
+    if ($preferredAccountId !== '') {
+        $push(dns_find_account($cfg, $preferredAccountId));
+    }
+    foreach ($accounts as $account) {
+        $push(is_array($account) ? $account : null);
+    }
+
+    $firstReachable = null;
+    foreach ($ordered as $account) {
+        $probe = dns_cli_call(['action' => 'zones.list', 'account' => $account]);
+        if (!$probe['ok']) {
+            continue;
+        }
+        if ($firstReachable === null) {
+            $firstReachable = $account;
+        }
+        $zones = $probe['data']['zones'] ?? [];
+        if (!empty($zones)) {
+            return $account;
+        }
+    }
+
+    return $firstReachable;
+}
+
+function dns_pick_zone_from_list(array $zones, string $preferredZoneId = '', string $preferredZoneName = ''): ?array {
+    foreach ($zones as $zone) {
+        if (($zone['id'] ?? '') === $preferredZoneId && $preferredZoneId !== '') {
+            return $zone;
+        }
+    }
+    foreach ($zones as $zone) {
+        if (($zone['name'] ?? '') === $preferredZoneName && $preferredZoneName !== '') {
+            return $zone;
+        }
+    }
+    return !empty($zones) ? ($zones[0] ?? null) : null;
+}
+
+function dns_resolve_zone_for_account(array $account, string $preferredZoneId = '', string $preferredZoneName = ''): array {
+    $zonesResult = dns_cli_call(['action' => 'zones.list', 'account' => $account]);
+    if (!$zonesResult['ok']) {
+        return [
+            'ok' => false,
+            'msg' => (string)$zonesResult['msg'],
+            'zones' => [],
+            'zone' => null,
+        ];
+    }
+    $zones = is_array($zonesResult['data']['zones'] ?? null) ? $zonesResult['data']['zones'] : [];
+    return [
+        'ok' => true,
+        'msg' => '',
+        'zones' => $zones,
+        'zone' => dns_pick_zone_from_list($zones, $preferredZoneId, $preferredZoneName),
+    ];
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
     require_once __DIR__ . '/shared/dns_lib.php';
@@ -75,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 && $previous !== '';
             if ($keepPrevious) { $value = $previous; }
             if (!empty($field['required']) && $value === '') {
-                $message = '请填写 ' . ($field['label'] ?? $fieldName);
+                $message = '请输入 ' . ($field['label'] ?? $fieldName);
                 if ($isAjax) {
                     dns_json_response(['ok' => false, 'msg' => $message], 400);
                 }
@@ -210,15 +284,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $accountId = trim((string)($_POST['account_id'] ?? ''));
         $zoneId    = trim((string)($_POST['zone_id'] ?? ''));
         $zoneName  = trim((string)($_POST['zone_name'] ?? ''));
-        $account   = dns_find_account($cfg, $accountId);
+        $account = dns_find_account($cfg, $accountId);
+        if (!$account && !empty($cfg['accounts'] ?? [])) {
+            $account = dns_pick_working_account($cfg, $cfg['accounts'], $accountId);
+            if ($account) {
+                $accountId = (string)($account['id'] ?? '');
+            }
+        }
         if (!$account) { flash_set('error', '请选择有效的 DNS 账号'); dns_redirect_to(); }
-        if ($zoneId === '' || $zoneName === '') {
+
+        $zoneInfo = dns_resolve_zone_for_account($account, $zoneId, $zoneName);
+        if (!$zoneInfo['ok']) {
+            flash_set('error', $zoneInfo['msg']);
+            dns_redirect_to(['account' => $accountId]);
+        }
+        $zone = is_array($zoneInfo['zone'] ?? null) ? $zoneInfo['zone'] : null;
+        if (!$zone) {
             flash_set('error', '请选择有效的域名 Zone');
             dns_redirect_to(['account' => $accountId]);
         }
+        $zoneId = (string)($zone['id'] ?? '');
+        $zoneName = (string)($zone['name'] ?? '');
         dns_store_ui_selection($cfg, $accountId, $zoneId, $zoneName);
         save_dns_config($cfg);
-        $zone = ['id' => $zoneId, 'name' => $zoneName];
 
         if ($action === 'record_batch_delete') {
             $recordIds = array_values(array_filter(array_map(
@@ -293,14 +381,24 @@ $accounts = $cfg['accounts'] ?? [];
 // 当前激活账号
 $selectedAccountId = trim((string)($_GET['account'] ?? ($cfg['ui']['selected_account_id'] ?? '')));
 $selectedAccount   = $selectedAccountId !== '' ? dns_find_account($cfg, $selectedAccountId) : null;
-if (!$selectedAccount && !empty($accounts)) {
-    $selectedAccount   = $accounts[0];
+if ((!$selectedAccount || ((string)($_GET['account'] ?? '') === '' && ($cfg['ui']['selected_account_id'] ?? '') !== $selectedAccountId)) && !empty($accounts)) {
+    $selectedAccount = dns_pick_working_account($cfg, $accounts, $selectedAccountId);
+    if (!$selectedAccount) {
+        $selectedAccount = $accounts[0];
+    }
     $selectedAccountId = (string)($selectedAccount['id'] ?? '');
 }
 
 // ── 异步数据接口（避免页面首屏阻塞）──
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'dns_data') {
     $user = auth_get_current_user();
+    if (!dns_is_ajax_request()) {
+        dns_log_write('app', 'error', 'DNS async hydrate rejected non-ajax request', [
+            'account_id' => $selectedAccountId,
+            'remote_ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        ]);
+        dns_json_response(['ok' => false, 'msg' => '请求方式无效'], 401);
+    }
     if (!$user || ($user['role'] ?? '') !== 'admin') {
         dns_log_write('app', 'error', 'DNS async hydrate unauthorized', [
             'account_id' => $selectedAccountId,
@@ -317,6 +415,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
     $cfg = load_dns_config();
     $accountId = trim((string)($_GET['account'] ?? ($cfg['ui']['selected_account_id'] ?? '')));
     $account = $accountId !== '' ? dns_find_account($cfg, $accountId) : null;
+    if (!$account && !empty($cfg['accounts'] ?? [])) {
+        $account = dns_pick_working_account($cfg, $cfg['accounts'], $accountId);
+        if ($account) {
+            $accountId = (string)($account['id'] ?? '');
+        }
+    }
 
     dns_log_write('app', 'info', 'DNS async hydrate request', [
         'account_id' => $accountId,
@@ -331,30 +435,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
         dns_json_response(['ok' => true, 'data' => ['zones' => [], 'records' => [], 'selected_zone' => null]]);
     }
 
-    $zonesResult = dns_cli_call(['action' => 'zones.list', 'account' => $account]);
-    if (!$zonesResult['ok']) {
+    $zoneInfo = dns_resolve_zone_for_account(
+        $account,
+        trim((string)($_GET['zone'] ?? ($cfg['ui']['selected_zone_id'] ?? ''))),
+        trim((string)($_GET['zone_name'] ?? ($cfg['ui']['selected_zone_name'] ?? '')))
+    );
+    if (!$zoneInfo['ok']) {
         dns_log_write('app', 'error', 'DNS async hydrate zones.list failed', [
             'account_id' => $accountId,
-            'message' => (string)$zonesResult['msg'],
+            'message' => (string)$zoneInfo['msg'],
         ]);
-        dns_json_response(['ok' => false, 'msg' => $zonesResult['msg']], 500);
+        dns_json_response(['ok' => false, 'msg' => $zoneInfo['msg']]);
     }
-    $zones = $zonesResult['data']['zones'] ?? [];
-
-    $selectedZoneId = trim((string)($_GET['zone'] ?? ($cfg['ui']['selected_zone_id'] ?? '')));
-    $selectedZoneName = trim((string)($_GET['zone_name'] ?? ($cfg['ui']['selected_zone_name'] ?? '')));
-    $selectedZone = null;
-    foreach ($zones as $zone) {
-        if (($zone['id'] ?? '') === $selectedZoneId) { $selectedZone = $zone; break; }
-    }
-    if (!$selectedZone && $selectedZoneName !== '') {
-        foreach ($zones as $zone) {
-            if (($zone['name'] ?? '') === $selectedZoneName) { $selectedZone = $zone; break; }
-        }
-    }
-    if (!$selectedZone && !empty($zones)) {
-        $selectedZone = $zones[0];
-    }
+    $zones = $zoneInfo['zones'] ?? [];
+    $selectedZone = $zoneInfo['zone'] ?? null;
 
     $records = [];
     if ($selectedZone) {
@@ -366,7 +460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
                 'zone_name' => (string)($selectedZone['name'] ?? ''),
                 'message' => (string)$recordsResult['msg'],
             ]);
-            dns_json_response(['ok' => false, 'msg' => $recordsResult['msg']], 500);
+            dns_json_response(['ok' => false, 'msg' => $recordsResult['msg']]);
         }
         $records = $recordsResult['data']['records'] ?? [];
     }
@@ -412,6 +506,13 @@ $selectedZoneName = trim((string)($_GET['zone_name'] ?? ($cfg['ui']['selected_zo
 $selectedZone     = ($selectedZoneId !== '' || $selectedZoneName !== '')
     ? ['id' => $selectedZoneId, 'name' => $selectedZoneName]
     : null;
+
+// 非 hydrate 首屏不提前展示上一次 Zone 的操作区，避免异步跳转前用户点到旧按钮/旧列表
+if (!$dnsHydrate) {
+    $selectedZone = null;
+    $selectedZoneId = '';
+    $selectedZoneName = '';
+}
 
 // 首屏默认不阻塞，hydrate=1 时才同步加载完整数据
 $records      = [];
@@ -786,49 +887,6 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
   </div>
 </div>
 
-<!-- ═══ 账号管理弹窗 ═══ -->
-<div id="account-mgr-modal" class="dns-modal" onclick="if(event.target===this)closeModal('account-mgr-modal')">
-  <div class="dns-modal-card">
-    <div class="dns-modal-head">
-      <span class="dns-modal-title">DNS 账号管理</span>
-      <button class="dns-modal-close" onclick="closeModal('account-mgr-modal')">×</button>
-    </div>
-    <div class="dns-modal-body">
-      <?php if (empty($accounts)): ?>
-      <div class="dns-empty-state" style="padding:18px"><strong>暂无账号</strong>点击「添加 DNS 账户」开始添加</div>
-      <?php else: ?>
-      <div class="dns-account-list-modal">
-        <?php foreach ($accounts as $acct): ?>
-        <?php $aid=(string)($acct['id']??''); $isAct=$aid===$selectedAccountId; ?>
-        <div class="dns-account-row<?= $isAct?' is-active':'' ?>">
-          <div class="dns-account-row-info">
-            <div class="dns-account-row-name">
-              <?= htmlspecialchars((string)($acct['name']??'')) ?>
-              <span class="badge <?= htmlspecialchars(dns_provider_badge_class((string)$acct['provider'])) ?>" style="margin-left:6px"><?= htmlspecialchars(dns_provider_label((string)$acct['provider'])) ?></span>
-              <?php if ($isAct): ?><span class="badge badge-green" style="margin-left:4px">当前</span><?php endif; ?>
-            </div>
-            <div class="dns-account-row-meta">ID: <?= htmlspecialchars($aid) ?> &nbsp;|&nbsp; 更新: <?= htmlspecialchars((string)($acct['updated_at']??'-')) ?></div>
-          </div>
-          <div class="dns-account-row-actions">
-            <a href="dns.php?<?= htmlspecialchars(http_build_query(['account'=>$aid])) ?>" class="btn btn-sm btn-secondary" onclick="closeModal('account-mgr-modal')">选择</a>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="openAccountForm('<?= htmlspecialchars($aid) ?>')">编辑</button>
-            <form method="POST" onsubmit="return confirm('确认删除该账号吗？')">
-              <?= csrf_field() ?>
-              <input type="hidden" name="action" value="delete_account">
-              <input type="hidden" name="account_id" value="<?= htmlspecialchars($aid) ?>">
-              <button type="submit" class="btn btn-sm btn-danger">删除</button>
-            </form>
-          </div>
-        </div>
-        <?php endforeach; ?>
-      </div>
-      <?php endif; ?>
-      <hr class="dns-divider">
-      <button type="button" class="btn btn-primary" onclick="openAccountForm()">+ 添加 DNS 账户</button>
-    </div>
-  </div>
-</div>
-
 <!-- ═══ 账号表单弹窗 ═══ -->
 <div id="account-form-modal" class="dns-modal" onclick="if(event.target===this)closeModal('account-form-modal')">
   <div class="dns-modal-card">
@@ -1073,104 +1131,6 @@ log "=== DDNS 结束 ==="</pre>
   </div>
 </div>
 
-<!-- ═══ 记录编辑弹窗 ═══ -->
-<div id="record-modal" class="dns-modal" onclick="if(event.target===this)closeModal('record-modal')">
-  <div class="dns-modal-card">
-    <div class="dns-modal-head">
-      <span class="dns-modal-title" id="rec-modal-title">新建解析记录</span>
-      <button class="dns-modal-close" onclick="closeModal('record-modal')">×</button>
-    </div>
-    <div class="dns-modal-body">
-      <form method="POST" id="rec-form">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" id="rec-action" value="record_create">
-        <input type="hidden" name="account_id" value="<?= htmlspecialchars($selectedAccountId) ?>">
-        <input type="hidden" name="zone_id" value="<?= htmlspecialchars($selectedZoneId) ?>">
-        <input type="hidden" name="zone_name" value="<?= htmlspecialchars($selectedZoneName) ?>">
-        <input type="hidden" name="record_id" id="rec-id" value="">
-        <input type="hidden" name="record_old_type" id="rec-old-type" value="A">
-        <div class="form-grid">
-          <div class="form-group">
-            <label>主机记录</label>
-            <input type="text" name="record_name" id="rec-name" value="@" placeholder="@ / www / api">
-          </div>
-          <div class="form-group">
-            <label>类型</label>
-            <select name="record_type" id="rec-type" onchange="onRecTypeChange()">
-              <?php foreach (dns_record_type_options() as $t): ?>
-              <option value="<?= htmlspecialchars($t) ?>"><?= htmlspecialchars($t) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="form-group full" id="rec-value-group">
-            <label id="rec-value-label">记录值</label>
-            <input type="text" name="record_value" id="rec-value" placeholder="1.2.3.4">
-          </div>
-          <div class="form-group" id="rec-priority-group" style="display:none">
-            <label>Priority</label>
-            <input type="number" name="record_priority" id="rec-priority" value="10">
-          </div>
-          <div class="form-group" id="rec-weight-group" style="display:none">
-            <label>Weight</label>
-            <input type="number" name="record_weight" id="rec-weight" value="0">
-          </div>
-          <div class="form-group" id="rec-port-group" style="display:none">
-            <label>Port</label>
-            <input type="number" name="record_port" id="rec-port" value="1">
-          </div>
-          <div class="form-group full" id="rec-target-group" style="display:none">
-            <label>Target</label>
-            <input type="text" name="record_target" id="rec-target" placeholder="sip.example.com">
-          </div>
-          <div class="form-group">
-            <label>TTL</label>
-            <input type="number" name="record_ttl" id="rec-ttl" value="<?= ($selectedAccount&&($selectedAccount['provider']??'')==='cloudflare')?'1':'600' ?>">
-            <span class="form-hint">Cloudflare 使用 1 表示自动 TTL</span>
-          </div>
-          <div class="form-group" id="rec-proxied-group" style="display:none">
-            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--tx);cursor:pointer">
-              <input type="checkbox" name="record_proxied" value="1" id="rec-proxied" style="width:15px;height:15px;accent-color:var(--ac)">
-              启用 Proxied（仅 Cloudflare A/AAAA/CNAME）
-            </label>
-          </div>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">保存记录</button>
-          <button type="button" class="btn btn-secondary" onclick="closeModal('record-modal')">取消</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ 批量导入弹窗 ═══ -->
-<div id="import-modal" class="dns-modal" onclick="if(event.target===this)closeModal('import-modal')">
-  <div class="dns-modal-card">
-    <div class="dns-modal-head">
-      <span class="dns-modal-title">批量导入解析记录</span>
-      <button class="dns-modal-close" onclick="closeModal('import-modal')">×</button>
-    </div>
-    <div class="dns-modal-body">
-      <form method="POST">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="records_import">
-        <input type="hidden" name="account_id" value="<?= htmlspecialchars($selectedAccountId) ?>">
-        <input type="hidden" name="zone_id" value="<?= htmlspecialchars($selectedZoneId) ?>">
-        <input type="hidden" name="zone_name" value="<?= htmlspecialchars($selectedZoneName) ?>">
-        <div class="form-group">
-          <label>JSON 数据</label>
-          <textarea name="import_json" rows="12" style="font-family:var(--mono);font-size:12px" placeholder='[&#10;  {"name":"@","type":"A","value":"1.2.3.4","ttl":600},&#10;  {"name":"www","type":"CNAME","value":"example.com","ttl":600}&#10;]'></textarea>
-        </div>
-        <div class="dns-tip">每条记录须含 <code>name</code>、<code>type</code>、<code>value</code>。MX/SRV 可附加 <code>priority</code>。</div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">开始导入</button>
-          <button type="button" class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
 <script>
 var DNS_CATALOG = <?= json_encode($catalog, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG) ?>;
 var DNS_ACCOUNTS = <?= json_encode($accountRowsForJs, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG) ?>;
@@ -1237,10 +1197,10 @@ function bindDnsAbortOnNavigation() {
 function restoreDnsHydrateShell() {
   var toolbar = document.querySelector('.dns-toolbar-row');
   var mainEl = document.getElementById('dns-records-panel') || document.getElementById('dns-main-card');
-  if (toolbar && typeof dnsHydrateToolbarSnapshot === 'string' && dnsHydrateToolbarSnapshot !== '') {
+  if (toolbar && typeof dnsHydrateToolbarSnapshot === 'string' && dnsHydrateToolbarSnapshot !== '' && !toolbar.querySelector('#dns-async-loading')) {
     toolbar.innerHTML = dnsHydrateToolbarSnapshot;
   }
-  if (mainEl && typeof dnsHydrateMainSnapshot === 'string' && dnsHydrateMainSnapshot !== '') {
+  if (mainEl && typeof dnsHydrateMainSnapshot === 'string' && dnsHydrateMainSnapshot !== '' && !mainEl.querySelector('#dns-async-loading')) {
     mainEl.innerHTML = dnsHydrateMainSnapshot;
   }
   var loadingEl = document.getElementById('dns-async-loading');
@@ -1269,11 +1229,13 @@ async function dnsAsyncHydrateIfNeeded() {
     try { dnsAsyncController.abort(); } catch (_) {}
   }
 
-  if (toolbar) {
-    toolbar.innerHTML = '<div class="dns-domain-select-wrap" style="flex:1;min-width:0"><span class="dns-loading" style="padding:8px 0;display:flex;align-items:center;gap:10px"><span class="dns-spinner"></span><span>正在加载 DNS 数据...</span></span></div>';
-  }
-  if (mainEl) {
-    mainEl.innerHTML = '<div class="dns-empty-state"><span class="dns-loading" style="justify-content:center;padding:32px 0;display:flex;align-items:center;gap:10px;width:100%"><span class="dns-spinner"></span><span>正在加载解析记录...</span></span></div>';
+  if (toolbar && !document.getElementById('dns-async-loading')) {
+    var loading = document.createElement('div');
+    loading.id = 'dns-async-loading';
+    loading.className = 'dns-loading';
+    loading.style.padding = '8px 0';
+    loading.innerHTML = '<span class="dns-spinner"></span><span>正在加载 DNS 数据...</span>';
+    toolbar.appendChild(loading);
   }
   document.body.classList.add('dns-hydrate-loading');
 

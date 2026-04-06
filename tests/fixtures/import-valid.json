@@ -1,0 +1,13 @@
+{
+  "groups": [
+    {
+      "id": "imported-group",
+      "name": "导入分组",
+      "icon": "📥",
+      "order": 1,
+      "auth_required": false,
+      "visible_to": "all",
+      "sites": []
+    }
+  ]
+}

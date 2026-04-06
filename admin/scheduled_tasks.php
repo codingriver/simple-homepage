@@ -32,6 +32,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', '请填写任务名称');
             header('Location: scheduled_tasks.php'); exit;
         }
+        if (cron_is_ddns_dispatcher_id($id)) {
+            flash_set('error', 'DDNS 调度器由系统自动维护，不能手动编辑');
+            header('Location: scheduled_tasks.php'); exit;
+        }
         if (!cron_validate_schedule($sched)) {
             flash_set('error', 'Cron 表达式无效（需至少 5 个时间字段）');
             header('Location: scheduled_tasks.php'); exit;
@@ -78,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* ------ 删除任务 ------ */
     if ($action === 'task_delete') {
         $id = trim((string)($_POST['id'] ?? ''));
+        if (cron_is_ddns_dispatcher_id($id)) {
+            flash_set('error', 'DDNS 调度器由系统自动维护，不能手动删除');
+            header('Location: scheduled_tasks.php'); exit;
+        }
         $data = load_scheduled_tasks();
         $deleted = null;
         foreach ($data['tasks'] ?? [] as $row) {
@@ -101,6 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* ------ 立即执行 ------ */
     if ($action === 'task_run') {
         $id = trim((string)($_POST['id'] ?? ''));
+        if (cron_is_ddns_dispatcher_id($id)) {
+            $ex = cron_execute_task($id);
+            flash_set($ex['ok'] ? 'success' : 'warn', $ex['ok'] ? 'DDNS 分组执行完成' : ('DDNS 分组执行有失败，退出码 ' . $ex['code']));
+            header('Location: scheduled_tasks.php'); exit;
+        }
         $ex = cron_execute_task($id);
         flash_set($ex['ok'] ? 'success' : 'error', $ex['ok'] ? '执行完成' : ('执行失败，退出码 ' . $ex['code']));
         header('Location: scheduled_tasks.php'); exit;
@@ -109,6 +122,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* ------ 启用 / 禁用切换 ------ */
     if ($action === 'task_toggle') {
         $id  = trim((string)($_POST['id'] ?? ''));
+        if (cron_is_ddns_dispatcher_id($id)) {
+            flash_set('error', 'DDNS 调度器由系统自动维护，不能手动启停');
+            header('Location: scheduled_tasks.php'); exit;
+        }
         $new = task_toggle_enabled($id);
         flash_set('success', $new === null ? '任务不存在' : ($new ? '已启用' : '已禁用'));
         header('Location: scheduled_tasks.php'); exit;
@@ -134,9 +151,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $page_title = '计划任务';
 require_once __DIR__ . '/shared/header.php';
 require_once __DIR__ . '/shared/cron_lib.php';
+require_once __DIR__ . '/shared/ddns_lib.php';
 
+$ddns_dispatcher = cron_sync_ddns_dispatcher_task();
 $tasks = load_scheduled_tasks()['tasks'] ?? [];
 foreach ($tasks as &$_t) {
+    $_t['_is_system'] = cron_is_system_task($_t);
     $_t['_next'] = (!empty($_t['enabled']) && !empty($_t['schedule']))
         ? (cron_next_run($_t['schedule']) ?: '-')
         : '-';
@@ -193,6 +213,36 @@ $CSRF = csrf_field();
   <span style="color:var(--tm);font-size:12px">管理员可执行任意 shell，请自行评估风险。</span>
 </div>
 
+<div class="card" style="margin-bottom:16px">
+  <div class="card-title">DDNS 调度器</div>
+  <?php if (!empty($ddns_dispatcher['enabled'])): ?>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span class="badge badge-blue">已自动接入</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)">系统分组数：<?= count($ddns_dispatcher['groups'] ?? []) ?></span>
+    </div>
+    <div style="margin-top:10px;color:var(--tm);font-size:12px;line-height:1.8">
+      系统会按 DDNS 任务的 Cron 分组，自动生成多个调度器。每个分组只负责执行同一个 cron 下的 DDNS 任务。
+    </div>
+    <div style="margin-top:10px;display:grid;gap:8px">
+      <?php foreach (($ddns_dispatcher['groups'] ?? []) as $cronExpr => $groupTasks): ?>
+        <div style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2)">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <span class="badge badge-purple">分组</span>
+            <code><?= htmlspecialchars($cronExpr) ?></code>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)"><?= htmlspecialchars(cron_ddns_dispatcher_id($cronExpr)) ?></span>
+            <span style="font-size:12px;color:var(--tx2)">名称：<?= htmlspecialchars('DDNS 调度器 [' . $cronExpr . ']') ?></span>
+          </div>
+          <div style="margin-top:6px;color:var(--tx2);font-size:12px">
+            任务：<?= htmlspecialchars(implode('、', array_map(fn($row) => (string)($row['name'] ?: $row['id']), $groupTasks))) ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php else: ?>
+    <div style="color:var(--tm);font-size:12px;line-height:1.7">当前没有启用的 DDNS 任务，所以不会生成 DDNS 调度器。</div>
+  <?php endif; ?>
+</div>
+
 <!-- ===== 任务列表 ===== -->
 <div class="card">
 <?php if (empty($tasks)): ?>
@@ -219,7 +269,17 @@ $CSRF = csrf_field();
                 : '<span class="badge badge-red">' . (int)$exitCode . '</span>');
     ?>
     <tr>
-      <td style="font-weight:600"><?= htmlspecialchars($t['name'] ?? '') ?></td>
+      <td style="font-weight:600">
+        <?= htmlspecialchars($t['name'] ?? '') ?>
+        <?php if (!empty($t['_is_system'])): ?>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="badge badge-purple">系统任务</span>
+            <?php if (!empty($t['meta']['group_label'])): ?>
+              <span style="font-size:11px;color:var(--tx2)">包含：<?= htmlspecialchars((string)$t['meta']['group_label']) ?></span>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </td>
       <td><code><?= htmlspecialchars($t['schedule'] ?? '') ?></code></td>
       <td style="font-size:11px;line-height:1.5">
         <div><span class="badge badge-blue"><?= htmlspecialchars($t['_workdir_mode_label']) ?></span></div>
@@ -244,6 +304,7 @@ $CSRF = csrf_field();
       <td style="white-space:nowrap">
 
         <!-- 启用 / 禁用 -->
+        <?php if (empty($t['_is_system'])): ?>
         <form method="POST" style="display:inline">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_toggle">
@@ -256,12 +317,19 @@ $CSRF = csrf_field();
             <?= $enabled ? '⏸ 禁用' : '▶ 启用' ?>
           </button>
         </form>
+        <?php else: ?>
+        <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">自动维护</button>
+        <?php endif; ?>
 
         <!-- 编辑 -->
+        <?php if (empty($t['_is_system'])): ?>
         <button type="button" class="btn btn-sm btn-secondary"
           onclick='openTaskModal(<?= htmlspecialchars(json_encode($t, JSON_UNESCAPED_UNICODE|JSON_HEX_APOS|JSON_HEX_TAG), ENT_QUOTES) ?>)'>
           ✏ 编辑
         </button>
+        <?php else: ?>
+        <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
+        <?php endif; ?>
 
         <!-- 立即执行 -->
         <form method="POST" style="display:inline">
@@ -285,6 +353,7 @@ $CSRF = csrf_field();
         </button>
 
         <!-- 删除 -->
+        <?php if (empty($t['_is_system'])): ?>
         <form method="POST" style="display:inline"
           onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($t['working_dir_mode'] ?? 'project'), ENT_QUOTES) ?>)">
           <?= csrf_field() ?>
@@ -292,6 +361,9 @@ $CSRF = csrf_field();
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
           <button type="submit" class="btn btn-sm btn-danger">✕ 删除</button>
         </form>
+        <?php else: ?>
+        <button type="button" class="btn btn-sm btn-danger" disabled style="opacity:.55;cursor:not-allowed">✕ 系统维护</button>
+        <?php endif; ?>
 
       </td>
     </tr>
@@ -606,9 +678,9 @@ function logLoadPage(p, jumpToLast) {
       var html = d.lines.map(function(line){
         var cls = '', safe = line
           .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        if (/error|fail|fatal|exception/i.test(safe))  cls = 'color:var(--red)';
-        else if (/warn/i.test(safe))                    cls = 'color:var(--yellow)';
-        else if (/ok|success|done|完成/i.test(safe))   cls = 'color:var(--green)';
+        if (/\bFAILED\b|error|fail|fatal|exception/i.test(safe)) cls = 'color:var(--red)';
+        else if (/\bSKIP\b|warn/i.test(safe))                    cls = 'color:var(--yellow)';
+        else if (/\bUPDATED\b|\bOK\b|success|done|完成/i.test(safe)) cls = 'color:var(--green)';
         return cls
           ? '<div style="' + cls + '"><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>'
           : '<div><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>';

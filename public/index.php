@@ -117,30 +117,45 @@ if ($bg_image) {
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
 <?= $bg_style ?>}
-header{display:flex;align-items:center;justify-content:space-between;padding:13px 24px;
+body.search-open{overflow-x:hidden}
+header{padding:12px 18px 10px;
 border-bottom:1px solid var(--bd);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100;
 background:rgba(15,17,23,.88)}
-.logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;text-decoration:none;color:var(--tx)}
+.topbar-main{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.topbar-actions{display:flex;align-items:center;gap:8px}
+.topbar-actions form{display:inline-flex;margin:0}
+.topbar-search{display:none;padding-top:10px}
+body.search-open .topbar-search{display:block}
+body.search-open .search-trigger{color:var(--tx);border-color:rgba(108,99,255,.48);background:rgba(108,99,255,.16);box-shadow:0 0 0 1px rgba(108,99,255,.08) inset}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;text-decoration:none;color:var(--tx);min-width:0}
+.logo-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dot{width:7px;height:7px;background:var(--ac);border-radius:50%;box-shadow:0 0 7px var(--ac);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .hr{display:flex;align-items:center;gap:8px;font-size:13px}
-.sb{background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:8px;
-padding:5px 11px;color:var(--tx);font-size:13px;outline:none;width:180px;
-font-family:var(--fn);transition:width .2s,border-color .2s}
-.sb:focus{border-color:var(--ac);width:240px}
+.sb{background:rgba(255,255,255,.05);border:1px solid var(--bd);border-radius:12px;
+padding:10px 12px;color:var(--tx);font-size:13px;outline:none;width:100%;
+font-family:var(--fn);transition:border-color .2s,box-shadow .2s,background .2s}
+.sb:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(108,99,255,.12);background:rgba(255,255,255,.07)}
 .ub{background:var(--sf);border:1px solid var(--bd);border-radius:20px;padding:4px 12px;font-size:13px}
-.nl{color:var(--tm);text-decoration:none;font-size:13px;padding:4px 10px;
-border:1px solid var(--bd);border-radius:16px;transition:all .15s}
+.nl{color:var(--tm);text-decoration:none;font-size:13px;padding:7px 10px;
+border:1px solid var(--bd);border-radius:12px;transition:all .15s;background:rgba(255,255,255,.02)}
 .nl:hover{color:var(--tx);border-color:rgba(108,99,255,.5)}
-.nav-bar{display:flex;gap:6px;padding:10px 24px;overflow-x:auto;
+.search-trigger{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:0 12px}
+.search-cancel{display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:40px;padding:0 12px}
+.search-row{display:flex;align-items:center;gap:8px}
+.search-meta{display:none;margin-top:8px;color:var(--tm);font-size:12px}
+body.search-open .search-meta{display:block}
+.nav-bar{display:flex;gap:8px;padding:10px 18px 12px;overflow-x:auto;
 border-bottom:1px solid var(--bd);background:rgba(15,17,23,.6);backdrop-filter:blur(8px);scrollbar-width:none}
 .nav-bar::-webkit-scrollbar{display:none}
 .na{color:var(--tm);text-decoration:none;font-size:13px;white-space:nowrap;
-padding:5px 14px;border-radius:8px;transition:all .15s;border:1px solid transparent}
+padding:7px 14px;border-radius:999px;transition:all .15s;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.02)}
 .na:hover{color:var(--tx);background:rgba(255,255,255,.06)}
-.na.active{color:var(--tx);background:rgba(108,99,255,.15);border-color:rgba(108,99,255,.35)}
-main{max-width:1280px;margin:0 auto;padding:28px 20px}
+.na.active{color:var(--tx);background:rgba(108,99,255,.18);border-color:rgba(108,99,255,.42);box-shadow:0 6px 16px rgba(108,99,255,.12)}
+main{max-width:1280px;margin:0 auto;padding:22px 16px}
 .sec{display:none}.sec.active{display:block}
+.section-label{display:none;margin-bottom:10px;color:var(--tm);font-size:12px;letter-spacing:.04em}
+body.search-open .section-label{display:block}
 <?php
 // ── 方向映射 ──
 $dir_map = [
@@ -217,7 +232,13 @@ background:linear-gradient(135deg,rgba(108,99,255,.07),transparent);opacity:0;tr
 .bi{background:rgba(108,99,255,.15);color:var(--ac2)}
 .bp{background:rgba(251,191,36,.12);color:#fbbf24}
 .be{background:rgba(156,163,175,.1);color:#9ca3af}
-footer{text-align:center;padding:22px;color:var(--tm);font-size:12px;border-top:1px solid var(--bd)}
+footer{text-align:center;padding:18px 14px;color:var(--tm);font-size:12px;border-top:1px solid var(--bd)}
+.card.no-desc .cd{opacity:.76}
+.group-chip{display:none;margin-top:auto;padding-top:6px;font-size:10px;color:var(--ac2);letter-spacing:.04em}
+body.search-open .group-chip{display:block}
+#proxy-pending-bar{background:linear-gradient(180deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.35);border-radius:14px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#proxy-pending-bar .proxy-pending-text{color:#fca5a5;font-size:13px;flex:1;line-height:1.6}
+#proxy-pending-bar .proxy-pending-action{background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.42);color:#fda4af;border-radius:10px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap}
 .hidden{display:none!important}
 /* ── Tooltip ── */
 .card{position:relative}
@@ -235,28 +256,59 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
 .card:first-child:hover .tt,.card:nth-child(4n+1):hover .tt{transform:translateX(0) scale(1)}
 <?php if($card_show_desc): ?>.card .cd{display:block}<?php else: ?>.card .cd{display:none}<?php endif; ?>
 @media(max-width:768px){
-  .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-  header{padding:10px 14px}
-  .sb{width:120px}.sb:focus{width:150px}
-  main{padding:20px 12px}
+  header{padding:10px 12px 10px}
+  .topbar-main{gap:10px}
+  .logo{font-size:15px;max-width:50vw}
+  .topbar-actions{gap:6px}
+  .topbar-actions .ub{display:none}
+  .topbar-actions .nl{font-size:12px;padding:7px 9px;min-height:38px}
+  .search-trigger{min-width:40px;padding:0 10px}
+  .nav-bar{padding:10px 12px 12px;gap:8px}
+  .na{padding:7px 12px;font-size:12px}
+  main{padding:16px 12px}
+  .section-label{margin-bottom:8px;font-size:11px}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .card{min-height:102px;padding:10px 10px 9px;border-radius:14px;gap:8px;align-items:flex-start;text-align:left}
+  .card .ci{width:24px;height:24px;font-size:18px;margin-bottom:2px}
+  .card .ci img{width:18px;height:18px}
+  .card .cn{font-size:12px;line-height:1.28;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.56em;max-width:calc(100% - 20px)}
+  .card .cd{display:block;font-size:10px;line-height:1.35;color:var(--tm);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;min-height:1.35em;max-width:100%}
+  .group-chip{padding-top:5px;font-size:9px}
+  .bx{top:8px;right:8px;font-size:9px;padding:2px 6px;border-radius:999px;opacity:.92}
+  #proxy-pending-bar{padding:12px;border-radius:12px}
+  #proxy-pending-bar .proxy-pending-text{font-size:12px}
+  #proxy-pending-bar .proxy-pending-action{width:100%;justify-content:center;display:inline-flex}
+  .tt{display:none!important}
 }
 @media(max-width:480px){
-  .grid{grid-template-columns:1fr 1fr}
-  .hr .ub{display:none}
+  .logo{max-width:46vw}
+  .search-meta{font-size:11px}
+  .topbar-actions .nl{padding:7px 8px}
+  .card{min-height:94px}
+  .bx{font-size:8px;padding:2px 5px}
 }
 </style></head><body>
 <header>
-  <a class="logo" href="/"><div class="dot"></div><?= htmlspecialchars($site_name) ?></a>
-  <div class="hr">
-    <input class="sb" id="sq" placeholder="搜索… (/)" autocomplete="off" type="search">
-    <?php if($user):?><div class="ub">👤 <?= htmlspecialchars($user['username']) ?></div><?php endif;?>
-    <?php if($is_admin):?><a href="../admin/" class="nl">⚙ 后台</a><?php endif;?>
-    <?php if($user):?>
-    <form method="POST" action="logout.php" style="display:inline;margin:0">
-      <?= csrf_field() ?>
-      <button type="submit" class="nl" style="background:none;cursor:pointer">退出</button>
-    </form>
-    <?php else:?><a href="login.php" class="nl">登录</a><?php endif;?>
+  <div class="topbar-main">
+    <a class="logo" href="/"><div class="dot"></div><span class="logo-text"><?= htmlspecialchars($site_name) ?></span></a>
+    <div class="topbar-actions">
+      <?php if($user):?><div class="ub">👤 <?= htmlspecialchars($user['username']) ?></div><?php endif;?>
+      <button type="button" class="nl search-trigger" id="searchToggle" aria-expanded="false" aria-controls="searchPanel">🔍</button>
+      <?php if($is_admin):?><a href="../admin/" class="nl">⚙</a><?php endif;?>
+      <?php if($user):?>
+      <form method="POST" action="logout.php" style="display:inline;margin:0">
+        <?= csrf_field() ?>
+        <button type="submit" class="nl" style="background:none;cursor:pointer">退出</button>
+      </form>
+      <?php else:?><a href="login.php" class="nl">登录</a><?php endif;?>
+    </div>
+  </div>
+  <div class="topbar-search" id="searchPanel">
+    <div class="search-row">
+      <input class="sb" id="sq" placeholder="搜索站点、描述、分组…" autocomplete="off" type="search">
+      <button type="button" class="nl search-cancel" id="searchClose">取消</button>
+    </div>
+    <div class="search-meta" id="searchMeta">输入关键词，跨分组搜索站点</div>
   </div>
 </header>
 <nav class="nav-bar" id="tabs">
@@ -268,8 +320,8 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
 </nav>
 <main id="mn">
 <?php if (!empty($_pending_proxy)): ?>
-<div id="proxy-pending-bar" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-  <span style="color:#f87171;font-size:13px;flex:1">
+<div id="proxy-pending-bar">
+  <span class="proxy-pending-text">
     ⚠️
     <?php if (count($_pending_proxy) <= 3): ?>
       以下代理站点配置已修改但尚未生效：
@@ -282,7 +334,7 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   <form method="POST" action="/admin/settings.php" style="margin:0">
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="nginx_apply_and_reload">
-    <button type="submit" style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.5);color:#f87171;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap">🔄 生成配置并 Reload Nginx</button>
+    <button type="submit" class="proxy-pending-action">🔄 生成配置并 Reload Nginx</button>
   </form>
   <?php endif; ?>
 </div>
@@ -293,6 +345,7 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   $gid=htmlspecialchars($grp['id']);
 ?>
 <div class="sec<?= $first_grp ? ' active' : '' ?>" id="g-<?=$gid?>">
+  <div class="section-label">#<?= htmlspecialchars($grp['name']) ?></div>
   <div class="grid">
   <?php foreach($grp['sites']??[] as $s):
     $href=build_nav_url($s,$token);
@@ -308,9 +361,10 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
         $h_status = $h_entry['status'] ?? 'unknown';
     }
   ?>
-  <a class="card" href="<?= htmlspecialchars($href) ?>" target="_blank" rel="noopener noreferrer"
+  <a class="card<?= empty($s['desc']) ? ' no-desc' : '' ?>" href="<?= htmlspecialchars($href) ?>" target="_blank" rel="noopener noreferrer"
      data-name="<?= htmlspecialchars(strtolower($s['name'])) ?>"
-     data-desc="<?= htmlspecialchars(strtolower($s['desc']??'')) ?>">
+     data-desc="<?= htmlspecialchars(strtolower($s['desc']??'')) ?>"
+     data-group="<?= htmlspecialchars(strtolower($grp['name']??'')) ?>">
     <span class="bx <?=$tc?>"><?=$tl?></span>
     <?php if ($user && $h_status !== 'unknown'): ?>
     <span class="hd" style="position:absolute;bottom:5px;right:6px;width:7px;height:7px;border-radius:50%;background:<?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;box-shadow:0 0 5px <?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;" title="<?= $h_status==='up' ? '在线' : '离线' ?>"></span>
@@ -326,6 +380,8 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
       <?php endif;?>
     </div>
     <div class="cn"><?= htmlspecialchars($s['name']) ?></div>
+    <div class="cd"><?= htmlspecialchars($s['desc'] ?? $tl) ?></div>
+    <div class="group-chip">#<?= htmlspecialchars($grp['name']) ?></div>
     <?php if(!empty($s['desc']) || !empty($href)): ?>
     <div class="tt">
       <?php if(!empty($s['desc'])): ?><p><?= htmlspecialchars($s['desc']) ?></p><?php endif; ?>
@@ -336,9 +392,14 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   <?php endforeach;?></div>
 </div>
 <?php $first_grp = false; endforeach;?></main>
-<footer><?php if($user):?><?= htmlspecialchars($user['username']) ?> &nbsp;·&nbsp; Cookie 到期 <?= date('Y-m-d H:i',$user['exp']??time()) ?><?php endif;?></footer>
+<footer><?php if($user):?><?= htmlspecialchars($user['username']) ?> · 已登录<?php endif;?></footer>
 <script>
 // ── Tab 切换 ──
+var body=document.body;
+var searchInput=document.getElementById('sq');
+var searchToggle=document.getElementById('searchToggle');
+var searchClose=document.getElementById('searchClose');
+var searchMeta=document.getElementById('searchMeta');
 var tabs=document.querySelectorAll('.na[data-tab]');
 var secs=document.querySelectorAll('.sec');
 function showTab(id){
@@ -346,35 +407,53 @@ function showTab(id){
   secs.forEach(function(s){s.classList.toggle('active',s.id===id);});
   localStorage.setItem('nav_tab',id);
 }
+function restoreTabView(){
+  var cur=localStorage.getItem('nav_tab')||'';
+  secs.forEach(function(s){s.classList.toggle('active',!cur||s.id===cur);s.style.display='';});
+  secs.forEach(function(s){s.querySelectorAll('.card').forEach(function(c){c.style.display='';});});
+  if(searchMeta) searchMeta.textContent='输入关键词，跨分组搜索站点';
+}
+function openSearch(){
+  body.classList.add('search-open');
+  if(searchToggle) searchToggle.setAttribute('aria-expanded','true');
+  if(searchInput) searchInput.focus();
+}
+function closeSearch(){
+  body.classList.remove('search-open');
+  if(searchToggle) searchToggle.setAttribute('aria-expanded','false');
+  if(searchInput){ searchInput.value=''; searchInput.blur(); }
+  restoreTabView();
+}
 // 恢复上次选中的 Tab
 var savedTab=localStorage.getItem('nav_tab');
 if(savedTab&&document.getElementById(savedTab))showTab(savedTab);
 tabs.forEach(function(t){
   t.addEventListener('click',function(e){e.preventDefault();showTab(this.dataset.tab);});
 });
+if(searchToggle){ searchToggle.addEventListener('click',function(){ body.classList.contains('search-open') ? closeSearch() : openSearch(); }); }
+if(searchClose){ searchClose.addEventListener('click',closeSearch); }
 // ── 搜索 ──
 document.addEventListener('keydown',function(e){
-  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();document.getElementById('sq').focus();}
-  if(e.key==='Escape')document.getElementById('sq').blur();
+  if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();openSearch();}
+  if(e.key==='Escape')closeSearch();
 });
-document.getElementById('sq').addEventListener('input',function(){
+searchInput.addEventListener('input',function(){
   var q=this.value.toLowerCase().trim();
   if(!q){
-    // 恢复 Tab 模式
-    var cur=localStorage.getItem('nav_tab')||'';
-    secs.forEach(function(s){s.classList.toggle('active',!cur||s.id===cur);s.style.display='';});
-    secs.forEach(function(s){s.querySelectorAll('.card').forEach(function(c){c.style.display='';});});
+    restoreTabView();
     return;
   }
-  // 搜索模式：显示所有含匹配结果的分组
+  openSearch();
+  var total=0;
   secs.forEach(function(sec){
     var cards=sec.querySelectorAll('.card');var any=false;
     cards.forEach(function(c){
-      var m=(c.dataset.name||'').includes(q)||(c.dataset.desc||'').includes(q);
-      c.style.display=m?'':'none';if(m)any=true;
+      var m=(c.dataset.name||'').includes(q)||(c.dataset.desc||'').includes(q)||(c.dataset.group||'').includes(q);
+      c.style.display=m?'':'none';if(m){any=true;total++;}
     });
     sec.classList.toggle('active',any);
     sec.style.display=any?'':'none';
   });
+  if(searchMeta) searchMeta.textContent=total>0?('找到 '+total+' 个结果'):'没有找到匹配结果';
 });
 </script></body></html>

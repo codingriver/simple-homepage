@@ -1,4 +1,4 @@
-#!/usr/local/bin/php
+#!/usr/bin/env php
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../admin/shared/cron_lib.php';

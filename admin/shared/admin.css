@@ -165,6 +165,30 @@ body {
   z-index: 100;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--bd2);
+  background: var(--sf2);
+  color: var(--tx);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
 .topbar-title {
   font-size: 14px;
   font-weight: 600;
@@ -267,6 +291,20 @@ body {
   text-transform: uppercase;
   letter-spacing: .07em;
   font-weight: 600;
+}
+
+/* ── 仪表盘快捷区 ── */
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.quick-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
 }
 
 /* ── 表格 ── */
@@ -475,12 +513,27 @@ input::placeholder { color: var(--tm); }
 
 /* ── 响应式 ── */
 @media (max-width: 768px) {
+  body.sidebar-open { overflow: hidden; }
   .sidebar { transform: translateX(-100%); transition: transform .25s; }
   .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 150;
+  }
+  .sidebar-backdrop.open { display: block; }
   .main-wrap { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .content { padding: 16px; }
   .topbar-title::before { display: none; }
+  .sidebar-toggle { display: inline-flex; }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-card { padding: 16px 12px; }
+  .stat-val { font-size: 24px; }
+  .quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quick-action { width: 100%; min-height: 42px; padding: 10px 8px; justify-content: center; }
+  .quick-actions .quick-action:last-child { grid-column: 1 / -1; }
 }
 
 /* ── code 标签 ── */

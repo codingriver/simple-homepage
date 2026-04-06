@@ -42,3 +42,10 @@ __pycache__/
 *.swp
 *.swo
 .DS_Store
+
+# Node / browser automation
+node_modules/
+playwright-report/
+test-results/
+test-artifacts/
+lighthouse-report/

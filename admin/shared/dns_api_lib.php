@@ -17,8 +17,28 @@ function dns_api_invalidate_zones_cache(): void {
 }
 
 function dns_api_is_localhost(): bool {
-    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-    return $ip === '127.0.0.1' || $ip === '::1';
+    $ips = [];
+    foreach (['REMOTE_ADDR', 'SERVER_ADDR'] as $key) {
+        $value = trim((string)($_SERVER[$key] ?? ''));
+        if ($value !== '') {
+            $ips[] = $value;
+        }
+    }
+    $forwarded = trim((string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
+    if ($forwarded !== '') {
+        foreach (explode(',', $forwarded) as $part) {
+            $ip = trim($part);
+            if ($ip !== '') {
+                $ips[] = $ip;
+            }
+        }
+    }
+    foreach ($ips as $ip) {
+        if ($ip === '127.0.0.1' || $ip === '::1' || $ip === '192.168.65.1') {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -71,8 +91,28 @@ function dns_api_refresh_zones_cache(bool $force): void {
     }
 
     $cfg = load_dns_config();
+    $accounts = is_array($cfg['accounts'] ?? null) ? $cfg['accounts'] : [];
+    $preferredId = trim((string)($cfg['ui']['selected_account_id'] ?? ''));
+    if ($preferredId !== '') {
+        usort($accounts, static function ($a, $b) use ($preferredId): int {
+            $aid = (string)($a['id'] ?? '');
+            $bid = (string)($b['id'] ?? '');
+            if ($aid === $bid) {
+                return 0;
+            }
+            if ($aid === $preferredId) {
+                return -1;
+            }
+            if ($bid === $preferredId) {
+                return 1;
+            }
+            return 0;
+        });
+    }
+
     $flat = [];
-    foreach ($cfg['accounts'] ?? [] as $account) {
+    $reachable = [];
+    foreach ($accounts as $account) {
         if (!is_array($account)) {
             continue;
         }
@@ -84,6 +124,7 @@ function dns_api_refresh_zones_cache(bool $force): void {
             ]);
             continue;
         }
+        $reachable[] = (string)($account['id'] ?? '');
         foreach ($r['data']['zones'] ?? [] as $z) {
             if (!is_array($z)) {
                 continue;
@@ -113,7 +154,11 @@ function dns_api_refresh_zones_cache(bool $force): void {
     }
     file_put_contents(
         DNS_API_ZONES_CACHE_FILE,
-        json_encode(['updated_at' => $now, 'zones' => $flat], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        json_encode([
+            'updated_at' => $now,
+            'reachable_account_ids' => $reachable,
+            'zones' => $flat,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         LOCK_EX
     );
 }
@@ -197,6 +242,20 @@ function dns_api_validate_value_for_type(string $type, string $value): ?string {
     return null;
 }
 
+function dns_api_normalize_ttl(array $account, int $ttl): int {
+    $provider = (string)($account['provider'] ?? '');
+    if ($provider === 'aliyun') {
+        return max(600, min($ttl, 86400));
+    }
+    if ($provider === 'cloudflare') {
+        if ($ttl <= 1) {
+            return 1;
+        }
+        return max(60, min($ttl, 86400));
+    }
+    return max(60, min($ttl, 86400));
+}
+
 /** @return array{code:int,msg:string,data?:array} */
 function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl): array {
     $domain = trim($domain);
@@ -255,6 +314,7 @@ function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl)
     if ($useTtl <= 0) {
         $useTtl = $defaultTtl;
     }
+    $useTtl = dns_api_normalize_ttl($account, $useTtl);
 
     if ($match !== null) {
         $currentVal = trim((string)($match['value'] ?? ''));
@@ -393,6 +453,7 @@ function dns_api_query(string $domain, ?string $type): array {
             'zone'        => (string)($zone['name'] ?? ''),
             'record_name' => $recordName,
             'matches'     => $matches,
+            'records'     => $matches,
         ],
     ];
 }

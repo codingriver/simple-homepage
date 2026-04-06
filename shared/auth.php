@@ -229,6 +229,57 @@ function auth_is_ip_access(): bool {
 }
 
 /**
+ * 当前请求是否适合使用配置中的 Cookie Domain。
+ * - IP 访问永远不使用 Domain Cookie
+ * - 配置为空时不使用
+ * - 当前 Host 不是该域或其子域时不使用
+ */
+function auth_cookie_domain_for_request(): string {
+    if (auth_is_ip_access()) {
+        return '';
+    }
+
+    $cfg_domain = trim((string) (auth_get_config()['cookie_domain'] ?? ''));
+    if ($cfg_domain === '') {
+        return '';
+    }
+
+    $host = strtolower((string) strtok(auth_current_host(), ':'));
+    $domain = ltrim(strtolower($cfg_domain), '.');
+    if ($host === '' || $domain === '') {
+        return '';
+    }
+
+    if ($host === $domain || str_ends_with($host, '.' . $domain)) {
+        return $cfg_domain;
+    }
+
+    return '';
+}
+
+/**
+ * 当前请求是否适合使用 Secure Cookie。
+ * 若当前不是 HTTPS，则无论配置如何都回退为 false，避免登录成功后 Cookie 无法回传。
+ */
+function auth_cookie_secure_for_request(): bool {
+    $cfg = auth_get_config();
+    $scheme_is_https = auth_request_scheme() === 'https';
+
+    if (!$scheme_is_https) {
+        return false;
+    }
+
+    $secure_mode = $cfg['cookie_secure'] ?? 'off';
+    if ($secure_mode === 'on') {
+        return true;
+    }
+    if ($secure_mode === 'off') {
+        return false;
+    }
+    return true;
+}
+
+/**
  * 获取当前访问上下文下的登录地址。
  * 导航站本体通过当前 Host 登录，便于保留内网 IP 排障入口。
  */
@@ -615,35 +666,9 @@ function auth_set_cookie(string $token, bool $remember_me = false): void {
     $expire = $remember_me
         ? (time() + auth_remember_expire())
         : (time() + auth_token_expire());
-    $cfg = auth_get_config();
 
-    // 检测当前访问的 host 是否为 IP 地址（含端口，如 192.168.1.100:8080）
-    $is_ip_access = auth_is_ip_access();
-
-    // Cookie Secure 模式
-    // IP 访问时强制降级为 false（否则 HTTP+IP 永远登不进去）
-    if ($is_ip_access) {
-        $is_https = false;
-    } else {
-        $secure_mode = $cfg['cookie_secure'] ?? 'off';
-        if ($secure_mode === 'on') {
-            $is_https = true;
-        } elseif ($secure_mode === 'off') {
-            $is_https = false;
-        } else {
-            $is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-                     || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
-                     || (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
-        }
-    }
-
-    // Cookie Domain
-    // IP 访问时强制留空（IP 地址无法匹配域名 Cookie，留空浏览器自动绑定当前 IP）
-    if ($is_ip_access) {
-        $cookie_domain = '';
-    } else {
-        $cookie_domain = trim($cfg['cookie_domain'] ?? '');
-    }
+    $is_https = auth_cookie_secure_for_request();
+    $cookie_domain = auth_cookie_domain_for_request();
 
     setcookie(SESSION_COOKIE_NAME, $token, [
         'expires'  => $expire,
@@ -659,16 +684,10 @@ function auth_set_cookie(string $token, bool $remember_me = false): void {
  * 清除登录 Cookie（退出登录）
  */
 function auth_clear_cookie(): void {
-    $cfg       = auth_get_config();
-    $is_ip_access = auth_is_ip_access();
+    $cfg_domain = trim((string) (auth_get_config()['cookie_domain'] ?? ''));
+    $request_domain = auth_cookie_domain_for_request();
 
-    if ($is_ip_access) {
-        $cookie_domain = '';
-    } else {
-        $cookie_domain = trim($cfg['cookie_domain'] ?? '');
-    }
-
-    $domains = array_values(array_unique([$cookie_domain, '']));
+    $domains = array_values(array_unique([$request_domain, $cfg_domain, '']));
     foreach ($domains as $domain) {
         foreach ([false, true] as $secure) {
             setcookie(SESSION_COOKIE_NAME, '', [
