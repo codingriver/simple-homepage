@@ -1467,36 +1467,130 @@ function nginx_reload(): array {
 function nginx_mark_applied(): void {
     $cfg = load_config();
     $cfg['nginx_last_applied'] = time();
+    $cfg['nginx_last_applied_proxy_state'] = nginx_current_proxy_state();
     save_config($cfg);
     // 同步刷新 auth 缓存
     auth_reload_config();
 }
 
 /**
+ * 归一化单个 proxy 站点为“影响实际 Nginx 生效结果”的状态
+ * 仅保留真正影响生成配置的字段，避免普通信息变更误触发未生效提示。
+ *
+ * @return array<string,mixed>|null
+ */
+function nginx_effective_proxy_site_state(array $site): ?array {
+    if (($site['type'] ?? '') !== 'proxy') {
+        return null;
+    }
+
+    $target = rtrim((string)($site['proxy_target'] ?? ''), '/');
+    if (!preg_match('#^https?://[a-zA-Z0-9._-]+(:\d+)?(/[^\n\r]*)?$#', $target)) {
+        return null;
+    }
+
+    $mode = (($site['proxy_mode'] ?? 'path') === 'domain') ? 'domain' : 'path';
+    $id = (string)($site['id'] ?? '');
+    $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string)($site['slug'] ?? $id)));
+
+    return [
+        'id' => $id,
+        'mode' => $mode,
+        'target' => $target,
+        'slug' => $mode === 'path' ? $slug : '',
+        'proxy_domain' => $mode === 'domain' ? (string)($site['proxy_domain'] ?? '') : '',
+    ];
+}
+
+/**
+ * 当前会影响 Nginx 反代生效结果的完整状态快照
+ *
+ * @return array{mode:string,nav_domain:string,port:int,sites:array<string,array<string,mixed>>}
+ */
+function nginx_current_proxy_state(): array {
+    $cfg = load_config();
+    $sitesData = load_sites();
+    $groups = $sitesData['groups'] ?? [];
+    $sites = [];
+
+    foreach ($groups as $grp) {
+        foreach ($grp['sites'] ?? [] as $site) {
+            $state = nginx_effective_proxy_site_state(is_array($site) ? $site : []);
+            if ($state === null) {
+                continue;
+            }
+            $id = (string)($state['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $sites[$id] = $state;
+        }
+    }
+
+    ksort($sites);
+
+    return [
+        'mode' => (($cfg['proxy_params_mode'] ?? 'simple') === 'full') ? 'full' : 'simple',
+        'nav_domain' => (string)($cfg['nav_domain'] ?? 'nav.yourdomain.com'),
+        'port' => (int)(getenv('NAV_PORT') ?: 58080),
+        'sites' => $sites,
+    ];
+}
+
+/**
  * 获取未在 Nginx 中生效的 proxy 站点列表
- * 判断依据：sites.json 的修改时间 > nginx_last_applied
- * @return array  [['name'=>..., 'proxy_domain'=>..., 'group'=>...], ...]
+ * 判断依据：仅比较真正影响 Nginx 生成结果的字段，而不是 sites.json 修改时间。
+ * @return array<int,array{name:string,proxy_domain:string,group:string}>
  */
 function nginx_pending_sites(): array {
-    $cfg          = auth_get_config();
-    $last_applied = (int)($cfg['nginx_last_applied'] ?? 0);
-    $sites_mtime  = file_exists(SITES_FILE) ? filemtime(SITES_FILE) : 0;
+    $cfg = load_config();
+    $applied = is_array($cfg['nginx_last_applied_proxy_state'] ?? null)
+        ? $cfg['nginx_last_applied_proxy_state']
+        : [];
+    $current = nginx_current_proxy_state();
 
-    // sites.json 没有变化，不需要提示
-    if ($sites_mtime <= $last_applied) return [];
+    $appliedSites = is_array($applied['sites'] ?? null) ? $applied['sites'] : [];
+    $currentSites = is_array($current['sites'] ?? null) ? $current['sites'] : [];
+    $pending = [];
 
-    $sites_data = load_sites();
-    $pending    = [];
-    foreach ($sites_data['groups'] as $grp) {
-        foreach ($grp['sites'] ?? [] as $s) {
-            if (($s['type'] ?? '') !== 'proxy') continue;
+    $globalChanged = (($applied['mode'] ?? null) !== $current['mode'])
+        || (($applied['nav_domain'] ?? null) !== $current['nav_domain'])
+        || ((int)($applied['port'] ?? -1) !== (int)$current['port']);
+
+    $sitesData = load_sites();
+    foreach ($sitesData['groups'] ?? [] as $grp) {
+        foreach ($grp['sites'] ?? [] as $site) {
+            if (($site['type'] ?? '') !== 'proxy') {
+                continue;
+            }
+            $id = (string)($site['id'] ?? '');
+            if ($id === '' || !isset($currentSites[$id])) {
+                continue;
+            }
+            $changed = $globalChanged
+                || !isset($appliedSites[$id])
+                || json_encode($appliedSites[$id], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    !== json_encode($currentSites[$id], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!$changed) {
+                continue;
+            }
             $pending[] = [
-                'name'         => $s['name'] ?? $s['id'],
-                'proxy_domain' => $s['proxy_domain'] ?? '',
-                'group'        => $grp['name'] ?? $grp['id'],
+                'name' => $site['name'] ?? $id,
+                'proxy_domain' => $site['proxy_domain'] ?? '',
+                'group' => $grp['name'] ?? $grp['id'] ?? '',
             ];
         }
     }
+
+    $removedCount = count(array_diff(array_keys($appliedSites), array_keys($currentSites)));
+    if ($removedCount > 0) {
+        $pending[] = [
+            'name' => '已删除代理站点 × ' . $removedCount,
+            'proxy_domain' => '',
+            'group' => 'system',
+        ];
+    }
+
     return $pending;
 }
 

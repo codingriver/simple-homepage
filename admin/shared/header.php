@@ -158,7 +158,7 @@ function showToast(msg, type) {
       以下代理站点配置已修改但尚未生效：
       <strong><?= implode('、', array_map(function($s){ return htmlspecialchars($s['name']); }, $_pending_proxy)) ?></strong>
     <?php else: ?>
-      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点配置已修改但尚未生效，请及时 Reload Nginx 使其生效。
+      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点相关变更尚未在 Nginx 生效，请及时 Reload Nginx。
     <?php endif; ?>
   </span>
   <?php if (($current_admin['role'] ?? '') === 'admin'): ?>

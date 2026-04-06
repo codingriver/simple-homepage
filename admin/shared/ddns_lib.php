@@ -63,18 +63,79 @@ function ddns_task_log(string $id, string $level, string $message, array $contex
     file_put_contents(ddns_task_log_file($id), $line . "\n", FILE_APPEND | LOCK_EX);
 }
 
+function ddns_count_lines(string $file): int {
+    $fp = @fopen($file, 'rb');
+    if ($fp === false) {
+        return 0;
+    }
+    $count = 0;
+    while (($line = fgets($fp)) !== false) {
+        $count++;
+    }
+    fclose($fp);
+    return $count;
+}
+
+function ddns_tail_lines(string $file, int $limit, int $skipFromEnd = 0): array {
+    if ($limit <= 0 || !is_file($file)) {
+        return [];
+    }
+    $fp = @fopen($file, 'rb');
+    if ($fp === false) {
+        return [];
+    }
+
+    fseek($fp, 0, SEEK_END);
+    $position = ftell($fp);
+    $buffer = '';
+    $chunkSize = 8192;
+    $needed = $limit + max(0, $skipFromEnd);
+
+    while ($position > 0) {
+        $readSize = min($chunkSize, $position);
+        $position -= $readSize;
+        fseek($fp, $position);
+        $chunk = fread($fp, $readSize);
+        if ($chunk === false) {
+            break;
+        }
+        $buffer = $chunk . $buffer;
+        if (substr_count($buffer, "\n") >= ($needed + 1)) {
+            break;
+        }
+    }
+    fclose($fp);
+
+    $buffer = rtrim($buffer, "\r\n");
+    if ($buffer === '') {
+        return [];
+    }
+    $lines = preg_split("/\r\n|\n|\r/", $buffer);
+    if (!is_array($lines) || $lines === []) {
+        return [];
+    }
+
+    if ($skipFromEnd > 0) {
+        $lines = array_slice($lines, 0, max(0, count($lines) - $skipFromEnd));
+    }
+    if ($limit > 0) {
+        $lines = array_slice($lines, -$limit);
+    }
+    return array_values($lines);
+}
+
 function ddns_task_log_page(string $id, int $page = 1): array {
     $file = ddns_task_log_file($id);
     if (!file_exists($file)) {
-        return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0];
+        return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0, 'order' => 'latest_first'];
     }
-    $all = file($file, FILE_IGNORE_NEW_LINES);
-    $total = count($all);
     $per = 100;
+    $total = ddns_count_lines($file);
     $pages = max(1, (int)ceil($total / $per));
     $page = max(1, min($page, $pages));
-    $slice = array_slice($all, ($page - 1) * $per, $per);
-    return ['lines' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages];
+    $skipFromEnd = ($page - 1) * $per;
+    $slice = ddns_tail_lines($file, $per, $skipFromEnd);
+    return ['lines' => array_reverse($slice), 'total' => $total, 'page' => $page, 'pages' => $pages, 'order' => 'latest_first'];
 }
 
 function ddns_task_log_clear(string $id): void {

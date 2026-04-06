@@ -329,7 +329,7 @@ async function ddnsLogLoadPage(p, jumpToLast) {
     return;
   }
   ddnsLogState.lines = Array.isArray(d.lines) ? d.lines : [];
-  document.getElementById('ddns-log-info').textContent = '共 ' + (d.total || 0) + ' 行，每页 100 行；支持当前页搜索';
+  document.getElementById('ddns-log-info').textContent = '共 ' + (d.total || 0) + ' 行，每页 100 行；按最新日志优先显示；支持当前页搜索';
   document.getElementById('ddns-log-page-label').textContent = '第 ' + (d.page || 1) + ' / ' + (d.pages || 1) + ' 页';
   document.getElementById('ddns-log-prev').disabled = (d.page || 1) <= 1;
   document.getElementById('ddns-log-next').disabled = (d.page || 1) >= (d.pages || 1);
