@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name  = trim((string)($_POST['name']     ?? ''));
         $sched = trim((string)($_POST['schedule'] ?? ''));
         $cmd   = (string)($_POST['command']       ?? '');
-        $mode  = trim((string)($_POST['working_dir_mode'] ?? 'project'));
+        $mode  = task_normalize_workdir_mode($_POST['working_dir_mode'] ?? null);
         $wdir  = trim((string)($_POST['working_dir'] ?? ''));
         $en    = !empty($_POST['enabled']);
         if ($id === '') $id = 't_' . bin2hex(random_bytes(8));
@@ -39,9 +39,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!cron_validate_schedule($sched)) {
             flash_set('error', 'Cron 表达式无效（需至少 5 个时间字段）');
             header('Location: scheduled_tasks.php'); exit;
-        }
-        if (!in_array($mode, ['project', 'task', 'custom'], true)) {
-            $mode = 'project';
         }
         if ($mode === 'custom') {
             if ($wdir === '') {
@@ -161,7 +158,7 @@ foreach ($tasks as &$_t) {
         ? (cron_next_run($_t['schedule']) ?: '-')
         : '-';
     $_t['_workdir'] = task_resolve_workdir($_t);
-    $_t['_workdir_mode_label'] = match((string)($_t['working_dir_mode'] ?? 'project')) {
+    $_t['_workdir_mode_label'] = match(task_normalize_workdir_mode($_t['working_dir_mode'] ?? null)) {
         'task' => '任务目录',
         'custom' => '自定义目录',
         default => '项目目录',
@@ -355,7 +352,7 @@ $CSRF = csrf_field();
         <!-- 删除 -->
         <?php if (empty($t['_is_system'])): ?>
         <form method="POST" style="display:inline"
-          onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($t['working_dir_mode'] ?? 'project'), ENT_QUOTES) ?>)">
+          onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode(task_normalize_workdir_mode($t['working_dir_mode'] ?? null), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_delete">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
@@ -527,7 +524,7 @@ function openTaskModal(task) {
   document.getElementById('fm-name').value     = isNew ? ''   : (task.name     || '');
   document.getElementById('fm-schedule').value = isNew ? '*/5 * * * *' : (task.schedule || '');
   document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
-  document.getElementById('fm-working-dir-mode').value = isNew ? 'project' : (task.working_dir_mode || 'project');
+  document.getElementById('fm-working-dir-mode').value = isNew ? 'task' : (task.working_dir_mode || 'task');
   document.getElementById('fm-working-dir').value = isNew ? '' : (task.working_dir || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
   toggleWorkdirInputs();

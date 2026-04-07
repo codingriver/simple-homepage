@@ -26,9 +26,14 @@ function task_default_workdir(string $id): string {
     return TASKS_WORKDIR_ROOT . '/' . $id;
 }
 
+function task_normalize_workdir_mode(?string $mode, string $default = 'task'): string {
+    $mode = trim((string)$mode);
+    return in_array($mode, ['project', 'task', 'custom'], true) ? $mode : $default;
+}
+
 function task_resolve_workdir(array $task): string {
     $id   = (string)($task['id'] ?? '');
-    $mode = (string)($task['working_dir_mode'] ?? 'project');
+    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
     $custom = trim((string)($task['working_dir'] ?? ''));
     if ($mode === 'task') {
         return task_default_workdir($id);
@@ -41,7 +46,7 @@ function task_resolve_workdir(array $task): string {
 
 function task_ensure_workdir(array $task): void {
     $dir = task_resolve_workdir($task);
-    $mode = (string)($task['working_dir_mode'] ?? 'project');
+    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
     if (($mode === 'task' || $mode === 'custom') && $dir !== '' && !is_dir($dir)) {
         @mkdir($dir, 0755, true);
     }
@@ -79,7 +84,7 @@ function task_clear_log(string $id): void {
 function task_cleanup_on_delete(array $task): void {
     $id = (string)($task['id'] ?? '');
     task_clear_log($id);
-    $mode = (string)($task['working_dir_mode'] ?? 'project');
+    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
     if ($mode !== 'task') {
         return;
     }

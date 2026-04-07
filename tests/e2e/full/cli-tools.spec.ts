@@ -25,6 +25,7 @@ const ddnsTasksFile = path.join(dataDir, 'ddns_tasks.json');
 const scheduledTasksFile = path.join(dataDir, 'scheduled_tasks.json');
 const ddnsLogDir = path.join(dataDir, 'logs');
 const taskLogDir = path.join(dataDir, 'logs');
+const taskWorkdirRoot = path.join(dataDir, 'tasks');
 
 function nowId(prefix: string) {
   return `${prefix}_${Date.now()}`;
@@ -232,6 +233,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
   const snapshots = await snapshotLocalFiles([scheduledTasksFile]);
   const taskId = nowId('cli_task');
   const logFile = path.join(taskLogDir, `cron_${taskId}.log`);
+  const taskWorkdir = path.join(taskWorkdirRoot, taskId);
 
   try {
     const invalid = runDockerPhp('/var/www/nav/cli/run_scheduled_task.php');
@@ -249,9 +251,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
           name: 'CLI Scheduled Task',
           enabled: true,
           schedule: '*/5 * * * *',
-          command: 'echo cli-scheduled-ok',
-          working_dir_mode: 'project',
-          working_dir: '',
+          command: 'pwd\necho cli-scheduled-ok',
         },
       ],
     };
@@ -259,17 +259,21 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
 
     const success = runDockerPhp('/var/www/nav/cli/run_scheduled_task.php', [taskId]);
     expect(success.code).toBe(0);
+    expect(success.stdout).toContain(`/var/www/nav/data/tasks/${taskId}`);
     expect(success.stdout).toContain('cli-scheduled-ok');
+    expect(runDockerShell(`test -d /var/www/nav/data/tasks/${taskId}`).code).toBe(0);
 
     const tasksAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as {
       tasks: Array<{ last_run?: string; last_code?: number; last_output?: string }>;
     };
     expect(tasksAfter.tasks[0]?.last_run).toBeTruthy();
     expect(tasksAfter.tasks[0]?.last_code).toBe(0);
+    expect(tasksAfter.tasks[0]?.last_output).toContain(`/var/www/nav/data/tasks/${taskId}`);
     expect(tasksAfter.tasks[0]?.last_output).toContain('cli-scheduled-ok');
     await expect(fs.access(logFile)).resolves.toBeUndefined();
   } finally {
     await fs.rm(logFile, { force: true }).catch(() => undefined);
+    await fs.rm(taskWorkdir, { recursive: true, force: true }).catch(() => undefined);
     await restoreLocalFiles(snapshots);
   }
 });

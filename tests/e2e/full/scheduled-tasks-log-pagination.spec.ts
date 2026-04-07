@@ -15,9 +15,10 @@ test('scheduled tasks support workdir modes log pagination and copy directory in
   await page.goto('/admin/scheduled_tasks.php');
   await page.getByRole('button', { name: /新建任务/ }).click();
 
+  await expect(page.locator('#fm-working-dir-mode')).toHaveValue('task');
+  await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
   await page.locator('#fm-name').fill('模式任务');
   await page.locator('#fm-schedule').fill('*/10 * * * *');
-  await page.locator('#fm-working-dir-mode').selectOption('task');
   await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
   await page.locator('#fm-command').fill(Array.from({ length: 35 }, (_, i) => `echo line-${i + 1}`).join('\n'));
   await page.getByRole('button', { name: '💾 保存' }).click();
