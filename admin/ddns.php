@@ -38,6 +38,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
           <th>来源</th>
           <th>域名</th>
           <th>类型</th>
+          <th>最近解析值</th>
           <th>调度</th>
           <th>最近执行状态</th>
           <th style="min-width:260px">操作</th>
@@ -71,11 +72,14 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
             <label>来源类型</label>
             <select id="fm-source-type" onchange="toggleSourceFields()">
               <option value="vps789_cfip">vps789 Cloudflare 优选 IP</option>
+              <option value="api4ce_cfip">4ce Cloudflare 优选 IP（三网）</option>
+              <option value="uouin_cfip">uouin Cloudflare 优选 IP（三网）</option>
+              <option value="cf164746_global">164746 Cloudflare 优选 IP（全局）</option>
               <option value="local_ipv4">本机公网 IPv4</option>
               <option value="local_ipv6">本机公网 IPv6</option>
             </select>
           </div>
-          <div class="form-group vps789-only">
+          <div class="form-group vps789-only line-only">
             <label>线路</label>
             <select id="fm-line"><option value="CT">CT 电信</option><option value="CU">CU 联通</option><option value="CM">CM 移动</option></select>
           </div>
@@ -90,6 +94,20 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
           <div class="form-group vps789-only">
             <label>最大丢包 / %</label>
             <input type="number" id="fm-max-loss" value="5" min="0" step="0.1">
+          </div>
+          <div class="form-group full">
+            <label>来源说明</label>
+            <div id="fm-source-hint" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-size:12px;color:var(--tx2);line-height:1.7">推荐优先使用 4ce；失败时可配置自动回退到 uouin 或 164746。</div>
+          </div>
+          <div class="form-group vps789-only">
+            <label>回退来源（可选）</label>
+            <select id="fm-fallback-type">
+              <option value="">不启用回退</option>
+              <option value="api4ce_cfip">4ce Cloudflare 优选 IP</option>
+              <option value="uouin_cfip">uouin Cloudflare 优选 IP</option>
+              <option value="cf164746_global">164746 Cloudflare 优选 IP（全局）</option>
+              <option value="vps789_cfip">vps789 Cloudflare 优选 IP</option>
+            </select>
           </div>
           <div class="form-group">
             <label>目标域名 *</label>
@@ -116,7 +134,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
           </div>
           <div class="form-group full">
             <label>来源测试结果</label>
-            <div id="fm-test-result" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all">未测试</div>
+            <div id="fm-test-result" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all;white-space:pre-wrap;line-height:1.7">未测试</div>
           </div>
         </div>
         <div class="form-actions">
@@ -165,6 +183,14 @@ DDNS_TASKS[<?= json_encode($task['id'] ?? '') ?>] = <?= json_encode($task, JSON_
 <?php endforeach; ?>
 var DDNS_CSRF = <?= json_encode($csrf) ?>;
 var DDNS_EDIT_ID = '';
+var DDNS_SOURCE_HINTS = {
+  vps789_cfip: 'vps789：现有稳定来源，支持三网线路；适合继续沿用。',
+  api4ce_cfip: '4ce：JSON API，结构最适合当前 DDNS，推荐作为主来源。',
+  uouin_cfip: 'uouin：HTML 表格抓取型来源，支持三网，适合作为备用源。',
+  cf164746_global: '164746：全局优选榜单，不区分三网；适合做全局 fallback。',
+  local_ipv4: '本机公网 IPv4：直接获取当前出口 IPv4，不依赖第三方优选源。',
+  local_ipv6: '本机公网 IPv6：直接获取当前出口 IPv6，不依赖第三方优选源。'
+};
 
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, function (s) {
@@ -172,10 +198,21 @@ function escapeHtml(str) {
   });
 }
 
-function statusBadge(status) {
-  if (status === 'success') return '<span class="badge badge-green">成功</span>';
-  if (status === 'running') return '<span class="badge badge-blue">运行中</span>';
-  return '<span class="badge badge-red">失败</span>';
+function statusBadge(status, timeText) {
+  var label = '失败';
+  var cls = 'badge badge-red';
+  if (status === 'success') {
+    label = '成功';
+    cls = 'badge badge-green';
+  } else if (status === 'running') {
+    label = '运行中';
+    cls = 'badge badge-blue';
+  }
+  var timeHtml = timeText ? '<div style="margin-top:4px;font-size:11px;color:var(--tm);font-family:var(--mono)">' + escapeHtml(timeText) + '</div>' : '';
+  return '<div>'
+    + '<span class="' + cls + '">' + label + '</span>'
+    + timeHtml
+    + '</div>';
 }
 
 function renderRows() {
@@ -184,7 +221,7 @@ function renderRows() {
   tbody.innerHTML = '';
   if (!DDNS_ROWS.length) {
     var empty = document.createElement('tr');
-    empty.innerHTML = '<td colspan="8" style="color:var(--tm);padding:18px 12px">暂无 DDNS 任务，点击上方“新建任务”开始。</td>';
+    empty.innerHTML = '<td colspan="9" style="color:var(--tm);padding:18px 12px">暂无 DDNS 任务，点击上方“新建任务”开始。</td>';
     tbody.appendChild(empty);
     return;
   }
@@ -198,8 +235,9 @@ function renderRows() {
       + '<td>' + escapeHtml(row.source_label) + '</td>'
       + '<td style="font-family:var(--mono)">' + escapeHtml(row.domain) + '</td>'
       + '<td><code>' + escapeHtml(row.record_type) + '</code></td>'
+      + '<td style="font-family:var(--mono);max-width:180px;word-break:break-all">' + escapeHtml(row.last_value || '—') + '</td>'
       + '<td style="font-family:var(--mono)">' + escapeHtml(row.cron) + '</td>'
-      + '<td>' + statusBadge(row.last_status) + '</td>'
+      + '<td>' + statusBadge(row.last_status, row.last_run_at || '') + '</td>'
       + '<td style="white-space:nowrap">'
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="toggleTask(' + jsonId + ')">' + (row.enabled ? '禁用' : '启用') + '</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="runTask(' + jsonId + ')">执行</button> '
@@ -212,8 +250,20 @@ function renderRows() {
 }
 
 function toggleSourceFields() {
-  var isVps = document.getElementById('fm-source-type').value === 'vps789_cfip';
-  document.querySelectorAll('.vps789-only').forEach(function(el){ el.style.display = isVps ? '' : 'none'; });
+  var type = document.getElementById('fm-source-type').value;
+  var needsLine = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip'].indexOf(type) !== -1;
+  var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf164746_global'].indexOf(type) !== -1;
+  document.querySelectorAll('.vps789-only').forEach(function(el){ el.style.display = needsFilters ? '' : 'none'; });
+  document.querySelectorAll('.line-only').forEach(function(el){ el.style.display = needsLine ? '' : 'none'; });
+  var hint = document.getElementById('fm-source-hint');
+  if (hint) hint.textContent = DDNS_SOURCE_HINTS[type] || '未配置来源说明';
+  var fallback = document.getElementById('fm-fallback-type');
+  if (fallback) {
+    Array.prototype.forEach.call(fallback.options, function(opt) {
+      opt.disabled = !!opt.value && opt.value === type;
+    });
+    if (fallback.value === type) fallback.value = '';
+  }
 }
 
 function openDdnsModal(id) {
@@ -227,12 +277,13 @@ function openDdnsModal(id) {
   document.getElementById('fm-pick-strategy').value = task ? ((task.source || {}).pick_strategy || 'best_score') : 'best_score';
   document.getElementById('fm-max-latency').value = task ? ((task.source || {}).max_latency || 250) : 250;
   document.getElementById('fm-max-loss').value = task ? ((task.source || {}).max_loss_rate || 5) : 5;
+  document.getElementById('fm-fallback-type').value = task ? ((task.source || {}).fallback_type || '') : '';
   document.getElementById('fm-domain').value = task ? ((task.target || {}).domain || '') : '';
   document.getElementById('fm-record-type').value = task ? ((task.target || {}).record_type || 'A') : 'A';
   document.getElementById('fm-ttl').value = task ? ((task.target || {}).ttl || 120) : 120;
   document.getElementById('fm-skip-unchanged').checked = task ? !!((task.target || {}).skip_when_unchanged) : true;
   document.getElementById('fm-cron').value = task ? ((task.schedule || {}).cron || '*/30 * * * *') : '*/30 * * * *';
-  document.getElementById('fm-test-result').textContent = '未测试';
+  setSourceTestResultState(['未测试'], 'loading');
   toggleSourceFields();
   document.getElementById('ddns-modal').style.display = 'flex';
 }
@@ -347,7 +398,8 @@ function currentTaskPayload() {
       line: document.getElementById('fm-line').value,
       pick_strategy: document.getElementById('fm-pick-strategy').value,
       max_latency: Number(document.getElementById('fm-max-latency').value || 0),
-      max_loss_rate: Number(document.getElementById('fm-max-loss').value || 0)
+      max_loss_rate: Number(document.getElementById('fm-max-loss').value || 0),
+      fallback_type: document.getElementById('fm-fallback-type').value
     },
     target: {
       domain: document.getElementById('fm-domain').value.trim(),
@@ -373,15 +425,83 @@ async function postAjax(action, payload) {
   return await resp.json();
 }
 
-async function testSource() {
+function formatSourceLabel(type) {
+  return ({
+    vps789_cfip: 'vps789 Cloudflare 优选 IP',
+    api4ce_cfip: '4ce Cloudflare 优选 IP',
+    uouin_cfip: 'uouin Cloudflare 优选 IP',
+    cf164746_global: '164746 Cloudflare 优选 IP（全局）',
+    local_ipv4: '本机公网 IPv4',
+    local_ipv6: '本机公网 IPv6'
+  })[String(type || '')] || String(type || '');
+}
+
+function formatSpeedValue(speed) {
+  var n = Number(speed || 0);
+  if (!isFinite(n) || n <= 0) return '';
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(2).replace(/\.00$/, '') + ' GB/s';
+  if (n >= 1024) return (n / 1024).toFixed(2).replace(/\.00$/, '') + ' MB/s';
+  return n.toFixed(2).replace(/\.00$/, '') + ' KB/s';
+}
+
+function setSourceTestResultState(lines, tone) {
   var resultBox = document.getElementById('fm-test-result');
-  resultBox.textContent = '测试中...';
+  if (!resultBox) return;
+  resultBox.textContent = Array.isArray(lines) ? lines.join('\n') : String(lines || '');
+  var map = {
+    loading: { color: 'var(--tx2)', border: 'var(--bd)', bg: 'var(--bg)' },
+    success: { color: 'var(--green)', border: 'rgba(80,200,120,.35)', bg: 'rgba(80,200,120,.08)' },
+    warning: { color: 'var(--yellow)', border: 'rgba(255,193,7,.35)', bg: 'rgba(255,193,7,.08)' },
+    error: { color: 'var(--red)', border: 'rgba(255,92,92,.35)', bg: 'rgba(255,92,92,.08)' }
+  };
+  var style = map[tone] || map.loading;
+  resultBox.style.color = style.color;
+  resultBox.style.borderColor = style.border;
+  resultBox.style.background = style.bg;
+}
+
+function formatSourceTestResult(data) {
+  if (!data || typeof data !== 'object') {
+    return { lines: ['状态：成功', '说明：测试成功，但没有返回可展示的数据'], tone: 'success' };
+  }
+  var meta = (data.meta && typeof data.meta === 'object') ? data.meta : {};
+  var rows = [];
+  rows.push('状态：成功');
+  if (data.message) rows.push('说明：' + data.message);
+  if (data.value) rows.push('IP：' + data.value);
+  if (meta.line && ['CT', 'CU', 'CM'].indexOf(meta.line) !== -1) {
+    rows.push('线路：' + meta.line);
+  }
+  if (typeof meta.latency !== 'undefined' && meta.latency !== '') {
+    rows.push('延迟：' + meta.latency + ' ms');
+  }
+  if (typeof meta.loss_rate !== 'undefined' && meta.loss_rate !== '') {
+    rows.push('丢包：' + meta.loss_rate + ' %');
+  }
+  var speedText = formatSpeedValue(meta.speed);
+  if (speedText) {
+    rows.push('速度：' + speedText);
+  }
+  if (typeof meta.score !== 'undefined' && meta.score !== '') {
+    rows.push('评分：' + meta.score);
+  }
+  if (meta.fallback) {
+    rows.push('回退：是');
+    if (meta.fallback_type) rows.push('回退来源：' + formatSourceLabel(meta.fallback_type));
+    if (meta.primary_error) rows.push('主源失败原因：' + meta.primary_error);
+  }
+  return { lines: rows, tone: meta.fallback ? 'warning' : 'success' };
+}
+
+async function testSource() {
+  setSourceTestResultState(['测试中...'], 'loading');
   var res = await postAjax('test_source', {task: currentTaskPayload()});
   if (!res.ok) {
-    resultBox.textContent = res.msg || '测试失败';
+    setSourceTestResultState(['状态：失败', '原因：' + (res.msg || '测试失败')], 'error');
     return;
   }
-  resultBox.textContent = '成功：' + (res.data.value || '') + (res.data.meta ? (' / ' + JSON.stringify(res.data.meta)) : '');
+  var formatted = formatSourceTestResult(res.data || {});
+  setSourceTestResultState(formatted.lines, formatted.tone);
 }
 
 function upsertRow(row) {

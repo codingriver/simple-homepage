@@ -158,14 +158,26 @@ function ddns_find_task(array $data, string $id): ?array {
     return null;
 }
 
-function ddns_source_label(array $task): string {
-    $source = $task['source'] ?? [];
-    $type = (string)($source['type'] ?? '');
+function ddns_source_short_label(string $type, array $source = []): string {
     return match ($type) {
-        'vps789_cfip' => 'vps789 / ' . ((string)($source['line'] ?? 'CT') ?: 'CT'),
+        'vps789_cfip' => 'vps789' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
+        'api4ce_cfip' => '4ce' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
+        'uouin_cfip' => 'uouin' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
+        'cf164746_global' => '164746',
         'local_ipv6' => 'local_ipv6',
         default => 'local_ipv4',
     };
+}
+
+function ddns_source_label(array $task): string {
+    $source = is_array($task['source'] ?? null) ? $task['source'] : [];
+    $type = (string)($source['type'] ?? '');
+    $label = ddns_source_short_label($type, $source);
+    $fallbackType = (string)($source['fallback_type'] ?? '');
+    if ($fallbackType !== '' && $fallbackType !== $type) {
+        $label .= ' → ' . ddns_source_short_label($fallbackType);
+    }
+    return $label;
 }
 
 function ddns_status_label(array $task): string {
@@ -192,6 +204,7 @@ function ddns_task_row(array $task): array {
         'last_status' => ddns_status_label($task),
         'last_run_at' => (string)($runtime['last_run_at'] ?? ''),
         'last_message' => (string)($runtime['last_message'] ?? ''),
+        'last_value' => (string)($runtime['last_value'] ?? ''),
     ];
 }
 
@@ -203,7 +216,7 @@ function ddns_normalize_task(array $input, ?array $existing = null): array {
     $runtime = is_array($existing['runtime'] ?? null) ? $existing['runtime'] : [];
 
     $type = trim((string)($source['type'] ?? 'local_ipv4'));
-    if (!in_array($type, ['local_ipv4', 'local_ipv6', 'vps789_cfip'], true)) {
+    if (!in_array($type, ['local_ipv4', 'local_ipv6', 'vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf164746_global'], true)) {
         $type = 'local_ipv4';
     }
     $line = strtoupper(trim((string)($source['line'] ?? 'CT')));
@@ -234,6 +247,9 @@ function ddns_normalize_task(array $input, ?array $existing = null): array {
             'pick_strategy' => $pick,
             'max_latency' => max(0, (int)($source['max_latency'] ?? 250)),
             'max_loss_rate' => max(0, (float)($source['max_loss_rate'] ?? 5)),
+            'fallback_type' => in_array((string)($source['fallback_type'] ?? ''), ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf164746_global'], true)
+                ? (string)$source['fallback_type']
+                : '',
         ],
         'target' => [
             'domain' => strtolower(trim((string)($target['domain'] ?? ''))),
@@ -271,8 +287,9 @@ function ddns_validate_task(array $task): ?string {
         return 'Cron 表达式无效';
     }
     $type = (string)($task['source']['type'] ?? '');
-    if ($type === 'vps789_cfip' && !in_array((string)($task['source']['line'] ?? ''), ['CT', 'CU', 'CM'], true)) {
-        return 'vps789 线路无效';
+    if (in_array($type, ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip'], true)
+        && !in_array((string)($task['source']['line'] ?? ''), ['CT', 'CU', 'CM'], true)) {
+        return $type . ' 线路无效';
     }
     return null;
 }
@@ -392,29 +409,145 @@ function ddns_pick_best_candidate(array $rows, array $source): ?array {
     return $candidates[0];
 }
 
-function ddns_resolve_source(array $task): array {
-    $source = is_array($task['source'] ?? null) ? $task['source'] : [];
-    $type = (string)($source['type'] ?? 'local_ipv4');
-    if ($type === 'local_ipv4') {
-        $r = ddns_fetch_url('https://api.ipify.org');
-        if (!$r['ok']) return $r;
-        $value = trim((string)($r['body'] ?? ''));
-        if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return ['ok' => false, 'msg' => '未获取到有效 IPv4'];
-        }
-        return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv4 成功'];
+function ddns_fetch_cf_api4ce(string $line, array $source): array {
+    $r = ddns_fetch_url('https://api.4ce.cn/api/bestCFIP');
+    if (!$r['ok']) {
+        return $r;
     }
-    if ($type === 'local_ipv6') {
-        $r = ddns_fetch_url('https://api64.ipify.org');
-        if (!$r['ok']) return $r;
-        $value = trim((string)($r['body'] ?? ''));
-        if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            return ['ok' => false, 'msg' => '未获取到有效 IPv6'];
-        }
-        return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv6 成功'];
+    $raw = json_decode(trim((string)($r['body'] ?? '')), true);
+    if (!is_array($raw) || empty($raw['success']) || !is_array($raw['data']['v4'] ?? null)) {
+        return ['ok' => false, 'msg' => '4ce 返回格式错误'];
     }
+    $rows = $raw['data']['v4'][$line] ?? [];
+    if (!is_array($rows)) {
+        return ['ok' => false, 'msg' => '4ce 未返回对应线路数据'];
+    }
+    $picked = ddns_pick_best_candidate($rows, $source);
+    if ($picked === null) {
+        return ['ok' => false, 'msg' => '4ce 未找到符合条件的候选 IP'];
+    }
+    return [
+        'ok' => true,
+        'value' => (string)$picked['value'],
+        'message' => '获取 4ce 候选 IP 成功',
+        'meta' => $picked,
+    ];
+}
 
-    $line = strtoupper((string)($source['line'] ?? 'CT'));
+function ddns_fetch_cf_uouin(string $line, array $source): array {
+    $r = ddns_fetch_url('https://api.uouin.com/cloudflare.html');
+    if (!$r['ok']) {
+        return $r;
+    }
+    $body = (string)($r['body'] ?? '');
+    $lineMap = ['CT' => '电信', 'CU' => '联通', 'CM' => '移动'];
+    $lineName = $lineMap[$line] ?? '电信';
+    preg_match_all('/<tr>(.*?)<\/tr>/is', $body, $matches);
+    $rows = [];
+    foreach (($matches[1] ?? []) as $rowHtml) {
+        if (strip_tags($rowHtml) === '') {
+            continue;
+        }
+        preg_match_all('/<t[dh][^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cells);
+        $cells = array_map(static function ($cell) {
+            $text = trim(html_entity_decode(strip_tags($cell), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            return preg_replace('/\s+/', ' ', $text);
+        }, $cells[1] ?? []);
+        if (($cells[1] ?? '') !== $lineName) {
+            continue;
+        }
+        $ip = trim((string)($cells[2] ?? ''));
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            continue;
+        }
+        $lossRaw = (string)($cells[3] ?? '0');
+        $latencyRaw = (string)($cells[4] ?? '0');
+        $speedRaw = strtolower((string)($cells[5] ?? '0'));
+        preg_match('/([\d.]+)/', $lossRaw, $mLoss);
+        preg_match('/([\d.]+)/', $latencyRaw, $mLatency);
+        preg_match('/([\d.]+)/', $speedRaw, $mSpeed);
+        $speed = (float)($mSpeed[1] ?? 0);
+        if (str_contains($speedRaw, 'gb/s')) {
+            $speed *= 1024;
+        }
+        $rows[] = [
+            'ip' => $ip,
+            'loss_rate' => (float)($mLoss[1] ?? 0),
+            'latency' => (float)($mLatency[1] ?? 0),
+            'score' => (float)($mLatency[1] ?? 0),
+            'speed' => $speed,
+        ];
+    }
+    $picked = ddns_pick_best_candidate($rows, $source);
+    if ($picked === null) {
+        return ['ok' => false, 'msg' => 'uouin 未找到符合条件的候选 IP'];
+    }
+    return [
+        'ok' => true,
+        'value' => (string)$picked['value'],
+        'message' => '获取 uouin 候选 IP 成功',
+        'meta' => $picked,
+    ];
+}
+
+function ddns_fetch_cf_164746(array $source): array {
+    $r = ddns_fetch_url('https://ip.164746.xyz');
+    if (!$r['ok']) {
+        return $r;
+    }
+    $body = (string)($r['body'] ?? '');
+    preg_match_all('/<tr>(.*?)<\/tr>/is', $body, $matches);
+    $rows = [];
+    foreach (($matches[1] ?? []) as $rowHtml) {
+        preg_match_all('/<t[dh][^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cells);
+        $cells = array_map(static function ($cell) {
+            $text = trim(html_entity_decode(strip_tags($cell), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            return preg_replace('/\s+/', ' ', $text);
+        }, $cells[1] ?? []);
+        $ip = trim((string)($cells[0] ?? ''));
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            continue;
+        }
+        $lossRaw = (string)($cells[3] ?? '0');
+        $latencyRaw = (string)($cells[4] ?? '0');
+        $speedRaw = strtoupper((string)($cells[5] ?? '0'));
+        preg_match('/([\d.]+)/', $lossRaw, $mLoss);
+        preg_match('/([\d.]+)/', $latencyRaw, $mLatency);
+        preg_match('/([\d.]+)/', $speedRaw, $mSpeed);
+        $speed = (float)($mSpeed[1] ?? 0);
+        if (str_contains($speedRaw, 'GB/S')) {
+            $speed *= 1024;
+        }
+        $rows[] = [
+            'ip' => $ip,
+            'loss_rate' => (float)($mLoss[1] ?? 0),
+            'latency' => (float)($mLatency[1] ?? 0),
+            'score' => (float)($mLatency[1] ?? 0),
+            'speed' => $speed,
+        ];
+    }
+    $picked = ddns_pick_best_candidate($rows, $source);
+    if ($picked === null) {
+        return ['ok' => false, 'msg' => '164746 未找到符合条件的候选 IP'];
+    }
+    return [
+        'ok' => true,
+        'value' => (string)$picked['value'],
+        'message' => '获取 164746 全局优选 IP 成功',
+        'meta' => $picked,
+    ];
+}
+
+function ddns_fetch_cf_source_by_type(string $type, array $source): array {
+    return match ($type) {
+        'api4ce_cfip' => ddns_fetch_cf_api4ce(strtoupper((string)($source['line'] ?? 'CT')), $source),
+        'uouin_cfip' => ddns_fetch_cf_uouin(strtoupper((string)($source['line'] ?? 'CT')), $source),
+        'cf164746_global' => ddns_fetch_cf_164746($source),
+        default => ddns_fetch_cf_vps789(strtoupper((string)($source['line'] ?? 'CT')), $source),
+    };
+}
+
+function ddns_fetch_cf_vps789(string $line, array $source): array {
     $apis = [
         'https://vps789.com/vps/sum/cfIpTop20?line=' . rawurlencode($line),
         'https://vps789.com/public/sum/cfIpApi?line=' . rawurlencode($line),
@@ -457,6 +590,56 @@ function ddns_resolve_source(array $task): array {
         $lastError = '未找到符合条件的候选 IP';
     }
     return ['ok' => false, 'msg' => $lastError];
+}
+
+function ddns_resolve_source(array $task): array {
+    $source = is_array($task['source'] ?? null) ? $task['source'] : [];
+    $type = (string)($source['type'] ?? 'local_ipv4');
+    if ($type === 'local_ipv4') {
+        $r = ddns_fetch_url('https://api.ipify.org');
+        if (!$r['ok']) return $r;
+        $value = trim((string)($r['body'] ?? ''));
+        if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return ['ok' => false, 'msg' => '未获取到有效 IPv4'];
+        }
+        return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv4 成功'];
+    }
+    if ($type === 'local_ipv6') {
+        $r = ddns_fetch_url('https://api64.ipify.org');
+        if (!$r['ok']) return $r;
+        $value = trim((string)($r['body'] ?? ''));
+        if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return ['ok' => false, 'msg' => '未获取到有效 IPv6'];
+        }
+        return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv6 成功'];
+    }
+
+    if ($type === 'api4ce_cfip' || $type === 'uouin_cfip' || $type === 'cf164746_global' || $type === 'vps789_cfip') {
+        $resolved = ddns_fetch_cf_source_by_type($type, $source);
+        if ($resolved['ok']) {
+            return $resolved;
+        }
+        $fallbackType = (string)($source['fallback_type'] ?? '');
+        if ($fallbackType !== '' && $fallbackType !== $type) {
+            $fallbackSource = $source;
+            if ($fallbackType === 'cf164746_global') {
+                $fallbackSource['line'] = 'CT';
+            }
+            $fallback = ddns_fetch_cf_source_by_type($fallbackType, $fallbackSource);
+            if ($fallback['ok']) {
+                $fallback['message'] = ($fallback['message'] ?? '获取候选 IP 成功') . '（主源失败后回退）';
+                $fallback['meta'] = array_merge(
+                    ['fallback' => true, 'fallback_type' => $fallbackType, 'primary_error' => $resolved['msg'] ?? '主源失败'],
+                    is_array($fallback['meta'] ?? null) ? $fallback['meta'] : []
+                );
+                return $fallback;
+            }
+            return ['ok' => false, 'msg' => ($resolved['msg'] ?? '主源失败') . '；回退源也失败：' . ($fallback['msg'] ?? '请求来源失败')];
+        }
+        return $resolved;
+    }
+
+    return ddns_fetch_cf_vps789(strtoupper((string)($source['line'] ?? 'CT')), $source);
 }
 
 function ddns_call_dns_api(string $domain, string $value, string $recordType, int $ttl): array {

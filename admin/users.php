@@ -15,9 +15,12 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   if($act==='save'){
     $un=trim($_POST['username']??'');$pw=trim($_POST['password']??'');
     $role=$_POST['role']??'user';$orig=trim($_POST['orig_username']??'');
+    $origRole = ($orig && isset($users[$orig])) ? ($users[$orig]['role'] ?? 'user') : null;
+    $adminCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === 'admin'));
     if(!preg_match('/^[a-zA-Z0-9_-]{2,32}$/',$un))$err='用户名只允许字母数字下划线横杠，2-32位';
     elseif(!in_array($role,['admin','user']))$err='角色无效';
     elseif(!$orig&&!$pw)$err='新用户必须设置密码';
+    elseif($orig && $origRole==='admin' && $role!=='admin' && $adminCount<=1)$err='至少保留一个管理员账户';
     else{
       if($orig&&$orig!==$un){$users[$un]=$users[$orig]??[];unset($users[$orig]);}
       if(!isset($users[$un]))$users[$un]=[];
@@ -30,7 +33,9 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   }
   if($act==='delete'){
     $du=$_POST['del_user']??'';
+    $adminCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === 'admin'));
     if($du===$current_admin['username'])$err='不能删除当前登录的自己';
+    elseif((($users[$du]['role'] ?? 'user')==='admin') && $adminCount<=1)$err='至少保留一个管理员账户';
     else{unset($users[$du]);auth_write_users($users);flash_set('success','已删除');header('Location: users.php');exit;}
   }
 }

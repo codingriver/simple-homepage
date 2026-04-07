@@ -119,7 +119,13 @@ export async function logout(page: Page) {
 
   await expect(logoutButton).toBeVisible();
   await logoutButton.scrollIntoViewIfNeeded();
-  await logoutButton.click({ force: true });
+  await logoutButton.evaluate((el) => {
+    if (el instanceof HTMLButtonElement) {
+      el.click();
+      return;
+    }
+    (el as HTMLElement).click();
+  });
   await expect(page).toHaveURL(/login\.php/);
 }
 
