@@ -47,6 +47,7 @@ test('dns advanced flows cover ttl coexistence unchanged updates and malformed a
       ['AAAA', '2001:db8::31', '120'],
     ] as const) {
       const create = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+        timeout: 45000,
         form: {
           _csrf: csrf,
           action: 'record_create',

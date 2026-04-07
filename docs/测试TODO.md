@@ -8,9 +8,10 @@
 
 当前状态：
 
-- 已有移动端基础用例：[mobile-homepage.spec.ts](/Users/mrwang/project/simple-homepage/tests/e2e/full/mobile-homepage.spec.ts)
-- 当前默认回归基线未执行 `mobile-chrome`
-- 现阶段移动端只覆盖了首页基础可用性和后台首页基础可用性
+- 已有移动端专项用例：[mobile-homepage.spec.ts](/Users/mrwang/project/simple-homepage/tests/e2e/full/mobile-homepage.spec.ts)
+- 已补首页搜索面板打开/关闭、无结果态、分组切换、卡片点击热区，以及后台侧边栏导航、分组/站点 modal、设置页长表单保存等移动端高风险场景
+- 已执行 `npx playwright test tests/e2e/full/mobile-homepage.spec.ts --project=mobile-chrome` 并通过
+- 当前默认回归基线仍未执行 `mobile-chrome`
 
 后续开发/补测时，应优先补以下移动端场景：
 
@@ -45,16 +46,14 @@
 
 - 已新增 [cli-tools.spec.ts](/Users/mrwang/project/simple-homepage/tests/e2e/full/cli-tools.spec.ts)
 - 已纳入默认 `chromium` 基线
-- 当前已覆盖 `manage_users.php`、`cli/alidns_sync.php`、`cli/ddns_sync.php`、`cli/run_scheduled_task.php` 的最小回归
+- 当前已覆盖 `manage_users.php`、`cli/alidns_sync.php`、`cli/ddns_sync.php`、`cli/run_scheduled_task.php` 的主要回归
 
 剩余 CLI 待补项如下：
 
 | 优先级 | 脚本 | 待补测试点 | 说明 |
 |---|---|---|---|
-| P1 | `manage_users.php` | 非 CLI 访问 403、最后管理员限制、`passwd` 不存在用户/非法密码补齐 | 当前已覆盖核心生命周期，但边界分支仍未锁定 |
-| P1 | `cli/alidns_sync.php` | 成功同步输出、第三方接口失败输出与退出码、`last_sync_at` 落地 | 目前只覆盖缺配置失败分支 |
-| P1 | `cli/ddns_sync.php` | 指定任务 ID 成功/失败、成功/部分失败/全部失败退出码 | 目前只覆盖缺失任务与 due tasks 批量执行 |
-| P2 | `cli/run_scheduled_task.php` | 非法字符 ID 的 sanitize 行为是否与空 ID 完全一致 | 当前已覆盖缺 ID、缺失任务 ID 与成功执行 |
+| P3 | `cli/alidns_sync.php` | 上游错误消息的精细映射是否需要固定到更细粒度文案 | 当前已覆盖失败退出码与成功落地，剩余是错误文案颗粒度 |
+| P3 | `cli/ddns_sync.php` | `skip-unchanged` 场景的稳定锁定方式 | 当前已覆盖 all-success / repeated-success / mixed / all-fail，剩余是外部一致性较强的跳过分支 |
 
 ---
 

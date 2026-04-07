@@ -45,7 +45,19 @@ bash local/docker-build.sh dev
 运行核心 E2E：
 
 ```bash
-docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright
+docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-full
+```
+
+运行移动端 E2E：
+
+```bash
+docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-mobile
+```
+
+查看当前运行中的测试服务数量：
+
+```bash
+npm run test:running
 ```
 
 测试产物：

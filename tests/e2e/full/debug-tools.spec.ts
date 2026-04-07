@@ -29,8 +29,8 @@ test('debug tools page supports display errors toggle clear cookie and log viewe
 
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: /清除当前 Cookie/ }).click();
-  await expect(page.getByText('请登录以继续')).toBeVisible();
   await expect(page).toHaveURL(/login\.php/);
+  await expect(page.locator('input[name="username"]')).toBeVisible();
 
   await tracker.assertNoClientErrors();
 });

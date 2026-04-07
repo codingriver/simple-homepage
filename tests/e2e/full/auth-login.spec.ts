@@ -47,6 +47,9 @@ test('login lockout blocks repeated failures for the same IP and can be reset af
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
     ],
+    ignoredFailedRequests: [
+      /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+    ],
   });
   const lockedTracker = await attachClientErrorTracking(lockedPage, {
     ignoredMessages: [

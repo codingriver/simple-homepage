@@ -7,7 +7,8 @@
     "test:e2e:full:chromium": "playwright test tests/e2e/full --project=chromium",
     "test:e2e:full:mobile": "playwright test tests/e2e/full --project=mobile-chrome",
     "test:e2e:headed": "playwright test tests/e2e/full --headed",
-    "test:perf": "lhci autorun --config=./lighthouserc.json"
+    "test:perf": "lhci autorun --config=./lighthouserc.json",
+    "test:running": "bash scripts/test-running-status.sh"
   },
   "devDependencies": {
     "@playwright/test": "1.54.2",

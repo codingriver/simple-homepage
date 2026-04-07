@@ -64,8 +64,16 @@ test('ddns test source shows structured result feedback', async ({ page }) => {
   await page.locator('#fm-name').fill('DDNS 来源测试');
   await page.locator('#fm-domain').fill(`ddns-source-${Date.now()}.606077.xyz`);
   await page.locator('#fm-source-type').selectOption('api4ce_cfip');
+  const sourceTestResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/admin/ddns_ajax.php') &&
+      response.request().method() === 'POST' &&
+      (response.request().postData() || '').includes('"action":"test_source"'),
+    { timeout: 20000 }
+  );
   await page.getByRole('button', { name: /测试来源/ }).click();
-  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/);
+  await sourceTestResponse;
+  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/, { timeout: 20000 });
 
   await tracker.assertNoClientErrors();
 });

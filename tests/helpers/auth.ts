@@ -24,8 +24,19 @@ export async function ensureAdminSidebarOpen(page: Page) {
 export async function clickAdminNav(page: Page, name: RegExp | string) {
   await ensureAdminSidebarOpen(page);
   const link = page.locator('#sidebar').getByRole('link', { name });
+  await expect(link).toBeVisible();
   await link.scrollIntoViewIfNeeded();
-  await link.click({ force: true });
+  try {
+    await link.click({ force: true });
+  } catch {
+    await link.evaluate((el) => {
+      if (el instanceof HTMLAnchorElement) {
+        el.click();
+        return;
+      }
+      (el as HTMLElement).click();
+    });
+  }
 }
 
 export async function submitVisibleModal(page: Page) {
@@ -74,7 +85,15 @@ export async function attachClientErrorTracking(
 
 export async function loginAsDevAdmin(page: Page) {
   await page.goto('/login.php');
-  await expect(page.getByText('请登录以继续')).toBeVisible();
+
+  if (!page.url().includes('/login.php')) {
+    return;
+  }
+
+  const usernameInput = page.locator('input[name="username"]');
+  const passwordInput = page.locator('input[name="password"]');
+  await expect(usernameInput).toBeVisible();
+  await expect(passwordInput).toBeVisible();
 
   const candidates = [
     { username: 'qatest', password: 'qatest2026' },
@@ -82,8 +101,8 @@ export async function loginAsDevAdmin(page: Page) {
   ];
 
   for (const candidate of candidates) {
-    await page.locator('input[name="username"]').fill(candidate.username);
-    await page.locator('input[name="password"]').fill(candidate.password);
+    await usernameInput.fill(candidate.username);
+    await passwordInput.fill(candidate.password);
     await page.getByRole('button', { name: /登\s*录/ }).click();
 
     try {

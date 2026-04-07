@@ -26,6 +26,8 @@ $input = $method === 'POST'
 $action = trim((string)($input['action'] ?? ''));
 
 if (session_status() === PHP_SESSION_NONE) session_start();
+$ddns_ajax_csrf_token = (string)($_SESSION['csrf_token'] ?? '');
+session_write_close();
 
 function ddns_ajax_response(array $payload, int $status = 200): void {
     http_response_code($status);
@@ -34,10 +36,10 @@ function ddns_ajax_response(array $payload, int $status = 200): void {
 }
 
 function ddns_ajax_require_csrf(array $input): void {
-    if (session_status() === PHP_SESSION_NONE) session_start();
+    global $ddns_ajax_csrf_token;
+
     $token = (string)($input['_csrf'] ?? '');
-    $expected = (string)($_SESSION['csrf_token'] ?? '');
-    if ($token === '' || $expected === '' || !hash_equals($expected, $token)) {
+    if ($token === '' || $ddns_ajax_csrf_token === '' || !hash_equals($ddns_ajax_csrf_token, $token)) {
         ddns_ajax_response(['ok' => false, 'msg' => 'CSRF验证失败，请刷新重试'], 403);
     }
 }

@@ -45,6 +45,8 @@ __pycache__/
 
 # Node / browser automation
 node_modules/
+.playwright-browsers/
+.playwright-runtime-home/
 playwright-report/
 test-results/
 test-artifacts/
