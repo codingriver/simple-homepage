@@ -18,6 +18,10 @@
 - 所有测试统一放在 `tests/e2e/full`
 - 每次核心功能改动后直接运行 full 测试集
 
+补充参考：
+
+- 页面级最终审计表见 `docs/full-e2e-coverage-audit.md`
+
 ---
 
 ## 2. 推荐目录结构
@@ -88,14 +92,15 @@ tests/
 | 导入导出一致性 | 导出再导入恢复 | 已覆盖 | P1 | `settings-import-export-roundtrip.spec.ts` |
 | 备份恢复 | 手动备份 / 下载 / 恢复回滚 | 已覆盖 | P1 | `settings-backup-restore.spec.ts` |
 | Cookie 策略 | secure/domain 保存与 IP 访问降级 | 已覆盖 | P1 | `settings-cookie-policy.spec.ts` |
+| Webhook 通知 | 类型联动 / 配置保存 / 测试消息失败提示 | 已覆盖 | P2 | `settings-webhook.spec.ts` |
 | Nginx 设置 | 下载配置 / 保存参数模式 / 待 reload 提示 | 已覆盖 | P2 | `settings-nginx.spec.ts` |
 | 导航流转 | 前后台完整跳转 | 已覆盖 | P2 | `navigation-flow.spec.ts` |
 | 首页渲染 | 分组/站点展示逻辑 | 已覆盖 | P2 | `homepage-render.spec.ts` |
 | UI 行为 | confirm dialog / modal 背景关闭 / 备份恢复确认 | 已覆盖 | P2 | `ui-dialogs.spec.ts` |
-| 移动端 | 首页可用性 | 已覆盖 | P3 | `mobile-homepage.spec.ts` |
-| 站点边界 | slug 为空 / 非法 / 重复、外链 URL 非法 | 待补充 | P1 | 仍有细项未单测 |
-| 分组边界 | 超长名称、删除特殊分组限制 | 待补充 | P2 | 仍有细项未单测 |
-| Nginx 设置 | reload 成功/失败提示 | 待补充 | P2 | 依赖运行环境能力 |
+| 移动端 | 首页可用性 | 部分覆盖 | P3 | `mobile-homepage.spec.ts` 已存在，但当前默认跳过 |
+| 站点边界 | slug 为空 / 非法 / 重复、外链 URL 非法 | 已覆盖 | P1 | `sites-validation.spec.ts`、`sites-uniqueness.spec.ts`、`sites-advanced-boundary.spec.ts` |
+| 分组边界 | 超长名称、删除特殊分组限制 | 已覆盖 | P2 | `groups-boundary.spec.ts`、`groups-advanced-boundary.spec.ts` |
+| Nginx 设置 | reload 成功/失败提示 | 已覆盖 | P2 | `settings-nginx.spec.ts`、`nginx-editor-advanced.spec.ts` |
 
 ---
 
@@ -240,6 +245,13 @@ tests/
 - 刷新后配置仍保留
 - IP 访问时 session cookie 自动降级
 - 结束后恢复原始配置
+
+#### `settings-webhook.spec.ts`
+- Webhook 类型切换时 Telegram Chat ID 显示联动正确
+- Webhook 配置保存后刷新仍保留
+- 未勾选任何事件时回退到默认订阅事件
+- 测试消息在 URL 为空时给出明确提示
+- 测试消息在目标地址不可达时给出明确失败提示
 
 #### `settings-nginx.spec.ts`
 - 下载配置成功

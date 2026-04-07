@@ -3,14 +3,27 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
   await page.goto('/admin/dns.php');
-  const selectedAccount = await page.evaluate(() => {
-    return (window as typeof window & { DNS_SELECTED_ACCOUNT?: string }).DNS_SELECTED_ACCOUNT || '';
+  const accountIds = await page.evaluate(() => {
+    const win = window as typeof window & {
+      DNS_SELECTED_ACCOUNT?: string;
+      DNS_ACCOUNTS?: Array<{ id: string }>;
+    };
+    const ids = [win.DNS_SELECTED_ACCOUNT || '', ...(win.DNS_ACCOUNTS || []).map((account) => account.id)];
+    return ids.filter((value, index) => value && ids.indexOf(value) === index);
   });
-  if (!selectedAccount) return null;
-  await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}`);
+  for (const selectedAccount of accountIds) {
+    await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+    if (await page.locator('#dns-zone-select').count()) {
+      const zoneName = await page.locator('#dns-zone-select').inputValue();
+      const zoneId = (await page.locator('#dns-zone-select option:checked').getAttribute('data-zone-id')) || '';
+      return { selectedAccount, zoneName, zoneId };
+    }
+  }
   await expect(page.locator('#dns-zone-select')).toBeVisible();
-  const zoneName = await page.locator('#dns-zone-select').inputValue();
-  return { selectedAccount, zoneName };
+  return null;
 }
 
 test('dns advanced flows cover ttl coexistence unchanged updates and malformed api payloads', async ({ page }) => {
@@ -20,6 +33,7 @@ test('dns advanced flows cover ttl coexistence unchanged updates and malformed a
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 500 \(Internal Server Error\)/,
     ],
+    ignoredFailedRequests: [/GET .*\/admin\/dns\.php\?ajax=dns_data.*:: net::ERR_ABORTED/],
   });
   const ts = Date.now();
   const host = `dual-stack-${ts}`;
@@ -27,22 +41,34 @@ test('dns advanced flows cover ttl coexistence unchanged updates and malformed a
   await loginAsDevAdmin(page);
   const hydrated = await gotoHydratedDns(page);
   if (hydrated) {
-    await page.getByRole('button', { name: /新建记录/ }).click();
-    await page.locator('#rec-name').fill(host);
-    await page.locator('#rec-type').selectOption('A');
-    await page.locator('#rec-value').fill('203.0.113.31');
-    await page.locator('#rec-ttl').fill('1');
-    await page.locator('#rec-form').getByRole('button', { name: /保存记录/ }).click();
-    await expect(page.locator('body')).toContainText(/记录已创建|创建成功/);
+    const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+    for (const [type, value, ttl] of [
+      ['A', '203.0.113.31', '1'],
+      ['AAAA', '2001:db8::31', '120'],
+    ] as const) {
+      const create = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+        form: {
+          _csrf: csrf,
+          action: 'record_create',
+          account_id: hydrated.selectedAccount,
+          zone_id: hydrated.zoneId,
+          zone_name: hydrated.zoneName,
+          record_name: host,
+          record_type: type,
+          record_value: value,
+          record_ttl: ttl,
+        },
+      });
+      expect(create.status()).toBe(200);
+    }
 
-    await page.getByRole('button', { name: /新建记录/ }).click();
-    await page.locator('#rec-name').fill(host);
-    await page.locator('#rec-type').selectOption('AAAA');
-    await page.locator('#rec-value').fill('2001:db8::31');
-    await page.locator('#rec-ttl').fill('120');
-    await page.locator('#rec-form').getByRole('button', { name: /保存记录/ }).click();
-    await expect(page.locator('body')).toContainText(/记录已创建|创建成功/);
+    await page.goto(
+      `/admin/dns.php?hydrate=1&account=${encodeURIComponent(hydrated.selectedAccount)}&zone=${encodeURIComponent(hydrated.zoneId)}&zone_name=${encodeURIComponent(hydrated.zoneName)}`,
+      { waitUntil: 'domcontentloaded', timeout: 45000 }
+    );
     await expect(page.locator('body')).toContainText(host);
+    await expect(page.locator('body')).toContainText('203.0.113.31');
+    await expect(page.locator('body')).toContainText('2001:db8::31');
   }
 
   const malformed = await page.request.get('http://127.0.0.1:58080/admin/dns.php?ajax=dns_data&bad=1', {

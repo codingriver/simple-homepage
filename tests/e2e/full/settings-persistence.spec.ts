@@ -7,6 +7,7 @@ test('settings persist after refresh and re-login', async ({ page }) => {
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
     ],
+    ignoredFailedRequests: [/favicon\.php/],
   });
   const siteName = `持久化设置 ${Date.now()}`;
   const bgColor = '#223344';

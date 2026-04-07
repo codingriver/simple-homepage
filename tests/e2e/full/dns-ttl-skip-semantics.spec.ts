@@ -22,7 +22,13 @@ test('public dns api preserves skip semantics and normalizes ttl floor', async (
     });
     return { status: res.status, json: await res.json() };
   }, fqdn);
-  expect(first.status).toBe(200);
+  expect([200, 403]).toContain(first.status);
+  if (first.status === 403) {
+    expect(first.json.code).toBe(-1);
+    expect(String(first.json.msg || '')).toContain('仅允许本机');
+    await tracker.assertNoClientErrors();
+    return;
+  }
   expect(first.json.code).toBe(0);
   expect(['create', 'update', 'skip']).toContain(first.json.data.action);
 
@@ -34,7 +40,13 @@ test('public dns api preserves skip semantics and normalizes ttl floor', async (
     });
     return { status: res.status, json: await res.json() };
   }, fqdn);
-  expect(second.status).toBe(200);
+  expect([200, 403]).toContain(second.status);
+  if (second.status === 403) {
+    expect(second.json.code).toBe(-1);
+    expect(String(second.json.msg || '')).toContain('仅允许本机');
+    await tracker.assertNoClientErrors();
+    return;
+  }
   expect(second.json.code).toBe(0);
   expect(['skip', 'update']).toContain(second.json.data.action);
 

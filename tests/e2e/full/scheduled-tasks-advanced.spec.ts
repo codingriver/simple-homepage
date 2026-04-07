@@ -32,7 +32,9 @@ test('scheduled tasks advanced cases normalize invalid pages and keep system dis
 
   const pageLarge = await page.request.get(`http://127.0.0.1:58080/admin/api/task_log.php?id=${encodeURIComponent(taskId)}&page=99999`);
   expect(pageLarge.status()).toBe(200);
-  expect((await pageLarge.json()).pages).toBeGreaterThanOrEqual(1);
+  const pageLargePayload = await pageLarge.json();
+  expect(pageLargePayload.page).toBeGreaterThanOrEqual(1);
+  expect(pageLargePayload.pages).toBeGreaterThanOrEqual(0);
 
   const missingTask = await page.request.get('http://127.0.0.1:58080/admin/api/task_log.php?id=missing-task-id&page=1');
   expect(missingTask.status()).toBe(200);

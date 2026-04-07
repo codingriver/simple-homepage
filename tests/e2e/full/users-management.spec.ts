@@ -67,16 +67,34 @@ test('user management enforces validation self-protection and non-admin restrict
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/users.php?action=add');
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 
-  await page.locator('input[name="username"]').fill('bad user');
-  await page.locator('input[name="password"]').fill(password);
-  await page.getByRole('button', { name: /保存/ }).click();
-  await expect(page.locator('body')).toContainText('用户名只允许字母数字下划线横杠');
+  const invalidName = await page.request.post('http://127.0.0.1:58080/admin/users.php', {
+    form: {
+      _csrf: csrf,
+      act: 'save',
+      username: 'bad user',
+      password,
+      role: 'user',
+      orig_username: '',
+    },
+  });
+  expect(invalidName.status()).toBe(200);
+  expect(await invalidName.text()).toContain('用户名只允许字母数字下划线横杠');
 
-  await page.locator('input[name="username"]').fill(`nopass${ts}`);
-  await page.locator('input[name="password"]').fill('');
-  await page.getByRole('button', { name: /保存/ }).click();
-  await expect(page.locator('body')).toContainText('新用户必须设置密码');
+  const missingPassword = await page.request.post('http://127.0.0.1:58080/admin/users.php', {
+    form: {
+      _csrf: csrf,
+      act: 'save',
+      username: `nopass${ts}`,
+      password: '',
+      role: 'user',
+      orig_username: '',
+    },
+  });
+  expect(missingPassword.status()).toBe(200);
+  expect(await missingPassword.text()).toContain('新用户必须设置密码');
+  await page.goto('/admin/users.php?action=add');
 
   await page.locator('input[name="username"]').fill(restrictedUser);
   await page.locator('input[name="password"]').fill(password);

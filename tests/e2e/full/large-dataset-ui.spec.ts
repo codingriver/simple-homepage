@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { attachClientErrorTracking, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
+import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('large dataset ui remains usable with many groups and sites', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
@@ -14,34 +14,56 @@ test('large dataset ui remains usable with many groups and sites', async ({ page
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/groups.php');
+  const groupCsrf = await page.locator('input[name="_csrf"]').first().inputValue();
   for (const [index, group] of groups.entries()) {
-    await page.getByRole('button', { name: /添加分组/ }).click();
-    await page.locator('#fi_id').fill(group.id);
-    await page.locator('#fi_name').fill(group.name);
-    await page.locator('#fi_order').fill(String(index));
-    await page.locator('#fi_auth').selectOption('0');
-    await submitVisibleModal(page);
+    const response = await page.request.post('http://127.0.0.1:58080/admin/groups.php', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      form: {
+        _csrf: groupCsrf,
+        action: 'save',
+        old_id: '',
+        gid: group.id,
+        name: group.name,
+        icon: '📁',
+        order: String(index),
+        visible_to: 'all',
+        auth_required: '0',
+      },
+    });
+    expect(response.ok()).toBeTruthy();
   }
 
   await page.goto('/admin/sites.php');
+  const siteCsrf = await page.locator('input[name="_csrf"]').first().inputValue();
   let siteCounter = 0;
   for (const group of groups) {
     for (let i = 0; i < 5; i++) {
-      await page.getByRole('button', { name: /添加站点/ }).click();
-      await page.locator('#fi_sid').fill(`large-site-${ts}-${siteCounter}`);
-      await page.locator('#fi_name').fill(`大数据站点 ${siteCounter}`);
-      await page.locator('#fi_gid').selectOption(group.id);
-      await page.locator('#fi_type').selectOption('external');
-      await page.locator('#fi_url').fill(`https://example.com/${ts}/${siteCounter}`);
-      await submitVisibleModal(page);
+      const response = await page.request.post('http://127.0.0.1:58080/admin/sites.php', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        form: {
+          _csrf: siteCsrf,
+          action: 'save',
+          old_gid: '',
+          old_sid: '',
+          gid: group.id,
+          sid: `large-site-${ts}-${siteCounter}`,
+          name: `大数据站点 ${siteCounter} ${ts}`,
+          icon: '🔗',
+          desc: '',
+          order: String(siteCounter),
+          type: 'external',
+          url: `https://example.com/${ts}/${siteCounter}`,
+        },
+      });
+      expect(response.ok()).toBeTruthy();
       siteCounter++;
     }
   }
 
   await page.goto('/index.php');
-  await expect(page.locator('.card')).toHaveCount(siteCounter);
+  await expect(page.locator('a.card').filter({ hasText: new RegExp(`大数据站点 .* ${ts}`) })).toHaveCount(siteCounter);
   await page.locator('#searchToggle').click();
-  await page.locator('#sq').fill('大数据站点 1');
+  await page.locator('#sq').fill(`大数据站点 1 ${ts}`);
   await expect(page.locator('#searchMeta')).toContainText('找到');
   await expect(page.locator('.nav-bar .na').first()).toBeVisible();
 

@@ -14,17 +14,17 @@ test('ddns save validates required fields and invalid cron or domain', async ({ 
 
   await openDdns(page);
   await page.getByRole('button', { name: /^保存$/ }).click();
-  await expect(page.locator('#fm-test-result')).toContainText(/请填写任务名称|请填写目标域名|保存失败/);
+  await expect(page.locator('body')).toContainText(/请填写任务名称|请填写目标域名/);
 
   await page.locator('#fm-name').fill('非法域名任务');
   await page.locator('#fm-domain').fill('bad domain');
   await page.getByRole('button', { name: /^保存$/ }).click();
-  await expect(page.locator('#fm-test-result')).toContainText(/目标域名格式不正确|保存失败/);
+  await expect(page.locator('body')).toContainText('目标域名格式不正确');
 
   await page.locator('#fm-domain').fill('valid-domain.606077.xyz');
   await page.locator('#fm-cron').fill('* * *');
   await page.getByRole('button', { name: /^保存$/ }).click();
-  await expect(page.locator('#fm-test-result')).toContainText(/Cron 表达式无效|保存失败/);
+  await expect(page.locator('body')).toContainText('Cron 表达式无效');
 
   await tracker.assertNoClientErrors();
 });

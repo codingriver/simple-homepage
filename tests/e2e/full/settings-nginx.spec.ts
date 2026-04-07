@@ -65,12 +65,12 @@ test('nginx settings show pending reload warning and keep feedback visible after
   await page.locator('label[data-ppm-card="simple"]').click();
   await page.getByRole('button', { name: /保存模式/ }).click();
   await expect(page.locator('.alert-warn')).toContainText(/需要重新生成配置并 Reload Nginx 才能生效/);
-  await expect(page.locator('form[action="settings.php"] button')).toContainText(/立即生成配置并 Reload Nginx/);
+  await expect(page.locator('body')).toContainText(/生成配置并 Reload Nginx/);
 
   await page.getByRole('button', { name: /仅生成配置文件/ }).click();
   await expect(page.locator('body')).toContainText(/反代配置已写入|Reload Nginx/);
 
-  await page.getByRole('button', { name: /立即生成配置并 Reload Nginx/ }).click();
+  await page.getByRole('button', { name: /生成配置并 Reload Nginx/ }).first().click();
   await expect(page.locator('body')).toContainText(/Reload Nginx|失败|成功|写入/);
 
   await tracker.assertNoClientErrors();

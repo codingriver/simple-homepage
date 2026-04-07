@@ -111,8 +111,8 @@ test('proxy mode switch updates fields and shows pending reload notice', async (
 
   await page.goto('/admin/settings.php#nginx');
   await expect(page.locator('#proxy-pending-bar')).toBeVisible();
-  await expect(page.locator('#proxy-pending-bar')).toContainText('待生效代理站点');
-  await expect(page.locator('body')).toContainText(/Reload Nginx|尚未生效/);
+  await expect(page.locator('#proxy-pending-bar')).toContainText(/尚未生效|未在 Nginx 生效/);
+  await expect(page.locator('body')).toContainText(/Reload Nginx|生成配置并 Reload Nginx/);
 
   await tracker.assertNoClientErrors();
 });

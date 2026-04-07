@@ -44,7 +44,7 @@ test('homepage advanced interactions cover search reset no-result tab switch and
   await page.locator('#sq').fill('高级交互关键字');
   await expect(page.locator('#searchMeta')).toContainText('找到');
   await page.locator('#sq').fill('no-such-keyword-xyz');
-  await expect(page.locator('#searchMeta')).toContainText(/找到 0 项|0/);
+  await expect(page.locator('#searchMeta')).toContainText(/没有找到匹配结果|0/);
   await page.locator('#searchClose').click();
   await expect(page.locator('#searchPanel')).toBeHidden();
   await expect(page.locator('body')).toContainText(`首页公开 ${ts}`);

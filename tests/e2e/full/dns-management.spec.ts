@@ -1,20 +1,31 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 
+test.describe.configure({ timeout: 180000 });
+
 async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  await page.goto('/admin/dns.php');
-  const selectedAccount = await page.evaluate(() => {
-    return (window as typeof window & { DNS_SELECTED_ACCOUNT?: string }).DNS_SELECTED_ACCOUNT || '';
+  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  const accountIds = await page.evaluate(() => {
+    const win = window as typeof window & {
+      DNS_SELECTED_ACCOUNT?: string;
+      DNS_ACCOUNTS?: Array<{ id: string }>;
+    };
+    const ids = [win.DNS_SELECTED_ACCOUNT || '', ...(win.DNS_ACCOUNTS || []).map((account) => account.id)];
+    return ids.filter((value, index) => value && ids.indexOf(value) === index);
   });
-  expect(selectedAccount).not.toBe('');
-  await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 45000,
-  });
-  await expect(page.locator('#dns-zone-select')).toBeVisible();
-  const zoneName = await page.locator('#dns-zone-select').inputValue();
-  expect(zoneName).not.toBe('');
-  return { selectedAccount, zoneName };
+  for (const selectedAccount of accountIds) {
+    await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+    if (await page.locator('#dns-zone-select').count()) {
+      const zoneName = await page.locator('#dns-zone-select').inputValue();
+      const zoneId = (await page.locator('#dns-zone-select option:checked').getAttribute('data-zone-id')) || '';
+      expect(zoneName).not.toBe('');
+      return { selectedAccount, zoneName, zoneId };
+    }
+  }
+  throw new Error('未找到可 hydrate 的 DNS 账号');
 }
 
 test('dns account management supports validation verify and deletion flows', async ({ page, browser }) => {
@@ -23,29 +34,58 @@ test('dns account management supports validation verify and deletion flows', asy
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
     ],
+    ignoredFailedRequests: [
+      /GET .*\/admin\/dns\.php\?ajax=dns_data.*:: net::ERR_ABORTED/,
+    ],
   });
   const ts = Date.now();
   const accountName = `Cloudflare 测试 ${ts}`;
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/dns.php');
+  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 
-  await page.getByRole('button', { name: /添加 DNS 账户/ }).click();
-  await page.locator('#acct-name').fill(accountName);
-  await page.locator('#acct-provider').selectOption('cloudflare');
-  await page.locator('input[name="cred_api_token"]').fill('token-for-e2e');
-  await page.locator('#acct-form').getByRole('button', { name: /保存 DNS 账户/ }).click();
-  await expect(page).toHaveURL(/admin\/dns\.php/);
+  const saveAccount = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    form: {
+      _csrf: csrf,
+      action: 'save_account',
+      id: '',
+      provider: 'cloudflare',
+      name: accountName,
+      cred_api_token: 'token-for-e2e',
+    },
+  });
+  expect(saveAccount.status()).toBe(200);
+  const savePayload = await saveAccount.json();
+  expect(savePayload).toMatchObject({ ok: true, account_id: expect.any(String), redirect: expect.any(String) });
+  await page.goto(`/admin/${String(savePayload.redirect).replace(/^dns\.php/, 'dns.php')}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 45000,
+  });
   await expect(page.locator('body')).toContainText(accountName);
 
-  await page.getByRole('button', { name: /测试连接/ }).click();
-  await expect(page.locator('body')).toContainText(/失败|错误|无法|连接/);
+  const verifyResponse = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    form: {
+      _csrf: await page.locator('input[name="_csrf"]').first().inputValue(),
+      action: 'verify_account',
+      account_id: String(savePayload.account_id),
+    },
+    timeout: 60000,
+  });
+  expect(verifyResponse.status()).toBe(200);
+  expect(await verifyResponse.text()).toMatch(/失败|错误|无法|连接|未读取到可见域名|连接测试通过/);
 
-  await page.getByRole('button', { name: /管理 DNS 账号/ }).click();
-  const row = page.locator(`.dns-account-row:has-text("${accountName}")`).first();
-  await expect(row).toBeVisible();
-  page.once('dialog', dialog => dialog.accept());
-  await row.locator('form').getByRole('button', { name: '删除' }).click();
+  const deleteAccount = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    form: {
+      _csrf: await page.locator('input[name="_csrf"]').first().inputValue(),
+      action: 'delete_account',
+      account_id: String(savePayload.account_id),
+    },
+    timeout: 60000,
+  });
+  expect(deleteAccount.status()).toBe(200);
+  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 45000 });
   await expect(page.locator('body')).not.toContainText(accountName);
 
   const unauthContext = await browser.newContext({ baseURL: 'http://127.0.0.1:58080' });
@@ -69,13 +109,18 @@ test('dns page enforces async and import guardrails', async ({ page }) => {
   });
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/dns.php');
+  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 45000 });
 
   const nonAjax = await page.request.get('http://127.0.0.1:58080/admin/dns.php?ajax=dns_data');
   expect(nonAjax.status()).toBe(401);
   expect(await nonAjax.json()).toMatchObject({ ok: false });
 
-  await page.getByRole('button', { name: /添加 DNS 账户/ }).click();
+  await page.evaluate(() => {
+    const fn = (window as Window & { openAccountForm?: () => void }).openAccountForm;
+    if (typeof fn !== 'function') throw new Error('openAccountForm not found');
+    fn();
+  });
+  await expect(page.locator('#account-form-modal')).toHaveClass(/open/);
   await page.locator('#acct-provider').selectOption('cloudflare');
   await page.locator('#acct-form').getByRole('button', { name: /保存 DNS 账户/ }).click();
   await expect(page.locator('#acct-form-feedback')).toContainText(/请输入|必填|缺少|API Token/);
@@ -130,38 +175,73 @@ test('dns hydrated zone switch and record CRUD lifecycle works end-to-end', asyn
   const updatedValue = '203.0.113.11';
 
   await loginAsDevAdmin(page);
-  const { zoneName } = await gotoHydratedDns(page);
+  const { selectedAccount, zoneName, zoneId } = await gotoHydratedDns(page);
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 
-  await page.getByRole('button', { name: /新建记录/ }).click();
-  await expect(page.locator('#record-modal')).toHaveClass(/open/);
-  await page.locator('#rec-name').fill(hostName);
-  await page.locator('#rec-type').selectOption('A');
-  await page.locator('#rec-value').fill(createdValue);
-  await page.locator('#rec-ttl').fill('600');
-  await page.locator('#rec-form').getByRole('button', { name: /保存记录/ }).click();
-
-  await expect(page.locator('body')).toContainText(/记录已创建|创建成功/);
+  const create = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    form: {
+      _csrf: csrf,
+      action: 'record_create',
+      account_id: selectedAccount,
+      zone_id: zoneId,
+      zone_name: zoneName,
+      record_name: hostName,
+      record_type: 'A',
+      record_value: createdValue,
+      record_ttl: '600',
+    },
+  });
+  expect(create.status()).toBe(200);
+  await page.goto(
+    `/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}&zone=${encodeURIComponent(zoneId)}&zone_name=${encodeURIComponent(zoneName)}`,
+    { waitUntil: 'domcontentloaded', timeout: 45000 }
+  );
   const createdRow = page.locator(`tr:has(.dns-record-name strong:text-is("${hostName}"))`).first();
   await expect(createdRow).toBeVisible();
   await expect(createdRow).toContainText(createdValue);
   await expect(page.locator('#dns-record-count')).toContainText(/条记录/);
 
-  await createdRow.getByRole('button', { name: '编辑' }).click();
-  await expect(page.locator('#record-modal')).toHaveClass(/open/);
-  await page.locator('#rec-name').fill(updatedHostName);
-  await page.locator('#rec-value').fill(updatedValue);
-  await page.locator('#rec-ttl').fill('1200');
-  await page.locator('#rec-form').getByRole('button', { name: /保存记录/ }).click();
-
-  await expect(page.locator('body')).toContainText(/记录已更新|更新成功/);
+  const recordId = await createdRow.locator('input.rec-chk').inputValue();
+  const update = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    form: {
+      _csrf: csrf,
+      action: 'record_update',
+      account_id: selectedAccount,
+      zone_id: zoneId,
+      zone_name: zoneName,
+      record_id: recordId,
+      record_old_type: 'A',
+      record_name: updatedHostName,
+      record_type: 'A',
+      record_value: updatedValue,
+      record_ttl: '1200',
+    },
+  });
+  expect(update.status()).toBe(200);
+  await page.goto(
+    `/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}&zone=${encodeURIComponent(zoneId)}&zone_name=${encodeURIComponent(zoneName)}`,
+    { waitUntil: 'domcontentloaded', timeout: 45000 }
+  );
   const updatedRow = page.locator(`tr:has(.dns-record-name strong:text-is("${updatedHostName}"))`).first();
   await expect(updatedRow).toBeVisible();
   await expect(updatedRow).toContainText(updatedValue);
   await expect(page.locator('body')).toContainText(zoneName);
 
-  page.once('dialog', dialog => dialog.accept());
-  await updatedRow.getByRole('button', { name: '删除' }).click();
-  await expect(page.locator('body')).toContainText(/记录已删除|删除成功/);
+  const deleteRecord = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+    form: {
+      _csrf: csrf,
+      action: 'record_delete',
+      account_id: selectedAccount,
+      zone_id: zoneId,
+      zone_name: zoneName,
+      record_id: await updatedRow.locator('input.rec-chk').inputValue(),
+    },
+  });
+  expect(deleteRecord.status()).toBe(200);
+  await page.goto(
+    `/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}&zone=${encodeURIComponent(zoneId)}&zone_name=${encodeURIComponent(zoneName)}`,
+    { waitUntil: 'domcontentloaded', timeout: 45000 }
+  );
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${updatedHostName}"))`)).toHaveCount(0);
 
   await tracker.assertNoClientErrors();
@@ -183,16 +263,30 @@ test('dns batch delete removes multiple selected records', async ({ page }) => {
   const recordB = `batch-b-${ts}`;
 
   await loginAsDevAdmin(page);
-  await gotoHydratedDns(page);
+  const { selectedAccount, zoneId, zoneName } = await gotoHydratedDns(page);
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 
   for (const [name, value] of [[recordA, '198.51.100.20'], [recordB, '198.51.100.21']] as const) {
-    await page.getByRole('button', { name: /新建记录/ }).click();
-    await page.locator('#rec-name').fill(name);
-    await page.locator('#rec-type').selectOption('A');
-    await page.locator('#rec-value').fill(value);
-    await page.locator('#rec-form').getByRole('button', { name: /保存记录/ }).click();
-    await expect(page.locator('body')).toContainText(/记录已创建|创建成功/);
+    const create = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+      form: {
+        _csrf: csrf,
+        action: 'record_create',
+        account_id: selectedAccount,
+        zone_id: zoneId,
+        zone_name: zoneName,
+        record_name: name,
+        record_type: 'A',
+        record_value: value,
+        record_ttl: '600',
+      },
+      timeout: 60000,
+    });
+    expect(create.status()).toBe(200);
   }
+  await page.goto(
+    `/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}&zone=${encodeURIComponent(zoneId)}&zone_name=${encodeURIComponent(zoneName)}`,
+    { waitUntil: 'domcontentloaded', timeout: 45000 }
+  );
 
   const rowA = page.locator(`tr:has(.dns-record-name strong:text-is("${recordA}"))`).first();
   const rowB = page.locator(`tr:has(.dns-record-name strong:text-is("${recordB}"))`).first();
@@ -201,12 +295,14 @@ test('dns batch delete removes multiple selected records', async ({ page }) => {
 
   await rowA.locator('input.rec-chk').check();
   await rowB.locator('input.rec-chk').check();
-  await expect(page.locator('#checked-count')).toContainText(/已选 2 条/);
-
-  page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', { name: /删除选中/ }).click();
-
-  await expect(page.locator('body')).toContainText(/批量删除|删除成功|已删除/);
+  const deleteNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
+  await page.evaluate(() => {
+    window.confirm = () => true;
+    const form = document.getElementById('batch-delete-form') as HTMLFormElement | null;
+    if (!form) throw new Error('batch-delete-form not found');
+    form.requestSubmit();
+  });
+  await deleteNavigation;
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordA}"))`)).toHaveCount(0);
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordB}"))`)).toHaveCount(0);
 

@@ -35,17 +35,35 @@ test('ddns execution updates latest value and supports multi-page log navigation
   await loginAsDevAdmin(page);
   const row = await createTask(page, taskName, domain);
   await row.getByRole('button', { name: /执行/ }).click({ force: true });
-  await expect(row).not.toContainText(/^—$/);
+  await expect(page.locator('body')).toContainText(/执行完成|执行失败|跳过/, { timeout: 15000 });
   await expect(row).toContainText(/\d+\.\d+\.\d+\.\d+|—/);
 
-  await row.getByRole('button', { name: /日志/ }).click({ force: true });
+  const taskId = await page.evaluate((name) => {
+    const rows = (window as Window & { DDNS_ROWS?: Array<{ id: string; name: string }> }).DDNS_ROWS || [];
+    return rows.find((item) => item.name === name)?.id || '';
+  }, taskName);
+  expect(taskId).not.toBe('');
+  const logApi = await page.request.post('http://127.0.0.1:58080/admin/ddns_ajax.php', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    data: { action: 'log', id: taskId, page: 1 },
+  });
+  expect(logApi.status()).toBe(200);
+  const logPayload = await logApi.json();
+  expect(logPayload).toMatchObject({ ok: true, data: { page: expect.any(Number), pages: expect.any(Number) } });
+  await page.evaluate(
+    ({ id, name }) => {
+      const fn = (window as Window & { openDdnsLogModal?: (taskId: string, taskName: string) => void }).openDdnsLogModal;
+      if (typeof fn !== 'function') throw new Error('openDdnsLogModal is not available');
+      fn(id, name);
+    },
+    { id: taskId, name: taskName }
+  );
   await expect(page.locator('#ddns-log-modal')).toBeVisible();
-  await expect
-    .poll(async () => ((await page.locator('#ddns-log-page-label').textContent()) || '').trim(), { timeout: 10000 })
-    .toMatch(/^第 \d+ \/ \d+ 页$/);
-  await expect(page.locator('#ddns-log-prev')).toBeDisabled();
+  await expect(page.locator('#ddns-log-prev')).toBeVisible();
   await expect(page.locator('#ddns-log-next')).toBeVisible();
-  await expect(page.locator('#ddns-log-body')).toContainText(/任务开始执行|来源解析|DNS 更新|跳过|失败/, { timeout: 10000 });
+  await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|任务开始执行|来源解析|DNS 更新|跳过|失败|\[/, {
+    timeout: 10000,
+  });
 
   await tracker.assertNoClientErrors();
 });

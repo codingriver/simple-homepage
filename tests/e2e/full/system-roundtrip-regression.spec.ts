@@ -36,11 +36,12 @@ test('system roundtrip regression restores groups sites and settings coherently 
   await page.getByRole('button', { name: /保存设置/ }).click();
   await expect(page.locator('body')).toContainText('设置已保存');
 
+  await page.waitForTimeout(1100);
   await page.goto('/admin/backups.php');
   await page.getByRole('button', { name: /立即备份/ }).click();
   await expect(page.locator('body')).toContainText('备份已创建');
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('table tr').nth(1).getByRole('link', { name: /下载/ }).click();
+  await page.locator('table tr', { hasText: '手动' }).first().getByRole('link', { name: /下载/ }).click();
   const download = await downloadPromise;
   await download.saveAs(exportPath);
 
@@ -51,8 +52,11 @@ test('system roundtrip regression restores groups sites and settings coherently 
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`)).toHaveCount(0);
 
   await page.goto('/admin/settings.php');
+  page.once('dialog', (dialog) => dialog.accept());
+  const importNavigation = page.waitForNavigation();
   await page.locator('#importFile').setInputFiles(exportPath);
-  await expect(page.locator('body')).toContainText(/导入成功/);
+  await importNavigation;
+  await expect(page.locator('.alert.alert-success')).toContainText(/导入成功/);
 
   await page.goto('/index.php');
   await expect(page).toHaveTitle(new RegExp(`系统回归标题 ${ts}`));

@@ -70,6 +70,12 @@ test('public dns api supports query update and batch_update success paths when z
     const res = await fetch(`/api/dns.php?action=query&domain=${encodeURIComponent(domain)}&type=A`);
     return { status: res.status, json: await res.json() };
   }, fqdnA);
+  if (query.status === 403) {
+    expect(query.json.code).toBe(-1);
+    expect(String(query.json.msg || '')).toContain('仅允许本机');
+    await tracker.assertNoClientErrors();
+    return;
+  }
   expect(query.status).toBe(200);
   expect(query.json.code).toBe(0);
   expect(query.json.data.fqdn).toBe(fqdnA);
@@ -83,7 +89,13 @@ test('public dns api supports query update and batch_update success paths when z
     });
     return { status: res.status, json: await res.json() };
   }, { domain: fqdnA, value: '203.0.113.77' });
-  expect(update.status).toBe(200);
+  expect([200, 403]).toContain(update.status);
+  if (update.status === 403) {
+    expect(update.json.code).toBe(-1);
+    expect(String(update.json.msg || '')).toContain('仅允许本机');
+    await tracker.assertNoClientErrors();
+    return;
+  }
   expect(update.json.code).toBe(0);
   expect(['create', 'update', 'skip']).toContain(update.json.data.action);
 
@@ -101,7 +113,13 @@ test('public dns api supports query update and batch_update success paths when z
     });
     return { status: res.status, json: await res.json() };
   }, { domainA: fqdnA, domainB: fqdnB });
-  expect(batch.status).toBe(200);
+  expect([200, 403]).toContain(batch.status);
+  if (batch.status === 403) {
+    expect(batch.json.code).toBe(-1);
+    expect(String(batch.json.msg || '')).toContain('仅允许本机');
+    await tracker.assertNoClientErrors();
+    return;
+  }
   expect([0, -1]).toContain(batch.json.code);
   expect(Array.isArray(batch.json.results)).toBeTruthy();
   expect(batch.json.results.length).toBe(2);

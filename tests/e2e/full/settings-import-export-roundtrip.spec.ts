@@ -9,6 +9,7 @@ test('admin can export config, mutate data, and restore it via import', async ({
     ],
     ignoredFailedRequests: [
       /POST .*\/admin\/settings\.php :: net::ERR_ABORTED/,
+      /GET .*\/favicon\.php\?url=.* :: net::ERR_ABORTED/,
     ],
   });
   const ts = Date.now();

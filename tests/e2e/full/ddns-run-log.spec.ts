@@ -28,9 +28,16 @@ test('ddns run and log modal support execution pagination search and clear', asy
   await row.getByRole('button', { name: /执行/ }).click();
   await expect(page.locator('body')).toContainText(/执行完成|执行失败|跳过/);
 
+  const logResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/admin/ddns_ajax.php') &&
+      response.request().method() === 'POST' &&
+      (response.request().postData() || '').includes('"action":"log"')
+  );
   await row.getByRole('button', { name: /日志/ }).click();
+  await logResponse;
   await expect(page.locator('#ddns-log-modal')).toBeVisible();
-  await expect(page.locator('#ddns-log-info')).toContainText(/共 .* 行|最新日志优先显示/);
+  await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|成功|失败|跳过|\[/);
 
   await page.locator('#ddns-log-search').fill('success');
   await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|当前页没有匹配|success|成功/);

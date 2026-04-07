@@ -7,6 +7,7 @@ test('sites advanced boundary flows cover mode switch long values and group casc
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
     ],
+    ignoredFailedRequests: [/favicon\.php/],
   });
   const ts = Date.now();
   const gid = `sites-adv-${ts}`;
