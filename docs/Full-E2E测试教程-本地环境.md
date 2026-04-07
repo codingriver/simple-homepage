@@ -90,6 +90,12 @@ npm run test:e2e:headed
 npm run test:e2e:full:chromium -- --list
 ```
 
+打开测试ui界面
+
+```bash
+npx playwright test --ui
+```
+
 切换被测地址：
 
 ```bash
