@@ -39,8 +39,67 @@ docker compose version >/dev/null 2>&1 && COMPOSE_CMD="docker compose"
 BASE_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml")
 DEV_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.dev.yml")
 
+has_var() {
+  local name="$1"
+  [[ ${!name+x} == x ]]
+}
+
+run_compose_build_env() {
+  local proxy_vars=(HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy ALL_PROXY all_proxy)
+  local any_defined=0
+  local cmd=(env)
+  local v
+
+  for v in "${proxy_vars[@]}"; do
+    if has_var "$v"; then
+      any_defined=1
+      break
+    fi
+  done
+
+  if [ "$any_defined" -eq 0 ]; then
+    echo "[INFO] Build proxy config: no explicit proxy vars defined, inheriting system/Docker defaults"
+    "$@"
+    return
+  fi
+
+  echo "[INFO] Build proxy config: using explicitly defined proxy vars"
+  for v in "${proxy_vars[@]}"; do
+    cmd+=("-u" "$v")
+  done
+  for v in "${proxy_vars[@]}"; do
+    if has_var "$v"; then
+      cmd+=("$v=${!v}")
+      if [ -n "${!v}" ]; then
+        echo "[INFO]   $v=${!v}"
+      else
+        echo "[INFO]   $v=<empty>"
+      fi
+    fi
+  done
+
+  cmd+=("$@")
+  "${cmd[@]}"
+}
+
+compose_needs_build_env() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      build|--build)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 run_compose() {
-  "$@"
+  if compose_needs_build_env "$@"; then
+    run_compose_build_env "$@"
+  else
+    "$@"
+  fi
 }
 
 print_help() {
@@ -115,7 +174,7 @@ if [ "${1:-}" = "dev" ]; then
   # 无子命令：默认构建并启动
   if [ $# -eq 0 ]; then
     echo "[INFO] Dev mode compose: up -d --build"
-    run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
+    run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
     exit 0
   fi
 
@@ -125,16 +184,16 @@ if [ "${1:-}" = "dev" ]; then
     start)
       shift || true
       echo "[INFO] Dev mode compose: up -d $*"
-      $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d "$@"
+      run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d "$@"
       ;;
     restart)
       shift || true
       echo "[INFO] Dev mode compose: restart $*"
-      $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" restart "$@"
+      run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" restart "$@"
       ;;
     *)
       echo "[INFO] Dev mode compose: $*"
-      $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" "$@"
+      run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" "$@"
       ;;
   esac
   exit 0
@@ -147,18 +206,18 @@ fi
 #   - 其他参数       => 透传 docker compose
 # -----------------------------
 if [ $# -eq 0 ]; then
-  run_compose $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" build --no-cache
+  run_compose_build_env $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" build --no-cache
 
-  $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" up -d
+  run_compose $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" up -d
   exit 0
 fi
 
 if [ "${1:-}" = "start" ]; then
   shift || true
   echo "[INFO] Base mode compose: up -d $*"
-  $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" up -d "$@"
+  run_compose $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" up -d "$@"
   exit 0
 fi
 
 echo "[INFO] Base mode compose: $*"
-$COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" "$@"
+run_compose $COMPOSE_CMD "${BASE_COMPOSE_ARGS[@]}" "$@"

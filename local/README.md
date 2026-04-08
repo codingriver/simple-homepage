@@ -7,7 +7,7 @@ cp local/.env.example local/.env   # 按需改端口、DATA_DIR 等
 ```
 
 数据目录默认 `../data`（相对项目根），首次启动会自动创建。
-Linux bind mount 若出现 `data` 不可写，可在 `local/.env` 中设置 `PUID` / `PGID` 对齐到宿主机目录 owner。
+Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐 `PUID` / `PGID`；若自动检测到 `0:0`，会回退到镜像默认用户 `1000:1000`，避免自动提权。只有自动检测不符合预期时，才需要在 `local/.env` 中显式覆盖。
 
 ### 无人值守安装（跳过安装向导）
 

@@ -63,6 +63,8 @@
 
 ### 方式一：直接运行镜像
 
+推荐 Linux bind mount 场景显式带上 `PUID/PGID`：
+
 ```bash
 docker run -d \
   --name simple-homepage \
@@ -83,6 +85,17 @@ http://你的服务器IP:58080
 
 ### 方式二：使用仓库内置 `docker-compose.yml`
 
+默认写法：由容器启动时自动按 `data` 目录 owner 对齐 UID/GID。
+
+```bash
+git clone https://github.com/codingriver/simple-homepage.git
+cd simple-homepage
+mkdir -p data
+docker compose up -d
+```
+
+如需显式覆盖自动检测结果：
+
 ```bash
 git clone https://github.com/codingriver/simple-homepage.git
 cd simple-homepage
@@ -90,7 +103,11 @@ mkdir -p data
 PUID=$(id -u) PGID=$(id -g) docker compose up -d
 ```
 
-如果你的环境还是旧版命令，也可以用：
+如果你的环境还是旧版命令，也可以用以下两种写法：
+
+```bash
+docker-compose up -d
+```
 
 ```bash
 PUID=$(id -u) PGID=$(id -g) docker-compose up -d
@@ -125,6 +142,8 @@ docker run -d \
   --name simple-homepage \
   -p 58080:58080 \
   -v $(pwd)/data:/var/www/nav/data \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -e ADMIN=admin \
   -e PASSWORD='ChangeMe123!' \
   -e NAME='我的导航' \
@@ -138,8 +157,8 @@ docker run -d \
 | --- | --- | --- |
 | `NAV_PORT` | `58080` | 容器内监听端口 |
 | `TZ` | `Asia/Shanghai` | 容器时区 |
-| `PUID` | 空 | Linux bind mount 时可选；将容器内 `navwww` 的 UID 对齐到宿主机 `data` 目录 owner；不填时保持镜像默认 `1000` |
-| `PGID` | 空 | Linux bind mount 时可选；将容器内 `navwww` 的 GID 对齐到宿主机 `data` 目录 owner group；不填时保持镜像默认 `1000` |
+| `PUID` | 空 | Linux bind mount 时可选；显式指定容器内 `navwww` 的 UID；留空时启动后自动按 `data` 目录 owner UID 对齐 |
+| `PGID` | 空 | Linux bind mount 时可选；显式指定容器内 `navwww` 的 GID；留空时启动后自动按 `data` 目录 owner GID 对齐 |
 | `ADMIN` | 空 | 首次启动时无人值守安装用户名 |
 | `PASSWORD` | 空 | 首次启动时无人值守安装密码 |
 | `NAME` | `导航中心` | 首次启动时站点名称 |
@@ -182,8 +201,8 @@ data/
 - `dns_config.json` 保存 DNS 账户与配置
 - `backups/` 保存导出与恢复快照
 - 容器重建后，未挂载 `data` 会导致所有配置丢失
-- Linux 宿主机若使用 bind mount，建议先 `mkdir -p data`，并按需传入 `PUID/PGID` 与宿主机目录 owner 对齐；容器启动时不会再递归 `chown` 整个挂载目录
-- 若未传 `PUID/PGID`，容器内运行用户默认是 `1000:1000`；仅在宿主机挂载目录权限本来就与该 UID/GID 匹配时才建议省略
+- Linux 宿主机若使用 bind mount，建议先 `mkdir -p data`；容器启动时会优先使用显式传入的 `PUID/PGID`，未传时自动按 `data` 目录 owner 对齐，且不会再递归 `chown` 整个挂载目录
+- 若自动检测到 `0:0`，为避免自动提权，容器会继续使用镜像默认用户 `1000:1000`；只有显式传入 `PUID=0` / `PGID=0` 时才会按 root 身份运行
 
 ## 常用命令
 

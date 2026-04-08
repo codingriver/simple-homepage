@@ -275,10 +275,15 @@ bash docker/docker-deploy.sh
 cp .env.example .env
 nano .env          # 按需修改端口等
 
-# 2. 构建并启动（优先使用 docker compose，旧环境可改用 docker-compose）
+# 2. 构建并启动（默认自动按数据目录 owner 对齐 UID/GID）
 docker compose up -d --build
 # 旧版独立安装命令：
 # docker-compose up -d --build
+
+# 2'. 如需显式覆盖自动检测结果
+PUID=$(id -u) PGID=$(id -g) docker compose up -d --build
+# 旧版独立安装命令：
+# PUID=$(id -u) PGID=$(id -g) docker-compose up -d --build
 
 # 3. 查看状态
 docker compose ps
@@ -304,6 +309,8 @@ docker run -d \
   --restart unless-stopped \
   -p 8080:80 \
   -v $(pwd)/nav-data:/var/www/nav/data \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -e TZ=Asia/Shanghai \
   codingriver/simple-homepage:latest
 ```
@@ -318,6 +325,8 @@ docker run -d \
 | `CONTAINER_NAME` | `nav-portal` | 容器名称 |
 | `DATA_DIR` | `./nav-data` | 宿主机数据持久化目录 |
 | `TZ` | `Asia/Shanghai` | 时区 |
+| `PUID` | 空 | 可选；显式指定容器内运行用户 UID。留空时容器启动后自动按 `nav-data` 目录 owner UID 对齐 |
+| `PGID` | 空 | 可选；显式指定容器内运行用户 GID。留空时容器启动后自动按 `nav-data` 目录 owner GID 对齐 |
 
 完整 `.env` 示例：
 
@@ -327,6 +336,8 @@ NAV_PORT=8080
 TZ=Asia/Shanghai
 DATA_DIR=./nav-data
 ```
+
+> 默认留空即可。容器启动时会自动按宿主机数据目录 owner 对齐 UID/GID；若自动检测到 `0:0`，会回退到镜像默认的 `1000:1000`，避免自动提权。仅在需要覆盖自动检测结果时，再显式设置 `PUID` / `PGID`。
 
 ---
 

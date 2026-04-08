@@ -16,12 +16,21 @@ services:
       context: ..              # Dockerfile 在上级项目根目录
       dockerfile: Dockerfile
       args:
-        TZ: ${TZ:-Asia/Shanghai}
+        - TZ=${TZ:-Asia/Shanghai}
         # 可选：与 GitHub Actions 一致注入，便于镜像内显示构建 commit（默认 unknown）
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
-        GIT_REF: ${GIT_REF:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-        GIT_REPO_URL: ${GIT_REPO_URL:-https://github.com/codingriver/simple-homepage}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+        - GIT_REF=${GIT_REF:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-unknown}
+        - GIT_REPO_URL=${GIT_REPO_URL:-https://github.com/codingriver/simple-homepage}
+        # 构建期代理：仅透传当前环境中“已定义”的标准代理变量
+        - HTTP_PROXY
+        - HTTPS_PROXY
+        - http_proxy
+        - https_proxy
+        - NO_PROXY
+        - no_proxy
+        - ALL_PROXY
+        - all_proxy
     image: codingriver/simple-homepage:latest
     container_name: ${CONTAINER_NAME:-simple-homepage}
     restart: unless-stopped
@@ -32,7 +41,7 @@ services:
     environment:
       - NAV_PORT=58080     # 容器内部默认端口 58080（host 模式更不易冲突）
       - TZ=${TZ:-Asia/Shanghai}
-      - PUID=${PUID:-}
+      - PUID=${PUID:-}     # 可选：显式覆盖；留空时启动后自动按 data 目录 owner 对齐
       - PGID=${PGID:-}
 
     volumes:

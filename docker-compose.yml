@@ -18,7 +18,7 @@ services:
       # 容器内默认端口（与端口映射保持一致）
       NAV_PORT: "58080"
       TZ: "Asia/Shanghai"
-      # Linux bind mount 场景可传宿主机 data 目录 owner，避免启动时递归 chown 宿主机目录
+      # 可选：显式覆盖运行用户 UID/GID；留空时容器启动后自动按 data 目录 owner 对齐
       PUID: "${PUID:-}"
       PGID: "${PGID:-}"
 

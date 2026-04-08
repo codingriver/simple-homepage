@@ -37,11 +37,28 @@ nav_require_writable_dir() {
     fi
 }
 
+data_owner_uid() {
+    stat -c '%u' /var/www/nav/data 2>/dev/null
+}
+
+data_owner_gid() {
+    stat -c '%g' /var/www/nav/data 2>/dev/null
+}
+
 remap_nav_user() {
     current_uid="$(id -u navwww)"
     current_gid="$(id -g navwww)"
     target_uid="$current_uid"
     target_gid="$current_gid"
+    detected_uid="$current_uid"
+    detected_gid="$current_gid"
+
+    if detected_uid_tmp="$(data_owner_uid)" && detected_gid_tmp="$(data_owner_gid)"; then
+        if is_uint "$detected_uid_tmp" && is_uint "$detected_gid_tmp"; then
+            detected_uid="$detected_uid_tmp"
+            detected_gid="$detected_gid_tmp"
+        fi
+    fi
 
     if [ -n "$PUID" ]; then
         if ! is_uint "$PUID"; then
@@ -49,6 +66,13 @@ remap_nav_user() {
             exit 1
         fi
         target_uid="$PUID"
+    else
+        if [ "$detected_uid" = "0" ]; then
+            echo "[entrypoint][WARN] 自动检测到 data 目录 owner UID 为 0；为避免自动提权，继续使用镜像默认 UID: ${target_uid}"
+        else
+            target_uid="$detected_uid"
+            echo "[entrypoint] 未显式设置 PUID，自动使用 data 目录 owner UID: ${target_uid}"
+        fi
     fi
     if [ -n "$PGID" ]; then
         if ! is_uint "$PGID"; then
@@ -56,6 +80,13 @@ remap_nav_user() {
             exit 1
         fi
         target_gid="$PGID"
+    else
+        if [ "$detected_gid" = "0" ]; then
+            echo "[entrypoint][WARN] 自动检测到 data 目录 owner GID 为 0；为避免自动提权，继续使用镜像默认 GID: ${target_gid}"
+        else
+            target_gid="$detected_gid"
+            echo "[entrypoint] 未显式设置 PGID，自动使用 data 目录 owner GID: ${target_gid}"
+        fi
     fi
 
     if [ "$target_uid" = "0" ] || [ "$target_gid" = "0" ]; then
@@ -79,8 +110,8 @@ if [ -f "/usr/share/zoneinfo/${TZ}" ]; then
     echo "${TZ}" > /etc/timezone
 fi
 
-# ── Linux bind mount 权限对齐（可选）──
-# 通过 PUID/PGID 将容器内 navwww 映射到宿主机 data 目录 owner，避免递归 chown 挂载目录
+# ── Linux bind mount 权限对齐（支持自动检测）──
+# 优先使用显式传入的 PUID/PGID；未传时自动按 /var/www/nav/data owner 对齐，避免递归 chown 挂载目录
 remap_nav_user
 
 # ── 将 NAV_PORT 注入 Nginx 站点配置 ──
