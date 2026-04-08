@@ -86,6 +86,21 @@ npm run test:e2e:headed:chromium
 npm run test:e2e:headed:mobile-chrome
 ```
 
+精确执行单条或单文件用例：
+
+```bash
+# 单个 spec 文件
+npm run test:e2e:headed:chromium -- tests/e2e/full/csrf-guards.spec.ts
+
+# 指定行号附近的单条用例
+npm run test:e2e:headed:chromium -- tests/e2e/full/csrf-guards.spec.ts:8
+
+# 按用例标题过滤
+npm run test:e2e:headed:chromium -- -g "csrf guards reject admin mutations without valid token"
+```
+
+说明：这些脚本已不再在命令内部硬编码 `tests/e2e/full`，默认范围仍由 `playwright.config.ts` 的 `testDir` 控制，所以追加文件、行号或 `-g` 时只会筛选你指定的目标，不会把整目录再次带进去。
+
 查看当前会跑哪些用例：
 
 ```bash

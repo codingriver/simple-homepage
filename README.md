@@ -248,6 +248,10 @@ docker compose \
 npm install
 BASE_URL=http://127.0.0.1:58080 npm run test:e2e:full:chromium
 BASE_URL=http://127.0.0.1:58080 npm run test:e2e:full:mobile
+
+# 单个文件 / 单条用例调试
+BASE_URL=http://127.0.0.1:58080 npm run test:e2e:headed:chromium -- tests/e2e/full/csrf-guards.spec.ts:8
+BASE_URL=http://127.0.0.1:58080 npm run test:e2e:headed:chromium -- -g "csrf guards reject admin mutations without valid token"
 ```
 
 ### Lighthouse
@@ -311,4 +315,3 @@ docker compose \
 - 根目录 `README.md`
 - `docs/` 下对应专题文档
 - `tests/e2e/full/` 相关回归测试
-
