@@ -68,6 +68,8 @@ docker run -d \
   --name simple-homepage \
   -p 58080:58080 \
   -v $(pwd)/data:/var/www/nav/data \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
   codingriver/simple-homepage:latest
@@ -85,13 +87,13 @@ http://你的服务器IP:58080
 git clone https://github.com/codingriver/simple-homepage.git
 cd simple-homepage
 mkdir -p data
-docker compose up -d
+PUID=$(id -u) PGID=$(id -g) docker compose up -d
 ```
 
 如果你的环境还是旧版命令，也可以用：
 
 ```bash
-docker-compose up -d
+PUID=$(id -u) PGID=$(id -g) docker-compose up -d
 ```
 
 ### 首次安装
@@ -136,6 +138,8 @@ docker run -d \
 | --- | --- | --- |
 | `NAV_PORT` | `58080` | 容器内监听端口 |
 | `TZ` | `Asia/Shanghai` | 容器时区 |
+| `PUID` | 空 | Linux bind mount 时可选；将容器内 `navwww` 的 UID 对齐到宿主机 `data` 目录 owner；不填时保持镜像默认 `1000` |
+| `PGID` | 空 | Linux bind mount 时可选；将容器内 `navwww` 的 GID 对齐到宿主机 `data` 目录 owner group；不填时保持镜像默认 `1000` |
 | `ADMIN` | 空 | 首次启动时无人值守安装用户名 |
 | `PASSWORD` | 空 | 首次启动时无人值守安装密码 |
 | `NAME` | `导航中心` | 首次启动时站点名称 |
@@ -178,6 +182,8 @@ data/
 - `dns_config.json` 保存 DNS 账户与配置
 - `backups/` 保存导出与恢复快照
 - 容器重建后，未挂载 `data` 会导致所有配置丢失
+- Linux 宿主机若使用 bind mount，建议先 `mkdir -p data`，并按需传入 `PUID/PGID` 与宿主机目录 owner 对齐；容器启动时不会再递归 `chown` 整个挂载目录
+- 若未传 `PUID/PGID`，容器内运行用户默认是 `1000:1000`；仅在宿主机挂载目录权限本来就与该 UID/GID 匹配时才建议省略
 
 ## 常用命令
 

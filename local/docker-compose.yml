@@ -17,14 +17,6 @@ services:
       dockerfile: Dockerfile
       args:
         TZ: ${TZ:-Asia/Shanghai}
-        # 构建时代理（让 BuildKit 和旧版 builder 都能走代理）
-        # 由 .env 中的 BUILD_PROXY_URL 控制，留空则不使用代理
-        HTTP_PROXY: ${BUILD_PROXY_URL:-}
-        HTTPS_PROXY: ${BUILD_PROXY_URL:-}
-        http_proxy: ${BUILD_PROXY_URL:-}
-        https_proxy: ${BUILD_PROXY_URL:-}
-        NO_PROXY: "localhost,127.0.0.1,::1"
-        no_proxy: "localhost,127.0.0.1,::1"
         # 可选：与 GitHub Actions 一致注入，便于镜像内显示构建 commit（默认 unknown）
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         GIT_REF: ${GIT_REF:-unknown}
@@ -40,6 +32,8 @@ services:
     environment:
       - NAV_PORT=58080     # 容器内部默认端口 58080（host 模式更不易冲突）
       - TZ=${TZ:-Asia/Shanghai}
+      - PUID=${PUID:-}
+      - PGID=${PGID:-}
 
     volumes:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──

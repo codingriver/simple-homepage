@@ -5,20 +5,9 @@
 # ============================================================
 FROM php:8.2-fpm-alpine
 
-# ── 构建时代理参数（由 docker-compose build args 传入，构建完成后不保留）──
-# 让 apk / PHP 扩展安装等步骤能走代理
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG http_proxy
-ARG https_proxy
-ARG NO_PROXY
-ARG no_proxy
-ENV HTTP_PROXY=${HTTP_PROXY} \
-    HTTPS_PROXY=${HTTPS_PROXY} \
-    http_proxy=${http_proxy} \
-    https_proxy=${https_proxy} \
-    NO_PROXY=${NO_PROXY} \
-    no_proxy=${no_proxy}
+# ── 代理策略 ──
+# 不在镜像中显式写入 HTTP(S)_PROXY/NO_PROXY。
+# 构建期与运行期均跟随宿主机 / Docker 自身代理配置。
 
 # ── 切换 Alpine 软件源（构建环境访问官方源不稳定时使用国内镜像）──
 RUN printf '%s\n%s\n' \
@@ -52,14 +41,6 @@ RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && \
 RUN docker-php-ext-install fileinfo
 
 # session 已内置，json/hash/pcre 均为核心内置，无需额外安装
-
-# ── 清除构建时代理环境变量（不让代理泄漏到最终镜像）──
-ENV HTTP_PROXY= \
-    HTTPS_PROXY= \
-    http_proxy= \
-    https_proxy= \
-    NO_PROXY= \
-    no_proxy=
 
 # ── 创建运行用户（与 Nginx worker 统一）──
 RUN addgroup -g 1000 navwww && \
