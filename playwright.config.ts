@@ -1,6 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = process.env.BASE_URL || 'http://127.0.0.1:58080';
+const reporter: any = process.env.PLAYWRIGHT_REPORTER === 'line'
+  ? [['line']]
+  : [
+      ['list'],
+      ['html', { open: 'never', outputFolder: 'test-results/playwright-report-html' }],
+      ['./scripts/playwright-markdown-reporter.cjs', { outputFile: 'test-results/playwright-report.md' }],
+    ];
 
 export default defineConfig({
   testDir: './tests/e2e/full',
@@ -9,11 +16,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  reporter: [
-    ['list'],
-    ['html', { open: 'never', outputFolder: 'test-results/playwright-report-html' }],
-    ['./scripts/playwright-markdown-reporter.cjs', { outputFile: 'test-results/playwright-report.md' }],
-  ],
+  reporter,
   use: {
     baseURL,
     trace: 'retain-on-failure',

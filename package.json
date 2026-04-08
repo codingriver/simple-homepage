@@ -5,6 +5,7 @@
     "test:e2e": "playwright test tests/e2e/full",
     "test:e2e:full": "playwright test tests/e2e/full",
     "test:e2e:full:chromium": "playwright test tests/e2e/full --project=chromium",
+    "test:e2e:full:chromium:log": "node scripts/run-playwright-log.cjs",
     "test:e2e:full:mobile": "playwright test tests/e2e/full --project=mobile-chrome",
     "test:e2e:headed": "playwright test tests/e2e/full --headed",
     "test:perf": "lhci autorun --config=./lighthouserc.json",

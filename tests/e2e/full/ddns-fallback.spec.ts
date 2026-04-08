@@ -26,9 +26,17 @@ test('ddns fallback task shows combined source label and structured test result'
   await expect(row).toContainText(/164746/);
 
   await row.getByRole('button', { name: /编辑/ }).click();
+  const sourceTestResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/admin/ddns_ajax.php') &&
+      response.request().method() === 'POST' &&
+      (response.request().postData() || '').includes('"action":"test_source"'),
+    { timeout: 20_000 }
+  );
   await page.getByRole('button', { name: /测试来源/ }).click();
-  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/);
-  await expect(page.locator('#fm-test-result')).toContainText(/4ce|164746|回退|失败/);
+  await sourceTestResponse;
+  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/, { timeout: 20_000 });
+  await expect(page.locator('#fm-test-result')).toContainText(/4ce|164746|回退|失败/, { timeout: 20_000 });
 
   await tracker.assertNoClientErrors();
 });

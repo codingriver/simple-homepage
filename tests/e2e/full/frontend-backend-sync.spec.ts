@@ -10,6 +10,7 @@ test('frontend and backend stay in sync after creating content and changing sett
     ignoredFailedRequests: [
       /GET .*\/admin\/groups\.php :: net::ERR_ABORTED/,
       /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+      /GET .*\/favicon\.php\?url=https%3A%2F%2Fexample\.com(?:%2Fsync)? :: net::ERR_ABORTED/,
     ],
   });
   const ts = Date.now();

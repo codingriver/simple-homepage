@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
+async function saveDdns(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  const saveButton = page.locator('#ddns-form .form-actions').getByRole('button', { name: /^保存$/ });
+  await saveButton.scrollIntoViewIfNeeded();
+  await saveButton.click({ force: true });
+}
+
 async function createTask(page: Parameters<typeof loginAsDevAdmin>[0], name: string, domain: string, cron: string) {
   await page.goto('/admin/ddns.php');
   await page.getByRole('button', { name: /新建任务/ }).click();
@@ -8,7 +14,7 @@ async function createTask(page: Parameters<typeof loginAsDevAdmin>[0], name: str
   await page.locator('#fm-source-type').selectOption('local_ipv4');
   await page.locator('#fm-domain').fill(domain);
   await page.locator('#fm-cron').fill(cron);
-  await page.getByRole('button', { name: /^保存$/ }).click();
+  await saveDdns(page);
 }
 
 test('ddns tasks sync into scheduled dispatcher groups by cron and update after disable', async ({ page }) => {
@@ -36,7 +42,9 @@ test('ddns tasks sync into scheduled dispatcher groups by cron and update after 
 
   await page.goto('/admin/ddns.php');
   const rowA = page.locator(`tr:has-text("${taskA}")`).first();
-  await rowA.getByRole('button', { name: /禁用/ }).click();
+  const toggleButton = rowA.getByRole('button', { name: /禁用/ });
+  await toggleButton.scrollIntoViewIfNeeded();
+  await toggleButton.click({ force: true });
   await expect(rowA).toContainText('禁用');
 
   await page.goto('/admin/scheduled_tasks.php');

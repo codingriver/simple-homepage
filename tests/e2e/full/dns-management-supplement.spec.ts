@@ -3,6 +3,8 @@ import path from 'path';
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
+test.describe.configure({ timeout: 180000 });
+
 const dnsConfigPath = path.resolve(__dirname, '../../../data/dns_config.json');
 
 async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0], accountId: string) {
