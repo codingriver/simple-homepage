@@ -82,6 +82,8 @@ npm run test:e2e:full:mobile
 
 ```bash
 npm run test:e2e:headed
+npm run test:e2e:headed:chromium
+npm run test:e2e:headed:mobile-chrome
 ```
 
 查看当前会跑哪些用例：
