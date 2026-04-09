@@ -175,6 +175,7 @@ printf 'LANG=%s\n' "${LANG:-}"
 printf 'TASK_ID=%s\n' "${TASK_ID:-}"
 printf 'TASK_NAME=%s\n' "${TASK_NAME:-}"
 printf 'TASK_WORKDIR=%s\n' "${TASK_WORKDIR:-}"
+printf 'TASK_SCRIPT_FILE=%s\n' "${TASK_SCRIPT_FILE:-}"
 
 echo
 echo "== all environment variables (sorted) =="
@@ -428,7 +429,7 @@ $CSRF = csrf_field();
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
             style="font-family:var(--mono);font-size:12px;resize:vertical;
                    min-height:120px;max-height:400px;overflow-y:auto;line-height:1.55"></textarea>
-          <span class="form-hint">新建任务会默认打印基础命令结果和 bash 启动前注入的环境变量，方便直接观察与修改。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
+          <span class="form-hint">保存后会先把这里的内容写成真实的 <code style="font-family:var(--mono)">.sh</code> 脚本，再由 <code style="font-family:var(--mono)">/bin/bash</code> 执行，行为尽量与手动在 Bash 中运行一致；脚本执行前会先进入 <code style="font-family:var(--mono)">data/tasks</code>。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
         </div>
       </form>
     </div>

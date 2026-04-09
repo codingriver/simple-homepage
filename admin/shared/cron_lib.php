@@ -70,6 +70,38 @@ function task_ensure_workdir(array $task): void {
     }
 }
 
+function task_runtime_script_name(string $id): string {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        $id = 'task';
+    }
+    try {
+        $suffix = bin2hex(random_bytes(4));
+    } catch (Throwable $e) {
+        $suffix = substr(md5(uniqid((string)mt_rand(), true)), 0, 8);
+    }
+    return '.task_runtime_' . $id . '_' . date('Ymd_His') . '_' . $suffix . '.sh';
+}
+
+function task_create_runtime_script(string $id, string $workdir, string $cmd): array {
+    $workdir = trim($workdir);
+    if ($workdir === '' || !is_dir($workdir)) {
+        return ['ok' => false, 'msg' => '任务工作目录不存在'];
+    }
+
+    $script = "#!/bin/bash\n"
+        . "cd " . escapeshellarg($workdir) . "\n"
+        . str_replace("\r\n", "\n", str_replace("\r", "\n", $cmd))
+        . "\n";
+
+    $path = rtrim($workdir, '/') . '/' . task_runtime_script_name($id);
+    if (@file_put_contents($path, $script, LOCK_EX) === false) {
+        return ['ok' => false, 'msg' => '运行脚本写入失败'];
+    }
+    @chmod($path, 0700);
+    return ['ok' => true, 'path' => $path];
+}
+
 function task_rrmdir(string $dir): void {
     if ($dir === '' || !is_dir($dir)) {
         return;
@@ -570,17 +602,19 @@ function cron_execute_task(string $id): array {
         cron_mark_running($id, false);
         return ['ok' => false, 'code' => -1, 'output' => '', 'msg' => '命令为空'];
     }
-    // 统一换行符：兼容 Windows \r\n 和 Unix \n
-    $script = str_replace("\r\n", "\n", str_replace("\r", "\n", $cmd));
     $workdir = task_resolve_workdir($task);
     task_ensure_workdir($task);
-    // 在脚本头部设置工作目录
-    $script = "cd " . escapeshellarg($workdir) . "\n" . $script;
+    $runtime = task_create_runtime_script($id, $workdir, $cmd);
+    if (!$runtime['ok']) {
+        cron_mark_running($id, false);
+        return ['ok' => false, 'code' => -1, 'output' => '', 'msg' => $runtime['msg']];
+    }
+    $runtime_script = (string)$runtime['path'];
 
-    // 用 proc_open 把脚本通过 stdin 管道传给 bash
-    // bash 读 stdin → 完整多行脚本支持，无需转义，无注入风险
+    // 将任务命令落地为真实 .sh 文件，再交给 /bin/bash 执行。
+    // 这样与“手动写脚本再在 bash 中运行”的行为更一致，$0 / BASH_SOURCE 也可用。
     $desc = [
-        0 => ['pipe', 'r'],   // stdin  → 写入脚本内容
+        0 => ['file', '/dev/null', 'r'],
         1 => ['pipe', 'w'],   // stdout → 收集输出
         2 => ['pipe', 'w'],   // stderr → 合并到输出
     ];
@@ -593,13 +627,12 @@ function cron_execute_task(string $id): array {
         'TASK_ID' => $id,
         'TASK_NAME' => (string)($task['name'] ?? ''),
         'TASK_WORKDIR' => $workdir,
+        'TASK_SCRIPT_FILE' => $runtime_script,
     ];
-    $proc = proc_open('/bin/bash', $desc, $pipes, $workdir, $env);
+    $proc = proc_open('/bin/bash ' . escapeshellarg($runtime_script), $desc, $pipes, $workdir, $env);
     $output = '';
     $code   = -1;
     if (is_resource($proc)) {
-        fwrite($pipes[0], $script);
-        fclose($pipes[0]);
         // 合并 stdout + stderr（保持顺序近似）
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
@@ -630,6 +663,7 @@ function cron_execute_task(string $id): array {
     } else {
         $output = '[无法启动 bash 进程]';
     }
+    @unlink($runtime_script);
     // 统一输出换行为 \n
     $output = str_replace("\r\n", "\n", $output);
 
