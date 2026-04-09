@@ -256,8 +256,49 @@ function dns_api_normalize_ttl(array $account, int $ttl): int {
     return max(60, min($ttl, 86400));
 }
 
-/** @return array{code:int,msg:string,data?:array} */
-function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl): array {
+function dns_api_zone_cache_key(array $account, array $zone): string {
+    return implode('|', [
+        (string)($account['id'] ?? ''),
+        (string)($zone['id'] ?? ''),
+        (string)($zone['name'] ?? ''),
+    ]);
+}
+
+/**
+ * @param array<string, array{ok:bool,records?:array,msg?:string}> $zoneRecordsCache
+ * @return array{ok:bool,records?:array,msg?:string}
+ */
+function dns_api_get_zone_records_cached(array $account, array $zone, array &$zoneRecordsCache): array {
+    $cacheKey = dns_api_zone_cache_key($account, $zone);
+    if (isset($zoneRecordsCache[$cacheKey])) {
+        return $zoneRecordsCache[$cacheKey];
+    }
+
+    $recordsRes = dns_cli_call([
+        'action'  => 'records.list',
+        'account' => $account,
+        'zone'    => $zone,
+    ]);
+    if (!$recordsRes['ok']) {
+        $zoneRecordsCache[$cacheKey] = [
+            'ok' => false,
+            'msg' => '读取解析记录失败: ' . $recordsRes['msg'],
+        ];
+        return $zoneRecordsCache[$cacheKey];
+    }
+
+    $zoneRecordsCache[$cacheKey] = [
+        'ok' => true,
+        'records' => is_array($recordsRes['data']['records'] ?? null) ? $recordsRes['data']['records'] : [],
+    ];
+    return $zoneRecordsCache[$cacheKey];
+}
+
+/**
+ * @param array<string, array{ok:bool,records?:array,msg?:string}> $zoneRecordsCache
+ * @return array{code:int,msg:string,data?:array}
+ */
+function dns_api_upsert_resolved(string $domain, string $value, ?string $type, ?int $ttl, array $parsed, array &$zoneRecordsCache): array {
     $domain = trim($domain);
     $value = trim($value);
     if ($domain === '' || $value === '') {
@@ -277,27 +318,24 @@ function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl)
         return ['code' => -1, 'msg' => $verr];
     }
 
-    $parsed = dns_api_resolve_domain($domain);
-    if ($parsed === null) {
+    $account = is_array($parsed['account'] ?? null) ? $parsed['account'] : [];
+    $zone = is_array($parsed['zone'] ?? null) ? $parsed['zone'] : [];
+    $recordName = trim((string)($parsed['record_name'] ?? ''));
+    if ($account === [] || $zone === [] || $recordName === '') {
         return ['code' => -1, 'msg' => '域名未匹配到任何已配置的 DNS 账号下的 Zone'];
     }
 
-    $account = $parsed['account'];
-    $zone = $parsed['zone'];
-    $recordName = $parsed['record_name'];
-
-    $recordsRes = dns_cli_call([
-        'action'  => 'records.list',
-        'account' => $account,
-        'zone'    => $zone,
-    ]);
-    if (!$recordsRes['ok']) {
-        return ['code' => -1, 'msg' => '读取解析记录失败: ' . $recordsRes['msg']];
+    $recordsBucket = dns_api_get_zone_records_cached($account, $zone, $zoneRecordsCache);
+    if (!$recordsBucket['ok']) {
+        return ['code' => -1, 'msg' => (string)($recordsBucket['msg'] ?? '读取解析记录失败')];
     }
 
-    $records = $recordsRes['data']['records'] ?? [];
+    $records = is_array($zoneRecordsCache[dns_api_zone_cache_key($account, $zone)]['records'] ?? null)
+        ? $zoneRecordsCache[dns_api_zone_cache_key($account, $zone)]['records']
+        : [];
     $match = null;
-    foreach ($records as $rec) {
+    $matchIndex = null;
+    foreach ($records as $index => $rec) {
         if (!is_array($rec)) {
             continue;
         }
@@ -305,6 +343,7 @@ function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl)
         $t = strtoupper((string)($rec['type'] ?? ''));
         if (strcasecmp($n, $recordName) === 0 && $t === $rtype) {
             $match = $rec;
+            $matchIndex = $index;
             break;
         }
     }
@@ -350,6 +389,13 @@ function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl)
         if (!$r['ok']) {
             return ['code' => -1, 'msg' => '更新失败: ' . $r['msg']];
         }
+
+        if ($matchIndex !== null) {
+            $records[$matchIndex]['value'] = $value;
+            $records[$matchIndex]['ttl'] = $useTtl;
+        }
+        $zoneRecordsCache[dns_api_zone_cache_key($account, $zone)]['records'] = $records;
+
         dns_log_write('app', 'info', 'DNS API upsert updated', ['domain' => $domain, 'type' => $rtype]);
         return [
             'code' => 0,
@@ -369,19 +415,42 @@ function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl)
             'ttl'   => $useTtl,
         ],
     ];
+    $proxied = null;
     if (dns_provider_supports_proxied((string)$account['provider']) && in_array($rtype, ['A', 'AAAA', 'CNAME'], true)) {
         $payload['record']['proxied'] = false;
+        $proxied = false;
     }
     $r = dns_cli_call($payload);
     if (!$r['ok']) {
         return ['code' => -1, 'msg' => '创建失败: ' . $r['msg']];
     }
+
+    $records[] = [
+        'id' => (string)($r['data']['id'] ?? ''),
+        'name' => $recordName,
+        'type' => $rtype,
+        'value' => $value,
+        'ttl' => $useTtl,
+        'proxied' => $proxied,
+    ];
+    $zoneRecordsCache[dns_api_zone_cache_key($account, $zone)]['records'] = $records;
+
     dns_log_write('app', 'info', 'DNS API upsert created', ['domain' => $domain, 'type' => $rtype]);
     return [
         'code' => 0,
         'msg'  => 'ok，已创建',
         'data' => ['action' => 'create', 'fqdn' => $domain, 'type' => $rtype],
     ];
+}
+
+/** @return array{code:int,msg:string,data?:array} */
+function dns_api_upsert(string $domain, string $value, ?string $type, ?int $ttl): array {
+    $parsed = dns_api_resolve_domain($domain);
+    if ($parsed === null) {
+        return ['code' => -1, 'msg' => '域名未匹配到任何已配置的 DNS 账号下的 Zone'];
+    }
+    $zoneRecordsCache = [];
+    return dns_api_upsert_resolved($domain, $value, $type, $ttl, $parsed, $zoneRecordsCache);
 }
 
 /**
@@ -482,6 +551,7 @@ function dns_api_batch_update(array $input): array {
 
     $results = [];
     $anyFail = false;
+    $zoneRecordsCache = [];
     foreach ($domains as $item) {
         if (is_string($item)) {
             $d = trim($item);
@@ -511,7 +581,13 @@ function dns_api_batch_update(array $input): array {
             continue;
         }
 
-        $r = dns_api_upsert($d, $v, ($t !== null && $t !== '') ? $t : null, $ttlOne);
+        $parsed = dns_api_resolve_domain($d);
+        if ($parsed === null) {
+            $results[] = ['domain' => $d, 'code' => -1, 'msg' => '域名未匹配到任何已配置的 DNS 账号下的 Zone'];
+            $anyFail = true;
+            continue;
+        }
+        $r = dns_api_upsert_resolved($d, $v, ($t !== null && $t !== '') ? $t : null, $ttlOne, $parsed, $zoneRecordsCache);
         $results[] = [
             'domain' => $d,
             'code'   => $r['code'],

@@ -6,7 +6,8 @@
 #   bash local/docker-build.sh
 #
 # 开发模式（dev）：使用 local/docker-compose.dev.yml 覆盖
-#   bash local/docker-build.sh dev                 # 等同 up -d --build（开发模式）
+#   bash local/docker-build.sh dev                 # 检查镜像+容器+开发模式；匹配则 restart，否则删除并重建
+#   bash local/docker-build.sh dev rebuild         # build + up -d --force-recreate（开发模式，使用缓存）
 #   bash local/docker-build.sh dev start           # 等同 up -d（开发模式，不构建）
 #   bash local/docker-build.sh dev restart         # restart（开发模式）
 #   bash local/docker-build.sh dev <args...>       # 透传 docker compose 子命令
@@ -38,6 +39,8 @@ docker compose version >/dev/null 2>&1 && COMPOSE_CMD="docker compose"
 
 BASE_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml")
 DEV_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.dev.yml")
+DEV_IMAGE_NAME="codingriver/simple-homepage:latest"
+DEV_CONTAINER_NAME="${CONTAINER_NAME:-simple-homepage}"
 
 has_var() {
   local name="$1"
@@ -102,6 +105,26 @@ run_compose() {
   fi
 }
 
+docker_image_exists() {
+  docker image inspect "$1" >/dev/null 2>&1
+}
+
+docker_container_exists() {
+  docker container inspect "$1" >/dev/null 2>&1
+}
+
+docker_container_is_dev_mode() {
+  local name="$1"
+  local env_lines mount_lines
+
+  env_lines="$(docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || true)"
+  mount_lines="$(docker container inspect --format '{{range .Mounts}}{{println .Source "|" .Destination}}{{end}}' "$name" 2>/dev/null || true)"
+
+  grep -Fqx "NAV_DEV_MODE=1" <<<"$env_lines" &&
+    grep -Fqx "$PROJECT_DIR|/var/www/nav" <<<"$mount_lines" &&
+    grep -Fqx "$SCRIPT_DIR/php-dev.ini|/usr/local/etc/php/conf.d/98-nav-dev.ini" <<<"$mount_lines"
+}
+
 print_help() {
   cat <<'EOF'
 用法总览：
@@ -119,9 +142,14 @@ print_help() {
     - 正式模式透传：将参数原样传给 docker compose（带 -f local/docker-compose.yml）
 
   bash local/docker-build.sh dev
-    - 开发模式：up -d --build（带 dev 覆盖 compose）
+    - 开发模式：检查镜像+容器+开发模式；匹配则 restart，否则删除不匹配容器并 up -d --build
+    - 缓存策略：需要构建时，使用 Docker 默认构建缓存（未加 --no-cache）
+    - 覆盖行为：缺少镜像/容器或容器不是开发模式时会重建；仅完全匹配时只重启当前容器
+
+  bash local/docker-build.sh dev rebuild
+    - 开发模式强制重建：先 build，再 up -d --force-recreate
     - 缓存策略：使用 Docker 默认构建缓存（未加 --no-cache）
-    - 覆盖行为：会更新同名镜像标签，并按 dev 配置重建/替换同名容器
+    - 覆盖行为：会重新生成同名镜像，并按 dev 配置强制重建/创建同名容器
 
   bash local/docker-build.sh dev start
     - 开发模式快速启动：仅 up -d（不执行 build）
@@ -148,6 +176,7 @@ print_help() {
   bash local/docker-build.sh ps
   bash local/docker-build.sh logs -f
   bash local/docker-build.sh dev
+  bash local/docker-build.sh dev rebuild
   bash local/docker-build.sh dev start
   bash local/docker-build.sh dev restart
   bash local/docker-build.sh dev down
@@ -163,7 +192,8 @@ fi
 
 # -----------------------------
 # 开发模式：
-#   - dev           => up -d --build
+#   - dev           => 检查镜像+容器+开发模式；匹配则 restart，否则删除并重建
+#   - dev rebuild   => build + up -d --force-recreate
 #   - dev start     => up -d
 #   - dev restart   => restart
 #   - 其他参数       => 透传
@@ -173,14 +203,32 @@ if [ "${1:-}" = "dev" ]; then
 
   # 无子命令：默认构建并启动
   if [ $# -eq 0 ]; then
-    echo "[INFO] Dev mode compose: up -d --build"
-    run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
+    if docker_image_exists "$DEV_IMAGE_NAME" && docker_container_exists "$DEV_CONTAINER_NAME"; then
+      if docker_container_is_dev_mode "$DEV_CONTAINER_NAME"; then
+        echo "[INFO] Dev mode: image '$DEV_IMAGE_NAME' and dev container '$DEV_CONTAINER_NAME' found, restarting"
+        run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" restart
+      else
+        echo "[INFO] Dev mode: container '$DEV_CONTAINER_NAME' exists but is not a dev container, removing and rebuilding"
+        docker rm -f "$DEV_CONTAINER_NAME"
+        run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
+      fi
+    else
+      echo "[INFO] Dev mode: image '$DEV_IMAGE_NAME' or container '$DEV_CONTAINER_NAME' missing, building and creating"
+      run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --build
+    fi
     exit 0
   fi
 
   DEV_SUBCMD="${1:-}"
 
   case "$DEV_SUBCMD" in
+    rebuild)
+      shift || true
+      echo "[INFO] Dev mode compose: build"
+      run_compose_build_env $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" build "$@"
+      echo "[INFO] Dev mode compose: up -d --force-recreate"
+      run_compose $COMPOSE_CMD "${DEV_COMPOSE_ARGS[@]}" up -d --force-recreate
+      ;;
     start)
       shift || true
       echo "[INFO] Dev mode compose: up -d $*"

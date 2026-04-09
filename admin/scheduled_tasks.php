@@ -20,8 +20,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name  = trim((string)($_POST['name']     ?? ''));
         $sched = trim((string)($_POST['schedule'] ?? ''));
         $cmd   = (string)($_POST['command']       ?? '');
-        $mode  = task_normalize_workdir_mode($_POST['working_dir_mode'] ?? null);
-        $wdir  = trim((string)($_POST['working_dir'] ?? ''));
         $en    = !empty($_POST['enabled']);
         if ($id === '') $id = 't_' . bin2hex(random_bytes(8));
         if (!preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
@@ -40,35 +38,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', 'Cron 表达式无效（需至少 5 个时间字段）');
             header('Location: scheduled_tasks.php'); exit;
         }
-        if ($mode === 'custom') {
-            if ($wdir === '') {
-                flash_set('error', '自定义工作目录不能为空');
-                header('Location: scheduled_tasks.php'); exit;
-            }
-            if (!str_starts_with($wdir, '/')) {
-                flash_set('error', '自定义工作目录必须为绝对路径');
-                header('Location: scheduled_tasks.php'); exit;
-            }
-        } else {
-            $wdir = '';
-        }
         $found = false;
         foreach ($data['tasks'] as &$t) {
             if (($t['id'] ?? '') === $id) {
                 $t['name'] = $name; $t['enabled'] = $en;
                 $t['schedule'] = $sched; $t['command'] = $cmd;
-                $t['working_dir_mode'] = $mode;
-                $t['working_dir'] = $wdir;
+                unset($t['working_dir_mode'], $t['working_dir']);
                 $found = true; break;
             }
         }
         unset($t);
         if (!$found) {
             $data['tasks'][] = ['id' => $id, 'name' => $name,
-                'enabled' => $en, 'schedule' => $sched, 'command' => $cmd,
-                'working_dir_mode' => $mode, 'working_dir' => $wdir];
+                'enabled' => $en, 'schedule' => $sched, 'command' => $cmd];
         }
-        task_ensure_workdir(['id' => $id, 'working_dir_mode' => $mode, 'working_dir' => $wdir]);
+        task_ensure_workdir(['id' => $id]);
         save_scheduled_tasks($data);
         $r = cron_regenerate();
         flash_set($r['ok'] ? 'success' : 'error',
@@ -106,6 +90,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* ------ 立即执行 ------ */
     if ($action === 'task_run') {
         $id = trim((string)($_POST['id'] ?? ''));
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        @set_time_limit(0);
         if (cron_is_ddns_dispatcher_id($id)) {
             $ex = cron_execute_task($id);
             flash_set($ex['ok'] ? 'success' : 'warn', $ex['ok'] ? 'DDNS 分组执行完成' : ('DDNS 分组执行有失败，退出码 ' . $ex['code']));
@@ -138,6 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /* ------ 重新安装 crontab ------ */
     if ($action === 'cron_reload') {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         $r = cron_regenerate();
         flash_set($r['ok'] ? 'success' : 'error',
             $r['ok'] ? '已重新安装 crontab' : $r['msg']);
@@ -158,11 +149,7 @@ foreach ($tasks as &$_t) {
         ? (cron_next_run($_t['schedule']) ?: '-')
         : '-';
     $_t['_workdir'] = task_resolve_workdir($_t);
-    $_t['_workdir_mode_label'] = match(task_normalize_workdir_mode($_t['working_dir_mode'] ?? null)) {
-        'task' => '任务目录',
-        'custom' => '自定义目录',
-        default => '项目目录',
-    };
+    $_t['_workdir_mode_label'] = '任务目录';
 }
 unset($_t);
 $default_task_command = <<<'BASH'
@@ -352,7 +339,7 @@ $CSRF = csrf_field();
         <!-- 删除 -->
         <?php if (empty($t['_is_system'])): ?>
         <form method="POST" style="display:inline"
-          onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode(task_normalize_workdir_mode($t['working_dir_mode'] ?? null), JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+          onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_delete">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
@@ -416,26 +403,10 @@ $CSRF = csrf_field();
               style="font-family:var(--mono)">
             <span class="form-hint" id="fm-next-tip" style="color:var(--ac);font-family:var(--mono)"></span>
           </div>
-          <!-- 工作目录模式 -->
-          <div class="form-group">
-            <label>工作目录模式</label>
-            <select name="working_dir_mode" id="fm-working-dir-mode" onchange="toggleWorkdirInputs()">
-              <option value="project">项目目录（/var/www/nav）</option>
-              <option value="task">任务目录（自动分配）</option>
-              <option value="custom">自定义目录</option>
-            </select>
-            <span class="form-hint">任务目录会自动分配到 data/tasks/&lt;任务ID&gt;，删除任务时会一起清理。</span>
-          </div>
-          <!-- 自定义工作目录 -->
-          <div class="form-group" id="fm-working-dir-wrap" style="display:none">
-            <label>自定义工作目录</label>
-            <input type="text" name="working_dir" id="fm-working-dir" placeholder="/tmp/my-job" oninput="updateWorkdirPreview()">
-            <span class="form-hint">仅在“自定义目录”模式下生效，必须是绝对路径。</span>
-          </div>
           <div class="form-group" style="grid-column:1/-1">
             <label>最终工作目录</label>
             <div id="fm-workdir-preview" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-            <span class="form-hint">任务目录模式会自动使用 data/tasks/&lt;任务ID&gt;；删除该任务时会连同目录一起清理。</span>
+            <span class="form-hint">所有任务固定使用 data/tasks/&lt;任务ID&gt;；目录不存在会自动创建，删除任务时会连同目录一起清理。</span>
           </div>
           <!-- 启用 -->
           <div class="form-group" style="justify-content:flex-end;padding-bottom:4px">
@@ -524,10 +495,7 @@ function openTaskModal(task) {
   document.getElementById('fm-name').value     = isNew ? ''   : (task.name     || '');
   document.getElementById('fm-schedule').value = isNew ? '*/5 * * * *' : (task.schedule || '');
   document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
-  document.getElementById('fm-working-dir-mode').value = isNew ? 'task' : (task.working_dir_mode || 'task');
-  document.getElementById('fm-working-dir').value = isNew ? '' : (task.working_dir || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
-  toggleWorkdirInputs();
   updateWorkdirPreview();
   updateNextTip();
   m.style.display = 'flex';
@@ -536,28 +504,11 @@ function openTaskModal(task) {
 function closeTaskModal() {
   document.getElementById('task-modal').style.display = 'none';
 }
-function toggleWorkdirInputs() {
-  var mode = document.getElementById('fm-working-dir-mode').value;
-  var wrap = document.getElementById('fm-working-dir-wrap');
-  if (!wrap) return;
-  wrap.style.display = mode === 'custom' ? '' : 'none';
-  updateWorkdirPreview();
-}
 function updateWorkdirPreview() {
-  var mode = document.getElementById('fm-working-dir-mode').value;
   var id = (document.getElementById('fm-id').value || '').trim();
-  var custom = (document.getElementById('fm-working-dir').value || '').trim();
   var preview = document.getElementById('fm-workdir-preview');
   if (!preview) return;
-  if (mode === 'project') {
-    preview.textContent = '/var/www/nav';
-    return;
-  }
-  if (mode === 'task') {
-    preview.textContent = '/var/www/nav/data/tasks/' + (id || '<保存后自动生成任务ID>');
-    return;
-  }
-  preview.textContent = custom || '<请输入绝对路径>';
+  preview.textContent = '/var/www/nav/data/tasks/' + (id || '<保存后自动生成任务ID>');
 }
 
 /* 实时预览下次运行时间（简单客户端提示，5段基本格式）*/
@@ -579,10 +530,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var inp = document.getElementById('fm-schedule');
   if (inp) inp.addEventListener('input', updateNextTip);
   var idInp = document.getElementById('fm-id');
-  var customInp = document.getElementById('fm-working-dir');
   if (idInp) idInp.addEventListener('input', updateWorkdirPreview);
-  if (customInp) customInp.addEventListener('input', updateWorkdirPreview);
-  toggleWorkdirInputs();
   // 按 ESC 关闭弹窗
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape') { closeTaskModal(); closeLogModal(); }
@@ -615,15 +563,8 @@ function clearCurrentLog() {
   document.body.appendChild(form);
   form.submit();
 }
-function confirmDeleteTask(name, mode) {
-  var lines = ['确定删除任务「' + name + '」？', '', '• 会删除该任务对应的日志'];
-  if (mode === 'task') {
-    lines.push('• 会删除该任务的独立工作目录');
-  } else if (mode === 'custom') {
-    lines.push('• 不会删除自定义工作目录');
-  } else {
-    lines.push('• 不会删除项目目录');
-  }
+function confirmDeleteTask(name) {
+  var lines = ['确定删除任务「' + name + '」？', '', '• 会删除该任务对应的日志', '• 会删除该任务的独立工作目录'];
   lines.push('', '此操作不可恢复。');
   return confirm(lines.join('\n'));
 }

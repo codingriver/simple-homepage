@@ -33,6 +33,9 @@ function dns_json_response(array $payload, int $status = 200): void {
     exit;
 }
 
+define('DNS_BATCH_DELETE_CHUNK_SIZE', 20);
+define('DNS_IMPORT_CHUNK_SIZE', 20);
+
 function dns_pick_working_account(array $cfg, array $accounts, string $preferredAccountId = ''): ?array {
     $ordered = [];
     $seen = [];
@@ -199,6 +202,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', '账号不存在');
             dns_redirect_to();
         }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        @set_time_limit(0);
 
         $result = dns_cli_call(['action' => 'account.verify', 'account' => $account]);
         if (!$result['ok']) {
@@ -242,21 +249,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $accountId = trim((string)($_POST['account_id'] ?? ''));
         $zoneId    = trim((string)($_POST['zone_id'] ?? ''));
         $zoneName  = trim((string)($_POST['zone_name'] ?? ''));
+        $isAjax    = dns_is_ajax_request();
         $account   = dns_find_account($cfg, $accountId);
         if (!$account || $zoneId === '') {
+            if ($isAjax) {
+                dns_json_response(['ok' => false, 'msg' => '请先选择账号与域名'], 400);
+            }
             flash_set('error', '请先选择账号与域名');
             dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
         }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        @set_time_limit(0);
         $raw = trim((string)($_POST['import_json'] ?? ''));
         $rows = json_decode($raw, true);
         if (!is_array($rows)) {
+            if ($isAjax) {
+                dns_json_response(['ok' => false, 'msg' => 'JSON 格式错误，请检查导入内容'], 400);
+            }
             flash_set('error', 'JSON 格式错误，请检查导入内容');
             dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
         }
         $zone = ['id' => $zoneId, 'name' => $zoneName];
         $ok = 0; $fail = 0;
+        $failedRows = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) { $fail++; continue; }
+            if (!is_array($row)) {
+                $fail++;
+                $failedRows[] = ['name' => '', 'msg' => '条目格式错误'];
+                continue;
+            }
             $rec = [
                 'name'  => trim((string)($row['name']  ?? '@')) ?: '@',
                 'type'  => strtoupper(trim((string)($row['type'] ?? 'A'))),
@@ -273,7 +296,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rec['value']  = $rec['target'];
             }
             $r = dns_cli_call(['action' => 'record.create', 'account' => $account, 'zone' => $zone, 'record' => $rec]);
-            $r['ok'] ? $ok++ : $fail++;
+            if ($r['ok']) {
+                $ok++;
+            } else {
+                $fail++;
+                $failedRows[] = [
+                    'name' => (string)($rec['name'] ?? ''),
+                    'type' => (string)($rec['type'] ?? ''),
+                    'msg'  => (string)($r['msg'] ?? '导入失败'),
+                ];
+            }
+        }
+        if ($isAjax) {
+            dns_json_response([
+                'ok' => true,
+                'msg' => "导入完成：成功 {$ok} 条，失败 {$fail} 条",
+                'data' => [
+                    'success_count' => $ok,
+                    'failed_count' => $fail,
+                    'failed' => $failedRows,
+                ],
+            ]);
         }
         flash_set($fail > 0 ? 'warn' : 'success', "导入完成：成功 {$ok} 条，失败 {$fail} 条");
         dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
@@ -309,11 +352,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         save_dns_config($cfg);
 
         if ($action === 'record_batch_delete') {
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
+            $isAjax = dns_is_ajax_request();
             $recordIds = array_values(array_filter(array_map(
                 fn($v) => trim((string)$v),
                 is_array($_POST['record_ids'] ?? null) ? $_POST['record_ids'] : []
             )));
             if (empty($recordIds)) {
+                if ($isAjax) {
+                    dns_json_response(['ok' => false, 'msg' => '请先选择要删除的记录'], 400);
+                }
                 flash_set('error', '请先选择要删除的记录');
                 dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
             }
@@ -322,8 +373,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $data = $result['data'] ?? [];
                 $sc = (int)($data['success_count'] ?? count($recordIds));
                 $fc = count($data['failed'] ?? []);
+                if ($isAjax) {
+                    dns_json_response([
+                        'ok' => true,
+                        'msg' => "批量删除完成：成功 {$sc}，失败 {$fc}",
+                        'data' => [
+                            'success_count' => $sc,
+                            'failed_count' => $fc,
+                            'failed' => array_values($data['failed'] ?? []),
+                        ],
+                    ]);
+                }
                 flash_set($fc > 0 ? 'warn' : 'success', "批量删除完成：成功 {$sc}，失败 {$fc}");
             } else {
+                if ($isAjax) {
+                    dns_json_response(['ok' => false, 'msg' => $result['msg']], 502);
+                }
                 flash_set('error', $result['msg']);
             }
             dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
@@ -759,7 +824,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
   </div>
   <?php else: ?>
 
-  <form method="POST" id="batch-delete-form" onsubmit="return confirm('确认删除选中的 ' + getCheckedCount() + ' 条记录吗？')">
+  <form method="POST" id="batch-delete-form">
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="record_batch_delete">
     <input type="hidden" name="account_id" value="<?= htmlspecialchars($selectedAccountId) ?>">
@@ -827,8 +892,9 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
   </div>
   <div class="dns-batchbar">
     <div style="display:flex;align-items:center;gap:10px">
-      <button type="submit" form="batch-delete-form" class="btn btn-danger btn-sm">删除选中</button>
+      <button type="submit" form="batch-delete-form" class="btn btn-danger btn-sm" id="batch-delete-btn">删除选中</button>
       <span id="checked-count" style="font-size:12px;color:var(--tm)">已选 0 条</span>
+      <span id="batch-delete-status" style="font-size:12px;color:var(--tm)"></span>
     </div>
     <span style="font-size:12px;color:var(--tm)">显示 <?= count($filteredRecords) ?> / <?= count($records) ?> 条</span>
   </div>
@@ -1111,7 +1177,7 @@ log "=== DDNS 结束 ==="</pre>
       <button class="dns-modal-close" onclick="closeModal('import-modal')">×</button>
     </div>
     <div class="dns-modal-body">
-      <form method="POST">
+      <form method="POST" id="dns-import-form">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="records_import">
         <input type="hidden" name="account_id" value="<?= htmlspecialchars($selectedAccountId) ?>">
@@ -1119,11 +1185,12 @@ log "=== DDNS 结束 ==="</pre>
         <input type="hidden" name="zone_name" value="<?= htmlspecialchars($selectedZoneName) ?>">
         <div class="form-group">
           <label>JSON 数据</label>
-          <textarea name="import_json" rows="12" style="font-family:var(--mono);font-size:12px" placeholder='[&#10;  {"name":"@","type":"A","value":"1.2.3.4","ttl":600},&#10;  {"name":"www","type":"CNAME","value":"example.com","ttl":600}&#10;]'></textarea>
+          <textarea name="import_json" id="dns-import-json" rows="12" style="font-family:var(--mono);font-size:12px" placeholder='[&#10;  {"name":"@","type":"A","value":"1.2.3.4","ttl":600},&#10;  {"name":"www","type":"CNAME","value":"example.com","ttl":600}&#10;]'></textarea>
         </div>
         <div class="dns-tip">每条记录须含 <code>name</code>、<code>type</code>、<code>value</code>。MX/SRV 可附加 <code>priority</code>。</div>
+        <div id="dns-import-status" class="dns-tip" style="display:none;margin-top:10px"></div>
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary">开始导入</button>
+          <button type="submit" class="btn btn-primary" id="dns-import-submit">开始导入</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal('import-modal')">取消</button>
         </div>
       </form>
@@ -1138,6 +1205,8 @@ var DNS_RECORDS  = <?= json_encode($records, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG
 var DNS_PROVIDER = <?= json_encode($selectedAccount ? ($selectedAccount['provider']??'') : '', JSON_HEX_TAG) ?>;
 var DNS_HYDRATE = <?= $dnsHydrate ? 'true' : 'false' ?>;
 var DNS_SELECTED_ACCOUNT = <?= json_encode($selectedAccountId, JSON_HEX_TAG) ?>;
+var DNS_BATCH_DELETE_CHUNK_SIZE = <?= (int)DNS_BATCH_DELETE_CHUNK_SIZE ?>;
+var DNS_IMPORT_CHUNK_SIZE = <?= (int)DNS_IMPORT_CHUNK_SIZE ?>;
 /** 最近一次服务端渲染的解析列表区 HTML，用于域名切换失败或中断时恢复（避免连续切换时误把「加载中」当快照） */
 var dnsPanelHtmlSnapshot = '';
 var dnsRecordCountSnapshot = '';
@@ -1529,9 +1598,184 @@ document.querySelectorAll('.rec-chk').forEach(function(c) {
 function getCheckedCount() {
   return document.querySelectorAll('.rec-chk:checked').length;
 }
+function getCheckedRecordIds() {
+  return Array.from(document.querySelectorAll('.rec-chk:checked')).map(function(input) {
+    return (input && input.value) ? String(input.value).trim() : '';
+  }).filter(function(value) {
+    return value !== '';
+  });
+}
 function updateCheckedCount() {
   var el = document.getElementById('checked-count');
   if (el) el.textContent = '已选 ' + getCheckedCount() + ' 条';
+}
+
+var dnsImportForm = document.getElementById('dns-import-form');
+if (dnsImportForm) {
+  dnsImportForm.addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    var textarea = document.getElementById('dns-import-json');
+    var submitBtn = document.getElementById('dns-import-submit');
+    var statusEl = document.getElementById('dns-import-status');
+    var originalText = submitBtn ? submitBtn.textContent : '开始导入';
+    var raw = textarea ? String(textarea.value || '').trim() : '';
+    if (!raw) {
+      showToast('请输入导入 JSON', 'error');
+      return;
+    }
+
+    var rows;
+    try {
+      rows = JSON.parse(raw);
+    } catch (error) {
+      showToast('JSON 格式错误，请检查导入内容', 'error');
+      return;
+    }
+    if (!Array.isArray(rows) || !rows.length) {
+      showToast('导入数据必须是非空数组', 'error');
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '导入中...';
+    }
+    if (statusEl) {
+      statusEl.style.display = '';
+      statusEl.textContent = '准备导入 ' + rows.length + ' 条记录...';
+    }
+
+    var successCount = 0;
+    var failed = [];
+    try {
+      for (var start = 0; start < rows.length; start += DNS_IMPORT_CHUNK_SIZE) {
+        var chunk = rows.slice(start, start + DNS_IMPORT_CHUNK_SIZE);
+        if (statusEl) {
+          statusEl.textContent = '正在导入 ' + Math.min(start + 1, rows.length) + '-' + Math.min(start + chunk.length, rows.length) + ' / ' + rows.length;
+        }
+        var formData = new FormData(dnsImportForm);
+        formData.set('import_json', JSON.stringify(chunk));
+        var response = await fetch('dns.php', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          credentials: 'same-origin',
+          body: formData,
+        });
+        var result = await response.json().catch(function() {
+          return null;
+        });
+        if (!response.ok || !result || !result.ok) {
+          throw new Error((result && result.msg) ? result.msg : ('导入失败（HTTP ' + response.status + '）'));
+        }
+        var data = result.data || {};
+        successCount += Number(data.success_count || 0);
+        failed = failed.concat(Array.isArray(data.failed) ? data.failed : []);
+      }
+
+      var failedCount = failed.length;
+      showToast('导入完成：成功 ' + successCount + ' 条，失败 ' + failedCount + ' 条', failedCount > 0 ? 'warning' : 'success');
+      var next = new URL(window.location.href);
+      next.searchParams.set('hydrate', '1');
+      next.searchParams.set('account', <?= json_encode($selectedAccountId, JSON_HEX_TAG) ?>);
+      next.searchParams.set('zone', <?= json_encode($selectedZoneId, JSON_HEX_TAG) ?>);
+      next.searchParams.set('zone_name', <?= json_encode($selectedZoneName, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?>);
+      window.location.replace(next.toString());
+    } catch (error) {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText || '开始导入';
+      }
+      if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.style.display = 'none';
+      }
+      showToast((error && error.message) ? error.message : '导入失败，请稍后重试', 'error');
+    }
+  });
+}
+
+var batchDeleteForm = document.getElementById('batch-delete-form');
+if (batchDeleteForm) {
+  batchDeleteForm.addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    var recordIds = getCheckedRecordIds();
+    if (!recordIds.length) {
+      showToast('请先选择要删除的记录', 'error');
+      return;
+    }
+    if (!window.confirm('确认删除选中的 ' + recordIds.length + ' 条记录吗？')) {
+      return;
+    }
+
+    var submitBtn = document.getElementById('batch-delete-btn');
+    var statusEl = document.getElementById('batch-delete-status');
+    var originalText = submitBtn ? submitBtn.textContent : '删除选中';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '删除中...';
+    }
+    if (chkAll) chkAll.disabled = true;
+    document.querySelectorAll('.rec-chk').forEach(function(input) {
+      input.disabled = true;
+    });
+
+    var successCount = 0;
+    var failed = [];
+    try {
+      for (var start = 0; start < recordIds.length; start += DNS_BATCH_DELETE_CHUNK_SIZE) {
+        var chunk = recordIds.slice(start, start + DNS_BATCH_DELETE_CHUNK_SIZE);
+        if (statusEl) {
+          statusEl.textContent = '正在删除 ' + Math.min(start + 1, recordIds.length) + '-' + Math.min(start + chunk.length, recordIds.length) + ' / ' + recordIds.length;
+        }
+        var formData = new FormData(batchDeleteForm);
+        formData.delete('record_ids[]');
+        chunk.forEach(function(id) {
+          formData.append('record_ids[]', id);
+        });
+
+        var response = await fetch('dns.php', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          credentials: 'same-origin',
+          body: formData,
+        });
+        var result = await response.json().catch(function() {
+          return null;
+        });
+        if (!response.ok || !result || !result.ok) {
+          throw new Error((result && result.msg) ? result.msg : ('批量删除失败（HTTP ' + response.status + '）'));
+        }
+        var data = result.data || {};
+        successCount += Number(data.success_count || 0);
+        failed = failed.concat(Array.isArray(data.failed) ? data.failed : []);
+      }
+
+      var failedCount = failed.length;
+      showToast('批量删除完成：成功 ' + successCount + '，失败 ' + failedCount, failedCount > 0 ? 'warning' : 'success');
+      var next = new URL(window.location.href);
+      next.searchParams.set('hydrate', '1');
+      next.searchParams.set('account', <?= json_encode($selectedAccountId, JSON_HEX_TAG) ?>);
+      next.searchParams.set('zone', <?= json_encode($selectedZoneId, JSON_HEX_TAG) ?>);
+      next.searchParams.set('zone_name', <?= json_encode($selectedZoneName, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?>);
+      window.location.replace(next.toString());
+    } catch (error) {
+      if (statusEl) {
+        statusEl.textContent = '';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText || '删除选中';
+      }
+      if (chkAll) chkAll.disabled = false;
+      document.querySelectorAll('.rec-chk').forEach(function(input) {
+        input.disabled = false;
+      });
+      showToast((error && error.message) ? error.message : '批量删除失败，请稍后重试', 'error');
+      updateCheckedCount();
+    }
+  });
 }
 
 // 批量导出

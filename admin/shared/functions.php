@@ -523,6 +523,84 @@ function health_check_url(string $url): array {
     return ['status' => $status, 'code' => $code, 'ms' => $ms];
 }
 
+function health_build_curl_handle(string $url) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_NOBODY => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 3,
+        CURLOPT_TIMEOUT => HEALTH_TIMEOUT,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_USERAGENT => 'NavPortal-HealthCheck/1.0',
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+    ]);
+    return $ch;
+}
+
+/**
+ * 并行检测多个 URL；无 curl_multi 时回退为串行。
+ * @param list<string> $urls
+ * @return array<string, array{status:string,code:int,ms:int}>
+ */
+function health_check_many(array $urls): array {
+    $targets = array_values(array_filter(array_unique(array_map(
+        static fn($url) => trim((string)$url),
+        $urls
+    )), static fn($url) => $url !== '' && filter_var($url, FILTER_VALIDATE_URL)));
+    if ($targets === []) {
+        return [];
+    }
+
+    if (!function_exists('curl_multi_init') || !function_exists('curl_init')) {
+        $result = [];
+        foreach ($targets as $url) {
+            $result[$url] = health_check_url($url);
+        }
+        return $result;
+    }
+
+    $mh = curl_multi_init();
+    $handles = [];
+    foreach ($targets as $url) {
+        $ch = health_build_curl_handle($url);
+        $handles[$url] = $ch;
+        curl_multi_add_handle($mh, $ch);
+    }
+
+    $running = null;
+    do {
+        $status = curl_multi_exec($mh, $running);
+        if ($status > CURLM_OK) {
+            break;
+        }
+        if ($running > 0) {
+            $selected = curl_multi_select($mh, 1.0);
+            if ($selected === -1) {
+                usleep(100000);
+            }
+        }
+    } while ($running > 0);
+
+    $result = [];
+    foreach ($handles as $url => $ch) {
+        $code = 0;
+        $status = 'down';
+        if (curl_errno($ch) === 0) {
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $status = ($code >= 200 && $code < 500) ? 'up' : 'down';
+        }
+        $ms = (int) round(((float) curl_getinfo($ch, CURLINFO_TOTAL_TIME)) * 1000);
+        $result[$url] = ['status' => $status, 'code' => $code, 'ms' => $ms];
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+    }
+    curl_multi_close($mh);
+
+    return $result;
+}
+
 /**
  * 检测所有站点并更新缓存
  * 仅检测 external / internal 类型有 url 字段的站点，以及 proxy 类型的 proxy_target
@@ -532,6 +610,7 @@ function health_check_all(): array {
     $sites_data = load_sites();
     $cache      = health_load_cache();
     $now        = time();
+    $urls       = [];
 
     foreach ($sites_data['groups'] as $grp) {
         foreach ($grp['sites'] ?? [] as $s) {
@@ -542,11 +621,13 @@ function health_check_all(): array {
                 $url = $s['url'] ?? '';
             }
             if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) continue;
+            $urls[] = $url;
+        }
+    }
 
-            $result = health_check_url($url);
+    foreach (health_check_many($urls) as $url => $result) {
             $result['checked_at'] = $now;
             $cache[$url] = $result;
-        }
     }
 
     health_save_cache($cache);

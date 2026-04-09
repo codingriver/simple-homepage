@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
-test('scheduled tasks support workdir modes log pagination and copy directory interactions', async ({ page }) => {
+test('scheduled tasks use fixed workdir with log pagination and copy directory interactions', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
@@ -15,7 +15,8 @@ test('scheduled tasks support workdir modes log pagination and copy directory in
   await page.goto('/admin/scheduled_tasks.php');
   await page.getByRole('button', { name: /新建任务/ }).click();
 
-  await expect(page.locator('#fm-working-dir-mode')).toHaveValue('task');
+  await expect(page.locator('#fm-working-dir-mode')).toHaveCount(0);
+  await expect(page.locator('#fm-working-dir')).toHaveCount(0);
   await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
   await page.locator('#fm-name').fill('模式任务');
   await page.locator('#fm-schedule').fill('*/10 * * * *');
@@ -67,11 +68,7 @@ test('scheduled tasks support workdir modes log pagination and copy directory in
   await expect(page.locator('#log-modal')).toBeHidden();
 
   await page.getByRole('button', { name: /新建任务/ }).click();
-  await page.locator('#fm-name').fill('自定义目录任务');
-  await page.locator('#fm-schedule').fill('*/20 * * * *');
-  await page.locator('#fm-working-dir-mode').selectOption('custom');
-  await page.locator('#fm-working-dir').fill('/tmp/nav-custom-task');
-  await expect(page.locator('#fm-workdir-preview')).toContainText('/tmp/nav-custom-task');
+  await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
   await page.getByRole('button', { name: /取消/ }).click();
   await expect(page.locator('#task-modal')).toBeHidden();
 

@@ -295,14 +295,15 @@ test('dns batch delete removes multiple selected records', async ({ page }) => {
 
   await rowA.locator('input.rec-chk').check();
   await rowB.locator('input.rec-chk').check();
-  const deleteNavigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
+  const deleteReload = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.evaluate(() => {
     window.confirm = () => true;
     const form = document.getElementById('batch-delete-form') as HTMLFormElement | null;
     if (!form) throw new Error('batch-delete-form not found');
     form.requestSubmit();
   });
-  await deleteNavigation;
+  await deleteReload;
+  await expect(page.locator('body')).toContainText(/批量删除完成：成功 2，失败 0/);
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordA}"))`)).toHaveCount(0);
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordB}"))`)).toHaveCount(0);
 

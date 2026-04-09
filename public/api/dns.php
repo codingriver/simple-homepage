@@ -44,6 +44,7 @@ try {
         exit;
     }
     if ($action === 'batch_update') {
+        @set_time_limit(0);
         $out = dns_api_batch_update($input);
         http_response_code(200);
         echo json_encode($out, JSON_UNESCAPED_UNICODE);

@@ -27,27 +27,24 @@ function task_default_workdir(string $id): string {
 }
 
 function task_normalize_workdir_mode(?string $mode, string $default = 'task'): string {
-    $mode = trim((string)$mode);
-    return in_array($mode, ['project', 'task', 'custom'], true) ? $mode : $default;
+    return 'task';
 }
 
 function task_resolve_workdir(array $task): string {
     $id   = (string)($task['id'] ?? '');
-    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
-    $custom = trim((string)($task['working_dir'] ?? ''));
-    if ($mode === 'task') {
-        return task_default_workdir($id);
+    return task_default_workdir($id);
+}
+
+function task_ensure_workdir_root(): void {
+    if (!is_dir(TASKS_WORKDIR_ROOT)) {
+        @mkdir(TASKS_WORKDIR_ROOT, 0755, true);
     }
-    if ($mode === 'custom' && $custom !== '') {
-        return $custom;
-    }
-    return '/var/www/nav';
 }
 
 function task_ensure_workdir(array $task): void {
+    task_ensure_workdir_root();
     $dir = task_resolve_workdir($task);
-    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
-    if (($mode === 'task' || $mode === 'custom') && $dir !== '' && !is_dir($dir)) {
+    if ($dir !== '' && !is_dir($dir)) {
         @mkdir($dir, 0755, true);
     }
 }
@@ -84,10 +81,6 @@ function task_clear_log(string $id): void {
 function task_cleanup_on_delete(array $task): void {
     $id = (string)($task['id'] ?? '');
     task_clear_log($id);
-    $mode = task_normalize_workdir_mode($task['working_dir_mode'] ?? null);
-    if ($mode !== 'task') {
-        return;
-    }
     $dir = task_resolve_workdir($task);
     $root = realpath(TASKS_WORKDIR_ROOT);
     $real = realpath($dir);
@@ -226,8 +219,6 @@ function cron_sync_ddns_dispatcher_task(): array {
             'enabled' => true,
             'schedule' => $cron,
             'command' => cron_ddns_dispatcher_command(),
-            'working_dir_mode' => 'project',
-            'working_dir' => '',
             'is_system' => true,
             'description' => '由 DDNS 页面自动维护，用于调度相同 cron 的 DDNS 任务',
             'meta' => [

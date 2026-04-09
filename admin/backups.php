@@ -32,6 +32,10 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
 
         if ($action === 'create') {
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
             backup_create('manual');
             flash_set('success', '备份已创建');
             header('Location: backups.php'); exit;
@@ -39,6 +43,10 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'restore') {
             $file = basename($_POST['filename'] ?? '');
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
             if (backup_restore($file)) {
                 flash_set('success', "已恢复备份：{$file}，恢复前的状态已自动备份");
             } else {

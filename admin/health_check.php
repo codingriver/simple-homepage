@@ -27,6 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'check_all') {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        @set_time_limit(0);
         $result = health_check_all();
         echo json_encode(['ok' => true, 'data' => $result, 'checked' => count($result)]); exit;
     }
@@ -41,6 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $url = trim($_POST['url'] ?? '');
         if (!$url) { echo json_encode(['ok' => false, 'msg' => '缺少 url']); exit; }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         $status = health_check_url($url);
         echo json_encode(['ok' => true, 'status' => $status]); exit;
     }

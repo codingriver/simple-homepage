@@ -105,6 +105,7 @@ if ($action === 'toggle') {
 }
 
 if ($action === 'test_source') {
+    @set_time_limit(0);
     $task = is_array($input['task'] ?? null) ? $input['task'] : [];
     $resolved = ddns_resolve_source(ddns_normalize_task($task));
     if (!$resolved['ok']) {
@@ -114,6 +115,7 @@ if ($action === 'test_source') {
 }
 
 if ($action === 'run') {
+    @set_time_limit(0);
     $id = trim((string)($input['id'] ?? ''));
     $result = ddns_run_task_by_id($id);
     $task = ddns_find_task(ddns_load_tasks(), $id);

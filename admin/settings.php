@@ -45,6 +45,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('error', 'JSON 格式解析错误：' . $e->getMessage());
                 header('Location: settings.php'); exit;
             }
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
             backup_create('auto_import');
             // 识别格式：新备份格式 {created_at, trigger, sites:{groups:[]}, config:{}}
             //           旧格式 {groups:[]}
@@ -127,6 +131,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // ── 手动备份 ──
         if ($action === 'manual_backup') {
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
             backup_create('manual');
             flash_set('success', '备份已创建');
             header('Location: settings.php'); exit;
@@ -205,6 +213,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('error', '站点名称不能超过 60 个字符');
                 header('Location: settings.php'); exit;
             }
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
             backup_create('auto_settings');
             $cfg['site_name']          = $site_name_input;
             $cfg['nav_domain']         = trim($_POST['nav_domain']        ?? '');

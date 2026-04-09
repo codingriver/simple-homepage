@@ -26,7 +26,8 @@ Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐
 
 | 场景 | 命令 |
 |------|------|
-| 首次或改了 `Dockerfile` / 基础镜像依赖 | `bash local/docker-build.sh dev` |
+| 首次启动：若开发镜像或容器缺失则自动构建并创建；都存在且确认为开发模式则直接重启，否则删除不匹配容器并重建 | `bash local/docker-build.sh dev` |
+| 改了 `Dockerfile` / 基础镜像依赖，需要强制重建镜像和容器（默认仍使用缓存） | `bash local/docker-build.sh dev rebuild` |
 | 日常改 PHP/CSS/JS，只重启容器、不重建镜像 | `bash local/docker-build.sh dev start` |
 | 看日志 | `bash local/docker-build.sh dev logs -f` |
 | 停止 | `bash local/docker-build.sh dev down` |

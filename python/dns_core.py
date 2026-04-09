@@ -11,10 +11,48 @@ import urllib.request
 import uuid
 import socket
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class DnsError(Exception):
     pass
+
+
+DELETE_MANY_MAX_WORKERS = 6
+
+
+def delete_many_parallel(delete_fn, zone: dict, record_ids: list) -> dict:
+    cleaned_ids = [str(record_id).strip() for record_id in record_ids if str(record_id).strip()]
+    if not cleaned_ids:
+        return {"success_count": 0, "failed": []}
+
+    if len(cleaned_ids) == 1:
+        try:
+            delete_fn(zone, cleaned_ids[0])
+            return {"success_count": 1, "failed": []}
+        except DnsError as exc:
+            return {"success_count": 0, "failed": [{"id": cleaned_ids[0], "msg": str(exc)}]}
+
+    success = 0
+    failed = []
+    max_workers = min(DELETE_MANY_MAX_WORKERS, len(cleaned_ids))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(delete_fn, zone, record_id): record_id
+            for record_id in cleaned_ids
+        }
+        for future in as_completed(future_map):
+            record_id = future_map[future]
+            try:
+                future.result()
+                success += 1
+            except DnsError as exc:
+                failed.append({"id": record_id, "msg": str(exc)})
+            except Exception as exc:
+                failed.append({"id": record_id, "msg": str(exc)})
+
+    return {"success_count": success, "failed": failed}
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -339,15 +377,7 @@ class AliyunProvider:
         return {"zones_count": len(zones)}
 
     def delete_many(self, zone: dict, record_ids: list) -> dict:
-        success = 0
-        failed = []
-        for record_id in record_ids:
-            try:
-                self.delete_record(zone, str(record_id))
-                success += 1
-            except DnsError as exc:
-                failed.append({"id": str(record_id), "msg": str(exc)})
-        return {"success_count": success, "failed": failed}
+        return delete_many_parallel(self.delete_record, zone, record_ids)
 
 
 class CloudflareProvider:
@@ -620,15 +650,7 @@ class CloudflareProvider:
         return {"zones_count": len(zones)}
 
     def delete_many(self, zone: dict, record_ids: list) -> dict:
-        success = 0
-        failed = []
-        for record_id in record_ids:
-            try:
-                self.delete_record(zone, str(record_id))
-                success += 1
-            except DnsError as exc:
-                failed.append({"id": str(record_id), "msg": str(exc)})
-        return {"success_count": success, "failed": failed}
+        return delete_many_parallel(self.delete_record, zone, record_ids)
 
 
 def make_provider(account: dict):

@@ -25,7 +25,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
 
   await page.locator('#fm-name').fill(name);
   await page.locator('#fm-schedule').fill('*/5 * * * *');
-  await page.locator('#fm-working-dir-mode').selectOption('task');
+  await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
   await page.locator('#fm-command').fill('echo from-task');
   await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|crontab/);
@@ -113,24 +113,10 @@ test('scheduled tasks validate invalid fields and support crontab reload', async
   await expect(page.locator('body')).toContainText('Cron 表达式无效');
 
   await page.getByRole('button', { name: /新建任务/ }).click();
-  await disableNativeTaskFormValidation(page);
-  await page.locator('#fm-name').fill(`空目录 ${ts}`);
-  await page.locator('#fm-schedule').fill('*/5 * * * *');
-  await page.locator('#fm-working-dir-mode').selectOption('custom');
-  await page.locator('#fm-working-dir').fill('');
-  await page.locator('#fm-command').fill('echo empty-dir');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
-  await expect(page.locator('body')).toContainText('自定义工作目录不能为空');
-
-  await page.getByRole('button', { name: /新建任务/ }).click();
-  await disableNativeTaskFormValidation(page);
-  await page.locator('#fm-name').fill(`相对目录 ${ts}`);
-  await page.locator('#fm-schedule').fill('*/5 * * * *');
-  await page.locator('#fm-working-dir-mode').selectOption('custom');
-  await page.locator('#fm-working-dir').fill('tmp/not-absolute');
-  await page.locator('#fm-command').fill('echo relative-dir');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
-  await expect(page.locator('body')).toContainText('自定义工作目录必须为绝对路径');
+  await expect(page.locator('#fm-workdir-preview')).toContainText('/var/www/nav/data/tasks/');
+  await expect(page.locator('#fm-working-dir-mode')).toHaveCount(0);
+  await expect(page.locator('#fm-working-dir')).toHaveCount(0);
+  await page.getByRole('button', { name: /取消/ }).click();
 
   await page.getByRole('button', { name: /重新安装 crontab/ }).click();
   await expect(page.locator('body')).toContainText(/已重新安装 crontab|crontab/);
