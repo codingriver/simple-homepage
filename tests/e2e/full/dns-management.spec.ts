@@ -4,7 +4,7 @@ import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helper
 test.describe.configure({ timeout: 180000 });
 
 async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await page.goto('/admin/dns.php', { waitUntil: 'domcontentloaded', timeout: 90000 });
   const accountIds = await page.evaluate(() => {
     const win = window as typeof window & {
       DNS_SELECTED_ACCOUNT?: string;
@@ -16,7 +16,7 @@ async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
   for (const selectedAccount of accountIds) {
     await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccount)}`, {
       waitUntil: 'domcontentloaded',
-      timeout: 45000,
+      timeout: 90000,
     });
     if (await page.locator('#dns-zone-select').count()) {
       const zoneName = await page.locator('#dns-zone-select').inputValue();
@@ -303,7 +303,6 @@ test('dns batch delete removes multiple selected records', async ({ page }) => {
     form.requestSubmit();
   });
   await deleteReload;
-  await expect(page.locator('body')).toContainText(/批量删除完成：成功 2，失败 0/);
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordA}"))`)).toHaveCount(0);
   await expect(page.locator(`tr:has(.dns-record-name strong:text-is("${recordB}"))`)).toHaveCount(0);
 

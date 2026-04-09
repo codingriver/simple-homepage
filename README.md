@@ -1,342 +1,338 @@
 # Simple Homepage
 
-一个面向个人 / 家庭实验室 / NAS / VPS 的私有导航与轻量运维门户。
+一个适合个人、家庭网络、NAS、软路由、小型 VPS 使用的私有导航首页。
 
-它不只是“网址收藏页”，而是一个基于 `PHP 8.2 + Nginx + JSON` 的单容器应用：带登录保护、站点分组、反向代理、DNS 管理、DDNS、计划任务、备份恢复、调试工具和完整 E2E 测试。
+它不只是书签页，还带这些能力：
+
+- 登录保护
+- 分组和站点管理
+- 反向代理入口
+- DNS 管理
+- DDNS 动态解析
+- 计划任务
+- 配置备份与恢复
+- 调试工具
+
+项目地址：
 
 - GitHub: <https://github.com/codingriver/simple-homepage>
 - Docker Hub: <https://hub.docker.com/r/codingriver/simple-homepage>
-- 镜像平台: `linux/amd64` / `linux/arm64`
-- 运行方式: Docker 单容器，数据目录挂载即可持久化
 
-## 项目特性
+镜像支持：
+
+- `linux/amd64`
+- `linux/arm64`
+
+## 适合谁
+
+如果你希望把这些东西集中到一个网页后台里，这个项目就适合你：
+
+- 家里有 NAS、路由器、下载器、影视服务、面板，想做统一入口
+- 有一台 VPS，想把常用站点、反代入口、DDNS、DNS 管理放到一起
+- 不想装 MySQL、Redis，只想用 Docker 跑起来
+- 希望数据都保存在本地目录里，重建容器也不丢
+
+## 主要功能
 
 ### 前台导航
 
-- 分组 + 站点卡片展示，支持搜索、折叠状态持久化
+- 分组展示站点卡片
+- 搜索站点
 - 支持公开分组和登录后可见分组
-- 支持自定义背景图 / 背景色、卡片尺寸、布局和方向
-- 自动抓取并缓存 favicon
-- 移动端适配，手机访问可直接使用
-- 已登录用户可看到站点健康状态缓存
+- 支持背景图、背景色、卡片大小等设置
+- 自动抓取 favicon
+- 适配手机和桌面浏览器
 
 ### 后台管理
 
-- 站点管理：普通链接、内部直达、反向代理三种站点类型
-- 分组管理：可见范围、登录要求、排序与增删改查
-- 用户管理：管理员账户维护、CLI 重置与改密
-- 系统设置：站点名称、域名、Cookie 策略、背景、Webhook、登录安全参数
-- 备份恢复：手动备份、恢复、导入导出
-- Nginx 管理：配置编辑、语法检查、保存并 reload
-- 调试工具：Nginx / PHP-FPM / DNS / 请求耗时日志查看与清理
-- 计划任务：Web 界面维护 cron 任务，支持立即执行和日志分页查看
+- 站点管理：普通链接、内部直达、反向代理
+- 分组管理：增删改查、排序、权限范围
+- 用户管理：管理员和普通用户
+- 系统设置：站点名称、域名、Cookie、安全项、Webhook
+- 备份恢复：导出、导入、恢复
+- 调试工具：日志查看、Cookie 清理、错误显示切换
 
-### 运维能力
+### 运维相关
 
-- 内置路径前缀 / 子域名两种反向代理模式
-- DNS 解析管理，当前支持 `Aliyun DNS`、`Cloudflare`
-- DDNS 动态解析，支持多来源优选 IP / 本机公网 IP
-- 自动生成 DDNS 调度器并接入计划任务系统
-- JSON 文件存储，无需 MySQL / Redis
-- Docker 镜像内置 `cron`、`python3`、`nginx`、`php-fpm`
+- DNS 解析管理，目前支持阿里云 DNS、Cloudflare
+- DDNS 动态解析
+- 计划任务管理，支持立即执行和日志查看
+- 计划任务统一工作目录固定为 `data/tasks`
 
-### 安全与稳定性
+## 部署前准备
 
-- 首次安装向导，安装完成后 `setup.php` 自动失效
-- CSRF 防护、登录失败次数限制、IP 锁定
-- Cookie `off` / `auto` / `on` 三档策略
-- IP 访问模式自动降级 Cookie，避免内网应急访问失效
-- 重定向地址净化，避免开放跳转
-- 反代目标限制内网地址，降低 SSRF 风险
-- 备份恢复前自动备份当前状态
-- 仓库包含大量 Playwright E2E 用例和 Lighthouse 基线检查
+你只需要准备：
 
-## 适用场景
+1. 一台装好 Docker 和 Docker Compose 的 Linux 主机、NAS，或者支持 Docker 的设备
+2. 一个准备存放数据的目录
+3. 一个浏览器
 
-- 家庭实验室导航页
-- NAS / 路由器 / 内网服务统一入口
-- 小型 VPS 运维入口
-- 需要账号保护的自用导航站
-- 希望把 DNS、DDNS、反代、任务调度集中到一个轻量后台里
-
-## 快速开始
-
-### 方式一：直接运行镜像
-
-推荐 Linux bind mount 场景显式带上 `PUID/PGID`：
+先确认 Docker 可用：
 
 ```bash
-docker run -d \
-  --name simple-homepage \
-  -p 58080:58080 \
-  -v $(pwd)/data:/var/www/nav/data \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -e TZ=Asia/Shanghai \
-  --restart unless-stopped \
-  codingriver/simple-homepage:latest
+docker -v
+docker compose version
 ```
 
-访问：
+如果这两个命令都能正常输出版本号，就可以继续。
+
+## 小白部署流程
+
+下面是最简单、最推荐的部署方式：直接从 Docker Hub 拉镜像，用 `docker compose` 启动。
+
+### 1. 创建部署目录
+
+```bash
+mkdir -p ~/simple-homepage
+cd ~/simple-homepage
+mkdir -p data
+```
+
+`data` 目录很重要，网站配置、用户、日志、备份都放在这里。
+
+### 2. 新建 `docker-compose.yml`
+
+在当前目录创建一个文件：`docker-compose.yml`
+
+内容直接复制下面这一份：
+
+```yaml
+# ============================================================
+# 官方一键部署（推荐新手）
+# 启动: docker compose up -d
+# 停止: docker compose down
+# 日志: docker compose logs -f
+# ============================================================
+
+services:
+  simple-homepage:
+    image: codingriver/simple-homepage:latest
+    container_name: simple-homepage
+    restart: unless-stopped
+
+    ports:
+      - "58080:58080"
+
+    environment:
+      # 容器内默认端口（与端口映射保持一致）
+      NAV_PORT: "58080"
+      TZ: "Asia/Shanghai"
+      # 可选：显式覆盖运行用户 UID/GID；留空时容器启动后自动按 data 目录 owner 对齐
+      PUID: "${PUID:-}"
+      PGID: "${PGID:-}"
+
+    volumes:
+      # 必须挂载：用户、配置、日志、备份都在这里
+      - ./data:/var/www/nav/data
+
+    healthcheck:
+      disable: true
+```
+
+### 3. 拉取镜像并启动
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+查看是否启动成功：
+
+```bash
+docker ps
+```
+
+如果你看到容器名 `simple-homepage` 在运行，就说明启动成功了。
+
+### 4. 打开网页
+
+浏览器访问：
 
 ```text
 http://你的服务器IP:58080
 ```
 
-### 方式二：使用仓库内置 `docker-compose.yml`
+例如：
 
-默认写法：由容器启动时自动按 `data` 目录 owner 对齐 UID/GID。
+```text
+http://192.168.1.10:58080
+```
+
+第一次打开会进入安装向导。
+
+### 5. 完成首次安装
+
+按页面提示设置：
+
+- 管理员用户名
+- 管理员密码
+- 网站名称
+- 网站域名（可以先不填完整正式域名，后面再改）
+
+安装完成后，就可以登录后台了。
+
+## 如果想自动创建管理员
+
+如果你不想手动走安装向导，也可以在 `docker-compose.yml` 里增加这些环境变量：
+
+```yaml
+environment:
+  NAV_PORT: "58080"
+  TZ: "Asia/Shanghai"
+  PUID: "${PUID:-}"
+  PGID: "${PGID:-}"
+  ADMIN: "admin"
+  PASSWORD: "ChangeMe123!"
+  NAME: "我的导航"
+  DOMAIN: "nav.example.com"
+```
+
+然后重新启动：
 
 ```bash
-git clone https://github.com/codingriver/simple-homepage.git
-cd simple-homepage
-mkdir -p data
 docker compose up -d
 ```
 
-如需显式覆盖自动检测结果：
+首次启动时会自动创建管理员账号。
+
+生产环境建议部署完成后把明文密码从 compose 文件里删掉。
+
+## 升级方法
+
+后续更新很简单：
 
 ```bash
-git clone https://github.com/codingriver/simple-homepage.git
-cd simple-homepage
-mkdir -p data
-PUID=$(id -u) PGID=$(id -g) docker compose up -d
+cd ~/simple-homepage
+docker compose pull
+docker compose up -d
 ```
 
-如果你的环境还是旧版命令，也可以用以下两种写法：
+因为数据挂载在 `./data` 目录，所以更新镜像不会清空你的配置。
+
+## 常用命令
+
+查看日志：
 
 ```bash
-docker-compose up -d
+docker compose logs -f
 ```
+
+重启：
 
 ```bash
-PUID=$(id -u) PGID=$(id -g) docker-compose up -d
+docker compose restart
 ```
 
-### 首次安装
-
-首次访问会进入安装向导，创建管理员账户并自动生成：
-
-- `data/.installed`
-- `data/auth_secret.key`
-- `data/config.json`
-- `data/users.json`
-
-安装完成后，`/setup.php` 会返回 `404`，避免重复初始化。
-
-## 无人值守安装
-
-容器启动时支持通过环境变量自动写入初始管理员信息。适合首次部署脚本化、测试环境或 CI。
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `ADMIN` | 是 | 管理员用户名，2-32 位，字母/数字/下划线/横杠 |
-| `PASSWORD` | 否 | 管理员密码，留空则允许无密码初始化，不建议生产使用 |
-| `NAME` | 否 | 站点名称，默认 `导航中心` |
-| `DOMAIN` | 否 | 导航站域名 |
-
-示例：
+停止：
 
 ```bash
-docker run -d \
-  --name simple-homepage \
-  -p 58080:58080 \
-  -v $(pwd)/data:/var/www/nav/data \
-  -e PUID=$(id -u) \
-  -e PGID=$(id -g) \
-  -e ADMIN=admin \
-  -e PASSWORD='ChangeMe123!' \
-  -e NAME='我的导航' \
-  -e DOMAIN='nav.example.com' \
-  codingriver/simple-homepage:latest
+docker compose down
 ```
 
-## 环境变量
+进入容器：
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `NAV_PORT` | `58080` | 容器内监听端口 |
-| `TZ` | `Asia/Shanghai` | 容器时区 |
-| `PUID` | 空 | Linux bind mount 时可选；显式指定容器内 `navwww` 的 UID；留空时启动后自动按 `data` 目录 owner UID 对齐 |
-| `PGID` | 空 | Linux bind mount 时可选；显式指定容器内 `navwww` 的 GID；留空时启动后自动按 `data` 目录 owner GID 对齐 |
-| `ADMIN` | 空 | 首次启动时无人值守安装用户名 |
-| `PASSWORD` | 空 | 首次启动时无人值守安装密码 |
-| `NAME` | `导航中心` | 首次启动时站点名称 |
-| `DOMAIN` | 空 | 首次启动时导航域名 |
-| `NAV_DEV_MODE` | 空 | 开发模式，启用内置测试管理员 |
-| `NAV_REQUEST_TIMING` | `1` | 设为 `0` 可关闭请求耗时日志 |
-| `AUTH_SECRET_KEY` | 空 | 可显式指定认证密钥；默认写入 `data/auth_secret.key` |
+```bash
+docker exec -it simple-homepage sh
+```
 
-## 数据持久化
+## 数据保存在哪里
 
-必须挂载：
+你本机部署目录下的：
+
+```text
+./data
+```
+
+容器里的对应路径是：
 
 ```text
 /var/www/nav/data
 ```
 
-常见数据文件：
+其中计划任务统一使用的工作目录是：
 
 ```text
-data/
-├── .installed
-├── auth_secret.key
-├── config.json
-├── sites.json
-├── users.json
-├── scheduled_tasks.json
-├── dns_config.json
-├── ip_locks.json
-├── backups/
-├── logs/
-├── bg/
-└── favicon_cache/
+./data/tasks
 ```
 
-说明：
+不是每个任务一个单独目录，而是所有计划任务共享这个目录。
 
-- `users.json` 保存账户数据
-- `sites.json` 保存分组和站点
-- `scheduled_tasks.json` 保存计划任务定义
-- `dns_config.json` 保存 DNS 账户与配置
-- `backups/` 保存导出与恢复快照
-- 容器重建后，未挂载 `data` 会导致所有配置丢失
-- Linux 宿主机若使用 bind mount，建议先 `mkdir -p data`；容器启动时会优先使用显式传入的 `PUID/PGID`，未传时自动按 `data` 目录 owner 对齐，且不会再递归 `chown` 整个挂载目录
-- 若自动检测到 `0:0`，为避免自动提权，容器会继续使用镜像默认用户 `1000:1000`；只有显式传入 `PUID=0` / `PGID=0` 时才会按 root 身份运行
+## 默认端口能不能改
 
-## 常用命令
+可以。
 
-### 容器管理
+如果你不想用 `58080`，把 compose 里的这一行改掉就行：
+
+```yaml
+ports:
+  - "58080:58080"
+```
+
+例如改成 `8080`：
+
+```yaml
+ports:
+  - "8080:58080"
+```
+
+改完重新执行：
 
 ```bash
-docker logs -f simple-homepage
-docker restart simple-homepage
-docker exec -it simple-homepage sh
+docker compose up -d
 ```
 
-### CLI 用户管理
-
-```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php list
-docker exec simple-homepage php /var/www/nav/manage_users.php info admin
-docker exec simple-homepage php /var/www/nav/manage_users.php add admin 新密码
-docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
-docker exec simple-homepage php /var/www/nav/manage_users.php del admin
-docker exec simple-homepage php /var/www/nav/manage_users.php reset
-```
-
-`reset` 会清空安装状态、站点配置、登录锁定和反代配置，并重新进入安装向导；备份文件会保留。
-
-## 开发与测试
-
-### 本地开发容器
-
-```bash
-cp local/.env.example local/.env
-bash local/docker-build.sh dev
-```
-
-开发模式会：
-
-- 挂载源码目录
-- 启用 `NAV_DEV_MODE`
-- 加载 `local/php-dev.ini`
-- 提供内置测试管理员 `qatest / qatest2026`
-
-更多说明见 [local/README.md](local/README.md)。
-
-### Playwright E2E
-
-启动开发容器后，可直接运行仓库内置测试环境：
-
-```bash
-docker compose \
-  -f local/docker-compose.yml \
-  -f local/docker-compose.dev.yml \
-  -f local/docker-compose.test.yml \
-  run --rm playwright-full
-```
-
-移动端用例：
-
-```bash
-docker compose \
-  -f local/docker-compose.yml \
-  -f local/docker-compose.dev.yml \
-  -f local/docker-compose.test.yml \
-  run --rm playwright-mobile
-```
-
-也可以在本地安装依赖后直接执行：
-
-```bash
-npm install
-BASE_URL=http://127.0.0.1:58080 npm run test:e2e:full:chromium
-BASE_URL=http://127.0.0.1:58080 npm run test:e2e:full:mobile
-
-# 单个文件 / 单条用例调试
-BASE_URL=http://127.0.0.1:58080 npm run test:e2e:headed:chromium -- tests/e2e/full/csrf-guards.spec.ts:8
-BASE_URL=http://127.0.0.1:58080 npm run test:e2e:headed:chromium -- -g "csrf guards reject admin mutations without valid token"
-```
-
-### Lighthouse
-
-```bash
-docker compose \
-  -f local/docker-compose.yml \
-  -f local/docker-compose.dev.yml \
-  -f local/docker-compose.test.yml \
-  run --rm lighthouse
-```
-
-## 文档索引
-
-- [Docker 部署文档](docs/Docker部署文档.md)
-- [导航网站部署文档](docs/导航网站部署文档.md)
-- [VPS-A 网关部署文档](docs/VPS-A网关部署文档.md)
-- [本地 Docker 开发说明](local/README.md)
-- [Full E2E 测试教程 - Docker 环境](docs/Full-E2E测试教程-Docker环境.md)
-- [Full E2E 测试教程 - 本地环境](docs/Full-E2E测试教程-本地环境.md)
-- [测试规划](docs/项目测试规划.md)
-- [测试 TODO](docs/测试TODO.md)
-
-## 技术栈
-
-- Backend: `PHP 8.2`
-- Web: `Nginx`
-- DNS CLI: `Python 3`
-- Storage: `JSON files`
-- Runtime: `Docker`, `supervisord`, `cron`
-- Test: `Playwright`, `Lighthouse CI`
-
-## 项目结构
+然后访问：
 
 ```text
-.
-├── public/                 # 前台页面与安装 / 登录入口
-├── admin/                  # 后台页面
-├── shared/                 # 认证和公共逻辑
-├── cli/                    # CLI 工具
-├── docker/                 # 镜像与运行配置
-├── local/                  # 本地开发和测试 compose
-├── tests/e2e/full/         # Playwright E2E
-├── docs/                   # 项目文档
-└── manage_users.php        # 用户管理 CLI
+http://你的服务器IP:8080
 ```
 
-## 安全建议
+## 常见问题
 
-- 生产环境务必挂载 `data` 目录
-- 首次安装后立即修改默认或弱密码
-- 公网部署建议开启 HTTPS，并将 Cookie 策略调整为 `auto` 或 `on`
-- 使用域名模式跨子域登录时，再配置 `cookie_domain`
-- 在改动 Nginx 代理配置前，先执行手动备份
-- 调试时临时开启 `display_errors`，结束后关闭
+### 打不开页面
 
-## 贡献
+先检查：
 
-欢迎提交 Issue 和 PR。更新功能时，建议同步补充：
+```bash
+docker ps
+docker compose logs -f
+```
 
-- 根目录 `README.md`
-- `docs/` 下对应专题文档
-- `tests/e2e/full/` 相关回归测试
+再确认服务器防火墙或路由器没有拦截你映射出来的端口。
+
+### 重建容器后数据没了
+
+通常是因为没有挂载 `./data:/var/www/nav/data`。
+
+这个挂载一定不能删。
+
+### 没有权限写入 `data`
+
+先确保目录存在：
+
+```bash
+mkdir -p data
+```
+
+如果是 Linux bind mount 场景，还可以按需显式指定：
+
+```bash
+export PUID=$(id -u)
+export PGID=$(id -g)
+docker compose up -d
+```
+
+## 进阶内容去哪看
+
+根目录这个 README 只保留新手部署和使用说明。
+
+这些进阶内容已经整理到 [local/README.md](local/README.md)：
+
+- 本地开发
+- 测试命令
+- 高级环境变量
+- 数据目录说明
+- CLI 管理命令
+- 多个 compose 组合方式
+
+如果你只是想把项目跑起来，用这个 README 就够了。

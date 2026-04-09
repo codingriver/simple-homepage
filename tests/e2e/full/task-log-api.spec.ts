@@ -1,6 +1,21 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
+async function waitForTaskLogLines(page: Parameters<typeof loginAsDevAdmin>[0], taskId: string, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await page.evaluate(async (id) => {
+      const response = await fetch(`/admin/api/task_log.php?id=${id}&page=1`, { credentials: 'include' });
+      return { status: response.status, json: await response.json() };
+    }, taskId);
+    if (res.status === 200 && Array.isArray(res.json.lines) && res.json.lines.length > 0) {
+      return res;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('task log did not receive lines in time');
+}
+
 test('task log api enforces auth and returns paged payload after a task run', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
@@ -9,6 +24,7 @@ test('task log api enforces auth and returns paged payload after a task run', as
     ],
   });
   const id = `tasklog-${Date.now()}`;
+  const taskName = `日志接口任务 ${Date.now()}`;
 
   await page.goto('/login.php');
   const denied = await page.evaluate(async () => {
@@ -21,16 +37,16 @@ test('task log api enforces auth and returns paged payload after a task run', as
   await loginAsDevAdmin(page);
   await page.goto('/admin/scheduled_tasks.php');
   await page.getByRole('button', { name: /新建任务/ }).click();
-  await page.locator('#fm-name').fill('日志接口任务');
+  await page.locator('#fm-name').fill(taskName);
   await page.locator('#fm-schedule').fill('*/30 * * * *');
   await page.locator('#fm-command').fill('echo api-log-line-1\necho api-log-line-2');
   await page.getByRole('button', { name: '💾 保存' }).click();
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
-  const row = page.locator('tr', { hasText: '日志接口任务' }).first();
+  const row = page.locator('tr', { hasText: taskName }).last();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
   await row.getByRole('button', { name: /立即执行/ }).click();
-  await expect(page.locator('body')).toContainText(/执行完成|执行失败/);
+  await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
 
   const missingId = await page.evaluate(async () => {
     const res = await fetch('/admin/api/task_log.php?page=1', { credentials: 'include' });
@@ -39,12 +55,10 @@ test('task log api enforces auth and returns paged payload after a task run', as
   expect(missingId.status).toBe(400);
   expect(missingId.json.error).toBe('missing id');
 
-  const ok = await page.evaluate(async (taskId) => {
-    const res = await fetch(`/admin/api/task_log.php?id=${taskId}&page=1`, { credentials: 'include' });
-    return { status: res.status, json: await res.json() };
-  }, taskId);
+  const ok = await waitForTaskLogLines(page, taskId);
   expect(ok.status).toBe(200);
   expect(Array.isArray(ok.json.lines)).toBeTruthy();
+  expect(ok.json.lines.length).toBeGreaterThan(0);
   expect(ok.json.page).toBe(1);
   expect(ok.json.pages).toBeGreaterThanOrEqual(1);
 

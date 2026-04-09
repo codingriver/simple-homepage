@@ -1,42 +1,155 @@
-# 本地 Docker 开发
+# 本地开发与进阶说明
 
-## 一次性准备
+这个文件收纳根目录 README 不再展开的内容：
 
-```bash
-cp local/.env.example local/.env   # 按需改端口、DATA_DIR 等
+- 本地开发
+- 自动化测试
+- 高级环境变量
+- 数据目录说明
+- CLI 管理命令
+- 开发用 compose 组合方式
+
+如果你只是第一次部署项目，先看根目录的 [README.md](../README.md) 就够了。
+
+## 1. 生产部署的进阶参数
+
+根目录 README 使用的是最简单的部署方式。下面这些内容适合需要进一步定制的人。
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `NAV_PORT` | `58080` | 容器内监听端口 |
+| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `PUID` | 空 | 可选；显式指定容器运行用户 UID |
+| `PGID` | 空 | 可选；显式指定容器运行用户 GID |
+| `ADMIN` | 空 | 首次启动时自动创建管理员用户名 |
+| `PASSWORD` | 空 | 首次启动时自动创建管理员密码 |
+| `NAME` | `导航中心` | 首次启动时站点名称 |
+| `DOMAIN` | 空 | 首次启动时导航站域名 |
+| `NAV_DEV_MODE` | 空 | 开发模式，会启用内置测试管理员 |
+| `NAV_REQUEST_TIMING` | `1` | 设为 `0` 可关闭请求耗时日志 |
+| `AUTH_SECRET_KEY` | 空 | 可显式指定认证密钥 |
+
+### 数据目录
+
+必须挂载：
+
+```text
+/var/www/nav/data
 ```
 
-数据目录默认 `../data`（相对项目根），首次启动会自动创建。
-Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐 `PUID` / `PGID`；若自动检测到 `0:0`，会回退到镜像默认用户 `1000:1000`，避免自动提权。只有自动检测不符合预期时，才需要在 `local/.env` 中显式覆盖。
+常见文件和目录：
 
-### 无人值守安装（跳过安装向导）
+```text
+data/
+├── .installed
+├── auth_secret.key
+├── config.json
+├── sites.json
+├── users.json
+├── scheduled_tasks.json
+├── dns_config.json
+├── ip_locks.json
+├── backups/
+├── logs/
+├── tasks/
+├── bg/
+└── favicon_cache/
+```
 
-在 `local/.env` 或 Compose `environment` 中设置：
+说明：
 
-| 变量 | 说明 |
-|------|------|
-| `ADMIN` | 管理员用户名（必填，2–32 位字母数字下划线横杠）；若变量存在但为空或非法，将**不**执行无人值守，强制打开安装向导 |
-| `PASSWORD` | 可选，可留空（无密码登录）；安装向导仍要求≥8 位 |
-| `NAME` | 可选，站点名称，默认「导航中心」 |
-| `DOMAIN` | 可选，导航站域名 |
+- `users.json` 保存用户
+- `sites.json` 保存站点和分组
+- `scheduled_tasks.json` 保存计划任务定义
+- `logs/` 保存各类日志
+- `tasks/` 是计划任务共享工作目录
+- `backups/` 保存备份快照
 
-首次访问站点将自动创建账户、配置与 `.installed`，直接进入登录。**安装成功后**应用会删除 `data/.initial_admin.json`；请勿在生产环境长期把明文密码留在环境变量中（可用 Docker Secrets 或部署后清空）。
+## 2. 容器内 CLI 管理命令
 
-## 推荐命令（在项目根目录执行）
+查看用户列表：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php list
+```
+
+查看用户信息：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php info admin
+```
+
+新增管理员：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php add admin 新密码
+```
+
+修改密码：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+```
+
+删除用户：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php del admin
+```
+
+重置安装状态：
+
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php reset
+```
+
+`reset` 会清空安装状态、站点配置、登录锁定和反代配置，并重新进入安装向导。备份文件会保留。
+
+## 3. 本地 Docker 开发
+
+### 一次性准备
+
+```bash
+cp local/.env.example local/.env
+```
+
+然后按需修改 `local/.env`。
+
+数据目录默认是项目根目录下的 `data/`。
+
+Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐 `PUID` / `PGID`；如果自动检测到 `0:0`，会回退到镜像默认用户 `1000:1000`，避免自动提权。只有自动检测结果不符合预期时，才需要在 `local/.env` 里显式覆盖。
+
+### 推荐命令
 
 | 场景 | 命令 |
-|------|------|
-| 首次启动：若开发镜像或容器缺失则自动构建并创建；都存在且确认为开发模式则直接重启，否则删除不匹配容器并重建 | `bash local/docker-build.sh dev` |
-| 改了 `Dockerfile` / 基础镜像依赖，需要强制重建镜像和容器（默认仍使用缓存） | `bash local/docker-build.sh dev rebuild` |
-| 日常改 PHP/CSS/JS，只重启容器、不重建镜像 | `bash local/docker-build.sh dev start` |
-| 看日志 | `bash local/docker-build.sh dev logs -f` |
-| 停止 | `bash local/docker-build.sh dev down` |
+| --- | --- |
+| 启动开发环境 | `bash local/docker-build.sh dev` |
+| 强制重建开发镜像 | `bash local/docker-build.sh dev rebuild` |
+| 仅重启开发容器 | `bash local/docker-build.sh dev start` |
+| 查看日志 | `bash local/docker-build.sh dev logs -f` |
+| 停止开发环境 | `bash local/docker-build.sh dev down` |
 
-`dev` 会使用 `docker-compose.yml` + `docker-compose.dev.yml`：挂载源码、启用 `NAV_DEV_MODE`、加载 `php-dev.ini`（显示错误等）。登录页可用内置管理员 **qatest / qatest2026**（详见 `shared/auth.php` 与登录页说明）。
+开发模式会：
 
-## 自动化测试（推荐方案）
+- 挂载源码目录
+- 启用 `NAV_DEV_MODE`
+- 加载 `local/php-dev.ini`
+- 提供内置测试管理员 `qatest / qatest2026`
 
-### 浏览器自动化：Playwright
+## 4. Compose 文件说明
+
+仓库里常见的 compose 文件有：
+
+- [docker-compose.yml](../docker-compose.yml)：给新手的生产部署模板
+- [local/docker-compose.yml](./docker-compose.yml)：本地开发基础 compose
+- [local/docker-compose.dev.yml](./docker-compose.dev.yml)：开发增强覆盖
+- [local/docker-compose.test.yml](./docker-compose.test.yml)：测试服务覆盖
+
+## 5. 自动化测试
+
+### Playwright E2E
 
 先启动开发容器：
 
@@ -44,47 +157,60 @@ Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐
 bash local/docker-build.sh dev
 ```
 
-运行核心 E2E：
+运行桌面端全量测试：
 
 ```bash
 docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-full
 ```
 
-运行移动端 E2E：
+运行移动端测试：
 
 ```bash
 docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-mobile
 ```
 
-查看当前运行中的测试服务数量：
+查看当前测试服务数量：
 
 ```bash
 npm run test:running
 ```
 
-测试产物：
+测试产物目录：
+
 - `playwright-report/`
 - `test-results/`
 
-### 页面性能 / 加载质量：Lighthouse CI
-
-同样先保证开发容器已启动，再执行：
+### Lighthouse
 
 ```bash
 docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm lighthouse
 ```
 
-测试产物：
+产物目录：
+
 - `lighthouse-report/`
 
-当前 Lighthouse 先对公开页面做基线检测：`/login.php`、`/index.php`。
+## 6. 无人值守安装
 
-## 与「非 dev」模式的区别
+如果想在开发或测试环境里跳过安装向导，可以在 `local/.env` 或 compose 环境变量中设置：
 
-- `bash local/docker-build.sh`（无 `dev`）：`--no-cache` 全量构建，**不**挂载源码，适合验证生产镜像行为。
+| 变量 | 说明 |
+| --- | --- |
+| `ADMIN` | 管理员用户名 |
+| `PASSWORD` | 管理员密码，可留空但不建议 |
+| `NAME` | 站点名称 |
+| `DOMAIN` | 导航站域名 |
 
-## 帮助
+首次访问时会自动创建账户、配置与 `.installed`。
+
+安装成功后，应用会删除 `data/.initial_admin.json`。不要在生产环境长期保留明文密码。
+
+## 7. 帮助
+
+查看开发脚本帮助：
 
 ```bash
 bash local/docker-build.sh help
 ```
+
+更多历史文档可继续查看 `docs/` 目录。

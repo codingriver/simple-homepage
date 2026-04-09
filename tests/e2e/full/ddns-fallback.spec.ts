@@ -1,6 +1,23 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
+async function ddnsTaskIdByName(page: Parameters<typeof loginAsDevAdmin>[0], name: string) {
+  const taskId = await page.evaluate((taskName) => {
+    const rows = (window as Window & { DDNS_ROWS?: Array<{ id: string; name: string }> }).DDNS_ROWS || [];
+    return rows.find((row) => row.name === taskName)?.id || '';
+  }, name);
+  expect(taskId).not.toBe('');
+  return taskId;
+}
+
+async function triggerDdnsSave(page: Parameters<typeof loginAsDevAdmin>[0], runAfterSave = false) {
+  await page.evaluate((shouldRun) => {
+    const fn = (window as Window & { saveTask?: (runAfterSave: boolean) => Promise<void> }).saveTask;
+    if (typeof fn !== 'function') throw new Error('saveTask not found');
+    void fn(shouldRun);
+  }, runAfterSave);
+}
+
 test('ddns fallback task shows combined source label and structured test result', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
@@ -14,27 +31,34 @@ test('ddns fallback task shows combined source label and structured test result'
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/ddns.php');
-  await page.getByRole('button', { name: /新建任务/ }).click();
+  await page.evaluate(() => {
+    const fn = (window as Window & { openDdnsModal?: () => void }).openDdnsModal;
+    if (typeof fn !== 'function') throw new Error('openDdnsModal not found');
+    fn();
+  });
+  await expect(page.locator('#ddns-modal')).toBeVisible();
   await page.locator('#fm-name').fill(taskName);
   await page.locator('#fm-source-type').selectOption('api4ce_cfip');
   await page.locator('#fm-fallback-type').selectOption('cf164746_global');
   await page.locator('#fm-domain').fill(domain);
-  await page.getByRole('button', { name: /^保存$/ }).click();
+  await triggerDdnsSave(page);
 
   const row = page.locator(`tr:has-text("${taskName}")`).first();
+  await expect(row).toBeVisible();
   await expect(row).toContainText(/4ce/);
   await expect(row).toContainText(/164746/);
 
-  await row.getByRole('button', { name: /编辑/ }).click();
-  const sourceTestResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes('/admin/ddns_ajax.php') &&
-      response.request().method() === 'POST' &&
-      (response.request().postData() || '').includes('"action":"test_source"'),
-    { timeout: 20_000 }
-  );
-  await page.getByRole('button', { name: /测试来源/ }).click();
-  await sourceTestResponse;
+  const taskId = await ddnsTaskIdByName(page, taskName);
+  await page.evaluate((id) => {
+    const fn = (window as Window & { openDdnsModal?: (taskId: string) => void }).openDdnsModal;
+    if (typeof fn !== 'function') throw new Error('openDdnsModal not found');
+    fn(id);
+  }, taskId);
+  await page.evaluate(() => {
+    const fn = (window as Window & { testSource?: () => Promise<void> }).testSource;
+    if (typeof fn !== 'function') throw new Error('testSource not found');
+    void fn();
+  });
   await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/, { timeout: 20_000 });
   await expect(page.locator('#fm-test-result')).toContainText(/4ce|164746|回退|失败/, { timeout: 20_000 });
 

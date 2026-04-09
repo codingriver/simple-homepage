@@ -466,7 +466,7 @@ $cfg = auth_get_config();
     </form>
     <a href="backups.php" class="btn btn-secondary">📋 备份管理</a>
   </div>
-  <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」为同一 JSON 结构（站点、系统配置、计划任务含脚本、DNS 解析账户）。不含用户账户、任务日志、<code>data/tasks/</code> 下任务工作区文件等。导入时自动识别格式。</div>
+  <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」为同一 JSON 结构（站点、系统配置、计划任务含脚本、DNS 解析账户）。不含用户账户、任务日志、<code>data/tasks/</code> 共享工作目录下的额外文件等。导入时自动识别格式。</div>
 </div>
 
 <script>

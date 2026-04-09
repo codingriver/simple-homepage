@@ -203,6 +203,7 @@ function ddns_task_row(array $task): array {
         'cron' => (string)($schedule['cron'] ?? ''),
         'last_status' => ddns_status_label($task),
         'last_run_at' => (string)($runtime['last_run_at'] ?? ''),
+        'started_at' => (string)($runtime['started_at'] ?? ''),
         'last_message' => (string)($runtime['last_message'] ?? ''),
         'last_value' => (string)($runtime['last_value'] ?? ''),
     ];
@@ -799,6 +800,39 @@ function ddns_run_task_by_id(string $id): array {
         return ['ok' => false, 'status' => 'fail', 'msg' => '任务不存在'];
     }
     return ddns_run_task($task);
+}
+
+function ddns_dispatch_task_async(string $id): array {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return ['ok' => false, 'msg' => '无效的任务 ID'];
+    }
+    $data = ddns_load_tasks();
+    $task = ddns_find_task($data, $id);
+    if (!$task) {
+        return ['ok' => false, 'msg' => '任务不存在'];
+    }
+    if (!empty($task['runtime']['running'])) {
+        return ['ok' => false, 'msg' => '后台执行已在运行中', 'task' => $task];
+    }
+
+    ddns_mark_running($id, true);
+    $command = escapeshellcmd(cron_php_binary())
+        . ' '
+        . escapeshellarg(task_project_root() . '/cli/ddns_sync.php')
+        . ' '
+        . escapeshellarg($id);
+    $spawn = task_spawn_background_command($command, task_project_root(), [
+        'DDNS_TASK_ID' => $id,
+    ]);
+    if (!$spawn['ok']) {
+        ddns_mark_running($id, false);
+        $task = ddns_find_task(ddns_load_tasks(), $id);
+        return ['ok' => false, 'msg' => $spawn['msg'], 'task' => $task];
+    }
+
+    $task = ddns_find_task(ddns_load_tasks(), $id);
+    return ['ok' => true, 'msg' => '已开始后台执行', 'task' => $task];
 }
 
 function ddns_cron_field_matches(string $expr, int $value, int $min, int $max): bool {

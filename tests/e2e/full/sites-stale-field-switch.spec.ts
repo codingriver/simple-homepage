@@ -19,6 +19,7 @@ test('sites type switching does not leak stale fields across proxy and external 
   await page.locator('#fi_name').fill(`站点脏字段 ${ts}`);
   await page.locator('#fi_auth').selectOption('0');
   await submitVisibleModal(page);
+  await page.waitForURL(/\/admin\/groups\.php/, { timeout: 15000 });
 
   await page.goto('/admin/sites.php');
   await page.getByRole('button', { name: /添加站点/ }).click();

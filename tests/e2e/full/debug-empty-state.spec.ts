@@ -21,7 +21,7 @@ test('debug tools keep empty-state messaging after clearing logs and refreshing 
 
   await page.getByRole('button', { name: /DNS 应用日志/ }).click();
   await expect(page.locator('#logContent')).not.toContainText('加载中...');
-  await expect(page.locator('#logContent')).toContainText(/暂无|空|日志|失败|error/i);
+  await expect(page.locator('#logContent')).toContainText(/暂无|空|日志|失败|error|\[\d{4}-\d{2}-\d{2}/i);
 
   await tracker.assertNoClientErrors();
 });

@@ -22,6 +22,59 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
         echo debug_read_log($type, $lines); exit;
     }
 
+    if (isset($_GET['ajax']) && $_GET['ajax'] === 'github_main_commit') {
+        $current_admin = auth_get_current_user();
+        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
+            http_response_code(401);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => '未登录']); exit;
+        }
+
+        $url = 'https://api.github.com/repos/codingriver/simple-homepage/commits/main';
+        $body = '';
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS => 3,
+                CURLOPT_TIMEOUT => 5,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_USERAGENT => 'SimpleHomepage-Debug/1.0',
+                CURLOPT_HTTPHEADER => [
+                    'Accept: application/vnd.github+json',
+                ],
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            ]);
+            $resp = curl_exec($ch);
+            if ($resp !== false) {
+                $body = (string)$resp;
+            }
+            curl_close($ch);
+        } else {
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 5,
+                    'ignore_errors' => true,
+                    'header' => "Accept: application/vnd.github+json\r\nUser-Agent: SimpleHomepage-Debug/1.0\r\n",
+                ],
+            ]);
+            $resp = @file_get_contents($url, false, $ctx);
+            if ($resp !== false) {
+                $body = (string)$resp;
+            }
+        }
+
+        $data = json_decode($body, true);
+        header('Content-Type: application/json; charset=utf-8');
+        if (!is_array($data) || empty($data['sha'])) {
+            echo json_encode(['ok' => false, 'msg' => '无法获取 GitHub main 最新提交']); exit;
+        }
+        echo json_encode(['ok' => true, 'sha' => (string)$data['sha']]); exit;
+    }
+
     // AJAX 清空日志
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['ajax'] ?? '') === 'clear_log')) {
         $current_admin = auth_get_current_user();
@@ -71,7 +124,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             $result = debug_set_display_errors($enable);
             flash_set($result['ok'] ? 'success' : 'error',
                 $result['ok'] ? 'display_errors 已' . ($enable ? '开启' : '关闭') : '操作失败：' . $result['msg']);
-            header('Location: debug.php#debug'); exit;
+            header('Location: debug.php?de_toggled=1#debug'); exit;
         }
 
         // ── 清除 Cookie ──
@@ -114,10 +167,10 @@ $build_info = nav_read_build_info();
     var bi;
     try { bi = JSON.parse(raw.textContent || '{}'); } catch (e) { return; }
     if (!bi.git_commit || bi.git_commit === 'unknown') { el.textContent = ''; return; }
-    fetch('https://api.github.com/repos/codingriver/simple-homepage/commits/main', { headers: { 'Accept': 'application/vnd.github+json' } })
+    fetch('debug.php?ajax=github_main_commit', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r){ return r.json(); })
       .then(function(j){
-        if (!j || !j.sha) { el.textContent = '（无法获取 GitHub main 最新提交）'; return; }
+        if (!j || !j.ok || !j.sha) { el.textContent = '（无法获取 GitHub main 最新提交）'; return; }
         var remote = j.sha;
         var local = String(bi.git_commit);
         if (remote.indexOf(local) === 0 || local.indexOf(remote) === 0) {
@@ -242,7 +295,15 @@ function clearAllLogs() {
         pre.textContent = '清空请求失败，请重试';
     });
 }
-refreshLog();
+var debugUrl = new URL(window.location.href);
+var skipAutoLog = debugUrl.searchParams.get('de_toggled') === '1';
+if (skipAutoLog) {
+    document.getElementById('logContent').textContent = 'display_errors 切换后 PHP-FPM 正在后台重载，请手动刷新日志。';
+    debugUrl.searchParams.delete('de_toggled');
+    history.replaceState(null, '', debugUrl.pathname + (debugUrl.search ? debugUrl.search : '') + debugUrl.hash);
+} else {
+    refreshLog();
+}
 </script>
 <script>window.DEBUG_CSRF = <?= json_encode(csrf_token()) ?>;</script>
 

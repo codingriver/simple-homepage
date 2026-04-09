@@ -212,8 +212,10 @@ function statusBadge(status, timeText) {
   return '<div>'
     + '<span class="' + cls + '">' + label + '</span>'
     + timeHtml
-    + '</div>';
+      + '</div>';
 }
+
+var DDNS_RUN_POLLERS = {};
 
 function renderRows() {
   var tbody = document.getElementById('ddns-tbody');
@@ -237,10 +239,10 @@ function renderRows() {
       + '<td><code>' + escapeHtml(row.record_type) + '</code></td>'
       + '<td style="font-family:var(--mono);max-width:180px;word-break:break-all">' + escapeHtml(row.last_value || '—') + '</td>'
       + '<td style="font-family:var(--mono)">' + escapeHtml(row.cron) + '</td>'
-      + '<td>' + statusBadge(row.last_status, row.last_run_at || '') + '</td>'
+      + '<td>' + statusBadge(row.last_status, (row.last_status === 'running' ? row.started_at : row.last_run_at) || '') + '</td>'
       + '<td style="white-space:nowrap">'
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="toggleTask(' + jsonId + ')">' + (row.enabled ? '禁用' : '启用') + '</button> '
-      + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="runTask(' + jsonId + ')">执行</button> '
+      + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center;' + (row.last_status === 'running' ? 'opacity:.55;cursor:not-allowed' : '') + '" onclick="' + (row.last_status === 'running' ? 'return false' : 'runTask(' + jsonId + ')') + '">' + (row.last_status === 'running' ? '运行中' : '执行') + '</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="openDdnsLogModal(' + jsonId + ', ' + jsonName + ')">日志</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="openDdnsModal(' + jsonId + ')">编辑</button> '
       + '<button type="button" class="btn btn-sm btn-danger" style="min-width:58px;text-align:center;justify-content:center" onclick="deleteTask(' + jsonId + ', ' + jsonName + ')">删除</button>'
@@ -541,6 +543,18 @@ async function refreshRows() {
   renderRows();
 }
 
+function scheduleRunPoll(id, remaining) {
+  clearTimeout(DDNS_RUN_POLLERS[id]);
+  if (remaining <= 0) return;
+  DDNS_RUN_POLLERS[id] = setTimeout(async function() {
+    await refreshRows();
+    var row = DDNS_ROWS.find(function(item){ return item.id === id; });
+    if (row && row.last_status === 'running') {
+      scheduleRunPoll(id, remaining - 1);
+    }
+  }, 1000);
+}
+
 async function runTask(id, silent) {
   var row = DDNS_ROWS.find(function(item){ return item.id === id; });
   if (row) {
@@ -551,8 +565,13 @@ async function runTask(id, silent) {
   if (res.data && res.data.row) {
     upsertRow(res.data.row);
   }
+  if (res.ok && res.data && res.data.row && res.data.row.last_status === 'running') {
+    scheduleRunPoll(id, 20);
+  } else if (!res.ok) {
+    await refreshRows();
+  }
   if (!silent) {
-    showToast(res.msg || (res.ok ? '执行完成' : '执行失败'), res.ok ? 'success' : 'error');
+    showToast(res.msg || (res.ok ? '已开始后台执行' : '执行失败'), res.ok ? 'success' : 'error');
   }
 }
 
@@ -582,6 +601,11 @@ async function deleteTask(id, name) {
 document.addEventListener('DOMContentLoaded', function(){
   renderRows();
   toggleSourceFields();
+  DDNS_ROWS.forEach(function(row) {
+    if (row.last_status === 'running') {
+      scheduleRunPoll(row.id, 20);
+    }
+  });
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') { closeDdnsModal(); closeDdnsLogModal(); } });
 });
 </script>

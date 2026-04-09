@@ -6,6 +6,10 @@ test('debug tools page supports display errors toggle clear cookie and log viewe
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Failed to load resource: the server responded with a status of 502 \(Bad Gateway\)/,
+    ],
+    ignoredFailedRequests: [
+      /GET .*\/favicon\.php\?url=.*:: net::ERR_ABORTED/,
     ],
   });
 

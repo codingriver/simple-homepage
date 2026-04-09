@@ -259,16 +259,16 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
 
     const success = runDockerPhp('/var/www/nav/cli/run_scheduled_task.php', [taskId]);
     expect(success.code).toBe(0);
-    expect(success.stdout).toContain(`/var/www/nav/data/tasks/${taskId}`);
+    expect(success.stdout).toContain('/var/www/nav/data/tasks');
     expect(success.stdout).toContain('cli-scheduled-ok');
-    expect(runDockerShell(`test -d /var/www/nav/data/tasks/${taskId}`).code).toBe(0);
+    expect(runDockerShell('test -d /var/www/nav/data/tasks').code).toBe(0);
 
     const tasksAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as {
       tasks: Array<{ last_run?: string; last_code?: number; last_output?: string }>;
     };
     expect(tasksAfter.tasks[0]?.last_run).toBeTruthy();
     expect(tasksAfter.tasks[0]?.last_code).toBe(0);
-    expect(tasksAfter.tasks[0]?.last_output).toContain(`/var/www/nav/data/tasks/${taskId}`);
+    expect(tasksAfter.tasks[0]?.last_output).toContain('/var/www/nav/data/tasks');
     expect(tasksAfter.tasks[0]?.last_output).toContain('cli-scheduled-ok');
     await expect(fs.access(logFile)).resolves.toBeUndefined();
   } finally {

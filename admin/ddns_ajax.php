@@ -117,16 +117,16 @@ if ($action === 'test_source') {
 if ($action === 'run') {
     @set_time_limit(0);
     $id = trim((string)($input['id'] ?? ''));
-    $result = ddns_run_task_by_id($id);
-    $task = ddns_find_task(ddns_load_tasks(), $id);
+    $result = ddns_dispatch_task_async($id);
+    $task = is_array($result['task'] ?? null) ? $result['task'] : ddns_find_task(ddns_load_tasks(), $id);
     ddns_ajax_response([
         'ok' => $result['ok'],
-        'msg' => $result['msg'] ?? ($result['ok'] ? '执行完成' : '执行失败'),
+        'msg' => $result['msg'] ?? ($result['ok'] ? '已开始后台执行' : '执行失败'),
         'data' => [
             'result' => $result,
             'row' => $task ? ddns_task_row($task) : null,
         ],
-    ], $result['ok'] ? 200 : 400);
+    ], $result['ok'] ? 200 : 409);
 }
 
 if ($action === 'log') {

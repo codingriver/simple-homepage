@@ -9,11 +9,11 @@ test('build metadata compare hint reacts to mocked GitHub API results', async ({
     ],
   });
 
-  await page.route('https://api.github.com/repos/codingriver/simple-homepage/commits/main', async (route) => {
+  await page.route('**/admin/debug.php?ajax=github_main_commit', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ sha: '1234567890abcdef1234567890abcdef12345678' }),
+      body: JSON.stringify({ ok: true, sha: '1234567890abcdef1234567890abcdef12345678' }),
     });
   });
 

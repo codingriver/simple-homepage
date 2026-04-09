@@ -94,13 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             session_write_close();
         }
         @set_time_limit(0);
-        if (cron_is_ddns_dispatcher_id($id)) {
-            $ex = cron_execute_task($id);
-            flash_set($ex['ok'] ? 'success' : 'warn', $ex['ok'] ? 'DDNS 分组执行完成' : ('DDNS 分组执行有失败，退出码 ' . $ex['code']));
-            header('Location: scheduled_tasks.php'); exit;
-        }
-        $ex = cron_execute_task($id);
-        flash_set($ex['ok'] ? 'success' : 'error', $ex['ok'] ? '执行完成' : ('执行失败，退出码 ' . $ex['code']));
+        $ex = cron_dispatch_task_async($id);
+        flash_set($ex['ok'] ? 'success' : 'warn', $ex['msg']);
         header('Location: scheduled_tasks.php'); exit;
     }
 
@@ -145,6 +140,8 @@ $ddns_dispatcher = cron_sync_ddns_dispatcher_task();
 $tasks = load_scheduled_tasks()['tasks'] ?? [];
 foreach ($tasks as &$_t) {
     $_t['_is_system'] = cron_is_system_task($_t);
+    $_t['_running'] = cron_task_is_running($_t);
+    $_t['_started_at'] = (string)(cron_task_runtime($_t)['started_at'] ?? '');
     $_t['_next'] = (!empty($_t['enabled']) && !empty($_t['schedule']))
         ? (cron_next_run($_t['schedule']) ?: '-')
         : '-';
@@ -277,6 +274,11 @@ $CSRF = csrf_field();
         <?php else: ?>
           <span class="badge badge-gray">禁用</span>
         <?php endif; ?>
+        <?php if (!empty($t['_running'])): ?>
+          <div style="margin-top:6px">
+            <span class="badge badge-blue">运行中</span>
+          </div>
+        <?php endif; ?>
       </td>
       <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
         <?= htmlspecialchars($t['_next']) ?>
@@ -320,7 +322,7 @@ $CSRF = csrf_field();
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_run">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="submit" class="btn btn-sm btn-secondary">▶▶ 立即执行</button>
+          <button type="submit" class="btn btn-sm btn-secondary" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
         </form>
 
         <!-- 查看日志 -->
@@ -406,7 +408,7 @@ $CSRF = csrf_field();
           <div class="form-group" style="grid-column:1/-1">
             <label>最终工作目录</label>
             <div id="fm-workdir-preview" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-            <span class="form-hint">所有任务固定使用 data/tasks/&lt;任务ID&gt;；目录不存在会自动创建，删除任务时会连同目录一起清理。</span>
+            <span class="form-hint">所有任务固定使用 data/tasks；目录不存在会自动创建，不再按任务 ID 拆分子目录。</span>
           </div>
           <!-- 启用 -->
           <div class="form-group" style="justify-content:flex-end;padding-bottom:4px">
@@ -505,10 +507,9 @@ function closeTaskModal() {
   document.getElementById('task-modal').style.display = 'none';
 }
 function updateWorkdirPreview() {
-  var id = (document.getElementById('fm-id').value || '').trim();
   var preview = document.getElementById('fm-workdir-preview');
   if (!preview) return;
-  preview.textContent = '/var/www/nav/data/tasks/' + (id || '<保存后自动生成任务ID>');
+  preview.textContent = '/var/www/nav/data/tasks';
 }
 
 /* 实时预览下次运行时间（简单客户端提示，5段基本格式）*/
@@ -564,7 +565,7 @@ function clearCurrentLog() {
   form.submit();
 }
 function confirmDeleteTask(name) {
-  var lines = ['确定删除任务「' + name + '」？', '', '• 会删除该任务对应的日志', '• 会删除该任务的独立工作目录'];
+  var lines = ['确定删除任务「' + name + '」？', '', '• 会删除该任务对应的日志', '• 不会删除共享工作目录 data/tasks'];
   lines.push('', '此操作不可恢复。');
   return confirm(lines.join('\n'));
 }

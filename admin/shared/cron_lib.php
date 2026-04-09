@@ -7,9 +7,9 @@ require_once __DIR__ . '/../../shared/auth.php';
 define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
 define('DDNS_DISPATCHER_TASK_PREFIX', 'sys_ddns_dispatcher_');
+define('TASK_DISPATCH_LOG_FILE', DATA_DIR . '/logs/task_dispatch.log');
 
 define('PHP_BIN_CANDIDATES', [
-    PHP_BINARY,
     '/usr/local/bin/php',
     '/usr/bin/php',
     '/opt/homebrew/bin/php',
@@ -21,9 +21,31 @@ function task_log_file(string $id): string {
     return DATA_DIR . '/logs/cron_' . $id . '.log';
 }
 
-function task_default_workdir(string $id): string {
-    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
-    return TASKS_WORKDIR_ROOT . '/' . $id;
+function task_log_dir(): string {
+    return DATA_DIR . '/logs';
+}
+
+function task_ensure_log_dir(): void {
+    if (!is_dir(task_log_dir())) {
+        @mkdir(task_log_dir(), 0755, true);
+    }
+}
+
+function task_dispatch_log(string $message, array $context = []): void {
+    task_ensure_log_dir();
+    $line = '[' . date('Y-m-d H:i:s') . '] ' . $message;
+    if ($context !== []) {
+        $line .= ' ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    @file_put_contents(TASK_DISPATCH_LOG_FILE, $line . "\n", FILE_APPEND | LOCK_EX);
+}
+
+function task_project_root(): string {
+    return realpath(__DIR__ . '/../..') ?: '/var/www/nav';
+}
+
+function task_default_workdir(string $id = ''): string {
+    return TASKS_WORKDIR_ROOT;
 }
 
 function task_normalize_workdir_mode(?string $mode, string $default = 'task'): string {
@@ -31,8 +53,7 @@ function task_normalize_workdir_mode(?string $mode, string $default = 'task'): s
 }
 
 function task_resolve_workdir(array $task): string {
-    $id   = (string)($task['id'] ?? '');
-    return task_default_workdir($id);
+    return task_default_workdir((string)($task['id'] ?? ''));
 }
 
 function task_ensure_workdir_root(): void {
@@ -78,15 +99,149 @@ function task_clear_log(string $id): void {
     }
 }
 
+function cron_task_runtime(array $task): array {
+    return is_array($task['runtime'] ?? null) ? $task['runtime'] : [];
+}
+
+function cron_task_is_running(array $task): bool {
+    return !empty(cron_task_runtime($task)['running']);
+}
+
+function cron_mark_running(string $id, bool $running): bool {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return false;
+    }
+    $data = load_scheduled_tasks();
+    foreach ($data['tasks'] ?? [] as $idx => $task) {
+        if (($task['id'] ?? '') !== $id) {
+            continue;
+        }
+        if (!isset($data['tasks'][$idx]['runtime']) || !is_array($data['tasks'][$idx]['runtime'])) {
+            $data['tasks'][$idx]['runtime'] = [];
+        }
+        $data['tasks'][$idx]['runtime']['running'] = $running;
+        $data['tasks'][$idx]['runtime']['started_at'] = $running ? date('Y-m-d H:i:s') : '';
+        save_scheduled_tasks($data);
+        return true;
+    }
+    return false;
+}
+
+function cron_store_run_result(string $id, int $code, string $output): void {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return;
+    }
+    $data = load_scheduled_tasks();
+    foreach ($data['tasks'] ?? [] as $idx => $task) {
+        if (($task['id'] ?? '') !== $id) {
+            continue;
+        }
+        if (!isset($data['tasks'][$idx]['runtime']) || !is_array($data['tasks'][$idx]['runtime'])) {
+            $data['tasks'][$idx]['runtime'] = [];
+        }
+        $data['tasks'][$idx]['runtime']['running'] = false;
+        $data['tasks'][$idx]['runtime']['started_at'] = '';
+        $data['tasks'][$idx]['last_run'] = date('Y-m-d H:i:s');
+        $data['tasks'][$idx]['last_code'] = $code;
+        $data['tasks'][$idx]['last_output'] = mb_substr($output, 0, 8000);
+        save_scheduled_tasks($data);
+        return;
+    }
+}
+
+function task_spawn_background_command(string $command, ?string $cwd = null, array $env = []): array {
+    $cwd = $cwd ?: task_project_root();
+    if (!is_dir($cwd)) {
+        return ['ok' => false, 'msg' => '后台进程工作目录不存在'];
+    }
+    $baseEnv = [
+        'HOME'  => '/home/navwww',
+        'USER'  => 'navwww',
+        'LOGNAME' => 'navwww',
+        'PATH'  => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        'SHELL' => '/bin/bash',
+        'LANG'  => 'en_US.UTF-8',
+    ];
+    $pairs = [];
+    foreach (array_merge($baseEnv, $env) as $key => $value) {
+        $key = trim((string)$key);
+        if ($key === '' || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+            continue;
+        }
+        $pairs[] = $key . '=' . escapeshellarg((string)$value);
+    }
+    $shell = 'cd ' . escapeshellarg($cwd)
+        . ' && env ' . implode(' ', $pairs)
+        . ' nohup ' . $command
+        . ' >/dev/null 2>&1 </dev/null & printf %s "$!"';
+    $output = [];
+    $code = 0;
+    @exec('/bin/sh -lc ' . escapeshellarg($shell), $output, $code);
+    $pid = trim(implode("\n", $output));
+    if ($code !== 0 || !preg_match('/^\d+$/', $pid)) {
+        task_dispatch_log('spawn failed', [
+            'cwd' => $cwd,
+            'command' => $command,
+            'code' => $code,
+            'output' => $output,
+        ]);
+        return ['ok' => false, 'msg' => '无法启动后台进程'];
+    }
+    task_dispatch_log('spawn started', [
+        'cwd' => $cwd,
+        'command' => $command,
+        'pid' => (int)$pid,
+    ]);
+    return ['ok' => true, 'msg' => '后台进程已启动', 'pid' => (int)$pid];
+}
+
+function cron_dispatch_task_async(string $id): array {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return ['ok' => false, 'msg' => '无效的任务 ID'];
+    }
+    $data = load_scheduled_tasks();
+    $task = null;
+    foreach ($data['tasks'] ?? [] as $row) {
+        if (($row['id'] ?? '') === $id) {
+            $task = $row;
+            break;
+        }
+    }
+    if (!$task) {
+        return ['ok' => false, 'msg' => '任务不存在'];
+    }
+    if (cron_task_is_running($task)) {
+        return ['ok' => false, 'msg' => '后台执行已在运行中'];
+    }
+    if (!cron_is_ddns_dispatcher_id($id) && trim((string)($task['command'] ?? '')) === '') {
+        return ['ok' => false, 'msg' => '命令为空'];
+    }
+
+    if (!cron_mark_running($id, true)) {
+        return ['ok' => false, 'msg' => '任务状态更新失败'];
+    }
+
+    $command = escapeshellcmd(cron_php_binary())
+        . ' '
+        . escapeshellarg(task_project_root() . '/cli/run_scheduled_task.php')
+        . ' '
+        . escapeshellarg($id);
+    $spawn = task_spawn_background_command($command, task_project_root(), [
+        'TASK_ID' => $id,
+    ]);
+    if (!$spawn['ok']) {
+        cron_mark_running($id, false);
+        return $spawn;
+    }
+    return ['ok' => true, 'msg' => '已开始后台执行'];
+}
+
 function task_cleanup_on_delete(array $task): void {
     $id = (string)($task['id'] ?? '');
     task_clear_log($id);
-    $dir = task_resolve_workdir($task);
-    $root = realpath(TASKS_WORKDIR_ROOT);
-    $real = realpath($dir);
-    if ($root && $real && str_starts_with($real, $root . DIRECTORY_SEPARATOR)) {
-        task_rrmdir($real);
-    }
 }
 
 /** @return array{tasks: array<int, array>} */
@@ -127,9 +282,19 @@ function cron_ddns_dispatcher_id(string $schedule): string {
 }
 
 function cron_php_binary(): string {
-    foreach (PHP_BIN_CANDIDATES as $candidate) {
+    $candidates = array_values(array_unique(array_filter([
+        PHP_BINDIR . '/php',
+        PHP_BINARY,
+        ...PHP_BIN_CANDIDATES,
+    ], static fn($candidate) => is_string($candidate) && trim($candidate) !== '')));
+
+    foreach ($candidates as $candidate) {
         $candidate = trim((string)$candidate);
         if ($candidate === '') {
+            continue;
+        }
+        $basename = strtolower(basename($candidate));
+        if ($basename !== 'php' && (str_starts_with($basename, 'php-fpm') || str_starts_with($basename, 'php-cgi'))) {
             continue;
         }
         if ($candidate === 'php') {
@@ -396,15 +561,13 @@ function cron_execute_task(string $id): array {
         }
         $stamp = date('[Y-m-d H:i:s]') . ' [exit:' . $code . '] --- DDNS 分组执行 ---';
         file_put_contents($log_file, $stamp . "\n" . rtrim($output) . "\n", FILE_APPEND | LOCK_EX);
-        $data['tasks'][$idx]['last_run'] = date('Y-m-d H:i:s');
-        $data['tasks'][$idx]['last_code'] = $code;
-        $data['tasks'][$idx]['last_output'] = mb_substr($output, 0, 8000);
-        save_scheduled_tasks($data);
+        cron_store_run_result($id, $code, $output);
         return ['ok' => $code === 0, 'code' => $code, 'output' => $output, 'msg' => $code === 0 ? '执行完成' : "退出码 $code"];
     }
 
     $cmd = (string)($task['command'] ?? '');
     if ($cmd === '') {
+        cron_mark_running($id, false);
         return ['ok' => false, 'code' => -1, 'output' => '', 'msg' => '命令为空'];
     }
     // 统一换行符：兼容 Windows \r\n 和 Unix \n
@@ -480,11 +643,7 @@ function cron_execute_task(string $id): array {
     file_put_contents($log_file,
         $stamp . "\n" . rtrim($output) . "\n",
         FILE_APPEND | LOCK_EX);
-
-    $data['tasks'][$idx]['last_run']    = date('Y-m-d H:i:s');
-    $data['tasks'][$idx]['last_code']   = $code;
-    $data['tasks'][$idx]['last_output'] = mb_substr($output, 0, 8000);
-    save_scheduled_tasks($data);
+    cron_store_run_result($id, $code, $output);
     return ['ok' => $code === 0, 'code' => $code, 'output' => $output, 'msg' => $code === 0 ? '执行完成' : "退出码 $code"];
 }
 
@@ -584,6 +743,7 @@ function cron_run_task_by_id(string $id): void {
         fwrite(STDERR, "invalid task id\n");
         exit(1);
     }
+    cron_mark_running($id, true);
     $r = cron_execute_task($id);
     echo $r['output'] . "\n";
     exit($r['ok'] ? 0 : 1);

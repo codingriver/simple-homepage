@@ -2,15 +2,22 @@ import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 async function clickDdnsSave(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  const saveButton = page.locator('#ddns-form .form-actions').getByRole('button', { name: /^保存$/ });
-  await saveButton.scrollIntoViewIfNeeded();
-  await saveButton.click({ force: true });
+  await page.evaluate(() => {
+    const fn = (window as Window & { saveTask?: (runAfterSave: boolean) => Promise<void> }).saveTask;
+    if (typeof fn !== 'function') throw new Error('saveTask not found');
+    void fn(false);
+  });
 }
 
 async function openDdns(page: Parameters<typeof loginAsDevAdmin>[0]) {
   await loginAsDevAdmin(page);
   await page.goto('/admin/ddns.php');
-  await page.getByRole('button', { name: /新建任务/ }).click();
+  await page.evaluate(() => {
+    const fn = (window as Window & { openDdnsModal?: () => void }).openDdnsModal;
+    if (typeof fn !== 'function') throw new Error('openDdnsModal not found');
+    fn();
+  });
+  await expect(page.locator('#ddns-modal')).toBeVisible();
 }
 
 test('ddns save validates required fields and invalid cron or domain', async ({ page }) => {

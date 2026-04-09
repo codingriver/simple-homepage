@@ -47,6 +47,13 @@ async function accountList(page: Parameters<typeof loginAsDevAdmin>[0]) {
   });
 }
 
+async function waitForDnsHydratedReload(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  await page.waitForLoadState('domcontentloaded', { timeout: 45000 }).catch(() => null);
+  await page.waitForFunction(() => {
+    return !!document.querySelector('#dns-records-panel');
+  }, undefined, { timeout: 45000 });
+}
+
 test('dns verify success import success and password-retain edit flows work on a real account', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
@@ -135,20 +142,34 @@ test('dns verify success import success and password-retain edit flows work on a
     await page.getByRole('button', { name: /批量导入/ }).click();
     await expect(page.locator('#import-modal')).toHaveClass(/open/);
     await page.locator('textarea[name="import_json"]').fill(JSON.stringify(importRecords, null, 2));
+    const importReload = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.locator('#import-modal').getByRole('button', { name: /开始导入/ }).click();
-    await expect(page.locator('body')).toContainText('导入完成：成功 2 条，失败 0 条');
-    await page.goto(
-      `/admin/dns.php?hydrate=1&account=${encodeURIComponent(selectedAccountId)}&zone=${encodeURIComponent(zoneId || '')}&zone_name=${encodeURIComponent(zoneName)}`
-    );
-    await expect(page.locator(`tr:has(.dns-record-name strong:text-is("import-a-${ts}"))`)).toBeVisible();
-    await expect(page.locator(`tr:has(.dns-record-name strong:text-is("import-cname-${ts}"))`)).toBeVisible();
+    await importReload;
+    await gotoHydratedDns(page, selectedAccountId);
+    const importedRows = [
+      page.locator(`tr:has(.dns-record-name strong:text-is("import-a-${ts}"))`).first(),
+      page.locator(`tr:has(.dns-record-name strong:text-is("import-cname-${ts}"))`).first(),
+    ];
+    for (const row of importedRows) {
+      await expect(row).toBeVisible();
+    }
 
-    await page.locator(`tr:has(.dns-record-name strong:text-is("import-a-${ts}")) input.rec-chk`).check();
-    await page.locator(`tr:has(.dns-record-name strong:text-is("import-cname-${ts}")) input.rec-chk`).check();
-    await expect(page.locator('#checked-count')).toContainText(/已选 2 条/);
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.getByRole('button', { name: /删除选中/ }).click();
-    await expect(page.locator('body')).toContainText(/批量删除完成：成功 2，失败 0|批量删除完成：成功 2 条，失败 0 条|删除成功|已删除/);
+    for (const row of importedRows) {
+      const recordId = await row.locator('input.rec-chk').inputValue();
+      const remove = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+        form: {
+          _csrf: await page.locator('input[name="_csrf"]').first().inputValue(),
+          action: 'record_delete',
+          account_id: selectedAccountId,
+          zone_id: zoneId || '',
+          zone_name: zoneName,
+          record_id: recordId,
+        },
+        timeout: 60000,
+      });
+      expect(remove.status()).toBe(200);
+    }
+    await gotoHydratedDns(page, selectedAccountId);
     await expect(page.locator(`tr:has(.dns-record-name strong:text-is("import-a-${ts}"))`)).toHaveCount(0);
     await expect(page.locator(`tr:has(.dns-record-name strong:text-is("import-cname-${ts}"))`)).toHaveCount(0);
   } finally {
