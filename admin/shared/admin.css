@@ -35,7 +35,11 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: none;
+}
 
 body {
   background: var(--bg);
@@ -48,6 +52,8 @@ body {
     linear-gradient(rgba(0,212,170,0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0,212,170,0.018) 1px, transparent 1px);
   background-size: 40px 40px;
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: none;
 }
 
 /* ── 侧边栏 ── */

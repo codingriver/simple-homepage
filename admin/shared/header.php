@@ -57,6 +57,7 @@ $nav_items = [
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($page_title ?? '后台') ?> — <?= htmlspecialchars($site_name_admin) ?></title>
 <link rel="stylesheet" href="shared/admin.css">
+<script src="/gesture-guard.js" defer></script>
 </head>
 <body>
 <script>

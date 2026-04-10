@@ -3,12 +3,14 @@
 --fn:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
 --mono:'JetBrains Mono','Consolas',monospace}
 *{box-sizing:border-box;margin:0;padding:0}
+html{overscroll-behavior-x:none;overscroll-behavior-y:none}
 body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
 display:flex;align-items:center;justify-content:center;padding:20px;
 background-image:
   linear-gradient(rgba(0,212,170,0.018) 1px,transparent 1px),
   linear-gradient(90deg,rgba(0,212,170,0.018) 1px,transparent 1px);
-background-size:40px 40px}
+background-size:40px 40px;
+overscroll-behavior-x:none;overscroll-behavior-y:none}
 .card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;
 padding:40px 36px;width:100%;max-width:400px;
 box-shadow:0 24px 60px rgba(0,0,0,.5);

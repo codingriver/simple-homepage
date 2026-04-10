@@ -264,7 +264,7 @@ $CSRF = csrf_field();
                 ? '<span class="badge badge-green">0</span>'
                 : '<span class="badge badge-red">' . (int)$exitCode . '</span>');
     ?>
-    <tr>
+    <tr data-task-row data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" data-task-system="0">
       <td style="font-weight:600">
         <?= htmlspecialchars($t['name'] ?? '') ?>
         <?php if (!empty($t['_is_system'])): ?>
@@ -283,25 +283,21 @@ $CSRF = csrf_field();
           <?= htmlspecialchars($t['_workdir']) ?>
         </div>
       </td>
-      <td>
-        <?php if ($enabled): ?>
-          <span class="badge badge-green">启用</span>
-        <?php else: ?>
-          <span class="badge badge-gray">禁用</span>
-        <?php endif; ?>
-        <?php if (!empty($t['_running'])): ?>
-          <div style="margin-top:6px">
-            <span class="badge badge-blue">运行中</span>
-          </div>
-        <?php endif; ?>
+      <td data-task-status-cell>
+        <span class="badge <?= $enabled ? 'badge-green' : 'badge-gray' ?>" data-task-enabled-badge>
+          <?= $enabled ? '启用' : '禁用' ?>
+        </span>
+        <div data-task-running-wrap style="margin-top:6px;<?= !empty($t['_running']) ? '' : 'display:none' ?>">
+          <span class="badge badge-blue">运行中</span>
+        </div>
       </td>
-      <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+      <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)" data-task-next>
         <?= htmlspecialchars($t['_next']) ?>
       </td>
-      <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+      <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)" data-task-last-run>
         <?= htmlspecialchars($t['last_run'] ?? '—') ?>
       </td>
-      <td><?= $exitBadge ?></td>
+      <td data-task-exit><?= $exitBadge ?></td>
       <td style="white-space:nowrap">
 
         <!-- 启用 / 禁用 -->
@@ -311,6 +307,7 @@ $CSRF = csrf_field();
           <input type="hidden" name="action" value="task_toggle">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
           <button type="submit"
+            data-task-toggle-btn
             class="btn btn-sm <?= $enabled ? 'btn-secondary' : 'btn-secondary' ?>"
             style="<?= $enabled
               ? 'color:var(--yellow);border-color:rgba(255,204,68,.35)'
@@ -337,7 +334,7 @@ $CSRF = csrf_field();
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_run">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="submit" class="btn btn-sm btn-secondary" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
+          <button type="submit" class="btn btn-sm btn-secondary" data-task-run-btn <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
         </form>
 
         <!-- 查看日志 -->
@@ -431,7 +428,7 @@ $CSRF = csrf_field();
                   ? '<span class="badge badge-green">0</span>'
                   : '<span class="badge badge-red">' . (int)$exitCode . '</span>');
       ?>
-      <tr>
+      <tr data-task-row data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" data-task-system="1">
         <td style="font-weight:600">
           <?= htmlspecialchars($t['name'] ?? '') ?>
           <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -448,25 +445,21 @@ $CSRF = csrf_field();
             <?= htmlspecialchars($t['_workdir']) ?>
           </div>
         </td>
-        <td>
-          <?php if ($enabled): ?>
-            <span class="badge badge-green">启用</span>
-          <?php else: ?>
-            <span class="badge badge-gray">禁用</span>
-          <?php endif; ?>
-          <?php if (!empty($t['_running'])): ?>
-            <div style="margin-top:6px">
-              <span class="badge badge-blue">运行中</span>
-            </div>
-          <?php endif; ?>
+        <td data-task-status-cell>
+          <span class="badge <?= $enabled ? 'badge-green' : 'badge-gray' ?>" data-task-enabled-badge>
+            <?= $enabled ? '启用' : '禁用' ?>
+          </span>
+          <div data-task-running-wrap style="margin-top:6px;<?= !empty($t['_running']) ? '' : 'display:none' ?>">
+            <span class="badge badge-blue">运行中</span>
+          </div>
         </td>
-        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)" data-task-next>
           <?= htmlspecialchars($t['_next']) ?>
         </td>
-        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)" data-task-last-run>
           <?= htmlspecialchars($t['last_run'] ?? '—') ?>
         </td>
-        <td><?= $exitBadge ?></td>
+        <td data-task-exit><?= $exitBadge ?></td>
         <td style="white-space:nowrap">
           <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">自动维护</button>
           <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
@@ -474,7 +467,7 @@ $CSRF = csrf_field();
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="task_run">
             <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-            <button type="submit" class="btn btn-sm btn-secondary" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
+            <button type="submit" class="btn btn-sm btn-secondary" data-task-run-btn <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
           </form>
           <button type="button" class="btn btn-sm btn-secondary"
             onclick="openLogModal(<?= htmlspecialchars(json_encode($t['id'] ?? ''), ENT_QUOTES) ?>,
@@ -540,27 +533,6 @@ $CSRF = csrf_field();
               placeholder="*/5 * * * *"
               style="font-family:var(--mono)">
             <span class="form-hint" id="fm-next-tip" style="color:var(--ac);font-family:var(--mono)"></span>
-          </div>
-          <div class="form-group" style="grid-column:1/-1">
-            <label>最终工作目录</label>
-            <div id="fm-workdir-preview" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-            <span class="form-hint">所有任务固定使用 data/tasks；目录不存在会自动创建，不再按任务 ID 拆分子目录。</span>
-          </div>
-          <div class="form-group">
-            <label>脚本文件名</label>
-            <div id="fm-script-filename" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-          </div>
-          <div class="form-group">
-            <label>脚本完整路径</label>
-            <div id="fm-script-path" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-          </div>
-          <div class="form-group">
-            <label>日志文件名</label>
-            <div id="fm-log-filename" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
-          </div>
-          <div class="form-group">
-            <label>日志完整路径</label>
-            <div id="fm-log-path" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
           </div>
           <!-- 启用 -->
           <div class="form-group" style="justify-content:flex-end;padding-bottom:4px">
@@ -641,6 +613,9 @@ var CSRF_TOKEN = <?= json_encode($GLOBALS['_nav_csrf_token'] ?? '') ?>;
 var DEFAULT_TASK_COMMAND = <?= json_encode($default_task_command, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var TASKS_ROOT = '/var/www/nav/data/tasks';
 var logPollTimer = 0;
+var taskStatusPollTimer = 0;
+var taskStatusPollInFlight = false;
+var taskStatusPollingStopped = false;
 var scheduledTabState = { active: 'tasks' };
 
 function switchScheduledTab(tab) {
@@ -662,66 +637,8 @@ function switchScheduledTab(tab) {
 }
 
 /* ---- 任务弹窗 ---- */
-function suggestTaskScriptFilename(name) {
-  var trimmed = (name || '').trim();
-  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(trimmed)) {
-    return trimmed + '.sh';
-  }
-  return '保存后自动生成';
-}
-
-function taskLogFilenameFromScriptFilename(filename, taskId) {
-  var normalized = (filename || '').trim();
-  if (/\.sh$/i.test(normalized)) {
-    return normalized.replace(/\.sh$/i, '.log');
-  }
-  var safeId = String(taskId || '').replace(/[^A-Za-z0-9_-]/g, '');
-  return safeId ? ('task_' + safeId + '.log') : '保存后自动生成';
-}
-
-function updateScriptPreview(task) {
-  var filenameEl = document.getElementById('fm-script-filename');
-  var pathEl = document.getElementById('fm-script-path');
-  var logFilenameEl = document.getElementById('fm-log-filename');
-  var logPathEl = document.getElementById('fm-log-path');
-  var form = document.getElementById('task-form');
-  if (!filenameEl || !pathEl || !logFilenameEl || !logPathEl) return;
-  var id = (document.getElementById('fm-id').value || '').trim();
-  var name = (document.getElementById('fm-name').value || '').trim();
-  var filename = '';
-  var fullPath = '';
-  var logFilename = '';
-  var logPath = '';
-  if (task && task._script_filename) {
-    filename = task._script_filename;
-    fullPath = task._script_file || '';
-    logFilename = task._log_filename || '';
-    logPath = task._log_file || '';
-  } else if (form && form.dataset.scriptFilename) {
-    filename = form.dataset.scriptFilename;
-    fullPath = form.dataset.scriptPath || '';
-    logFilename = form.dataset.logFilename || '';
-    logPath = form.dataset.logPath || '';
-  }
-  if (!filename) {
-    filename = suggestTaskScriptFilename(name);
-    fullPath = filename === '保存后自动生成' ? '保存后自动生成固定脚本路径' : (TASKS_ROOT + '/' + filename);
-  }
-  if (!logFilename) {
-    logFilename = filename === '保存后自动生成' ? '保存后自动生成' : taskLogFilenameFromScriptFilename(filename, id);
-  }
-  if (!logPath) {
-    logPath = logFilename === '保存后自动生成' ? '保存后自动生成固定日志路径' : (TASKS_ROOT + '/' + logFilename);
-  }
-  filenameEl.textContent = filename;
-  pathEl.textContent = fullPath || (id ? (TASKS_ROOT + '/' + filename) : '保存后自动生成固定脚本路径');
-  logFilenameEl.textContent = logFilename;
-  logPathEl.textContent = logPath;
-}
-
 function openTaskModal(task) {
   var m = document.getElementById('task-modal');
-  var form = document.getElementById('task-form');
   var isNew = !task || !task.id;
   document.getElementById('modal-title').textContent = isNew ? '新建任务' : '编辑任务';
   document.getElementById('fm-id').value       = isNew ? ''   : (task.id       || '');
@@ -729,25 +646,12 @@ function openTaskModal(task) {
   document.getElementById('fm-schedule').value = isNew ? '*/5 * * * *' : (task.schedule || '');
   document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
-  if (form) {
-    form.dataset.scriptFilename = isNew ? '' : (task._script_filename || '');
-    form.dataset.scriptPath = isNew ? '' : (task._script_file || '');
-    form.dataset.logFilename = isNew ? '' : (task._log_filename || '');
-    form.dataset.logPath = isNew ? '' : (task._log_file || '');
-  }
-  updateWorkdirPreview();
-  updateScriptPreview(isNew ? null : task);
   updateNextTip();
   m.style.display = 'flex';
   setTimeout(function(){ document.getElementById('fm-name').focus(); }, 80);
 }
 function closeTaskModal() {
   document.getElementById('task-modal').style.display = 'none';
-}
-function updateWorkdirPreview() {
-  var preview = document.getElementById('fm-workdir-preview');
-  if (!preview) return;
-  preview.textContent = '/var/www/nav/data/tasks';
 }
 
 /* 实时预览下次运行时间（简单客户端提示，5段基本格式）*/
@@ -765,14 +669,139 @@ function updateNextTip() {
   }
   tip.style.color = 'var(--ac)';
 }
+
+function taskExitBadgeHtml(code) {
+  if (code === null || code === undefined || code === '') {
+    return '—';
+  }
+  var num = Number(code);
+  if (!Number.isFinite(num)) {
+    return '—';
+  }
+  if (num === 0) {
+    return '<span class="badge badge-green">0</span>';
+  }
+  return '<span class="badge badge-red">' + String(Math.trunc(num)) + '</span>';
+}
+
+function stopTaskStatusPolling() {
+  taskStatusPollingStopped = true;
+  if (taskStatusPollTimer) {
+    clearTimeout(taskStatusPollTimer);
+    taskStatusPollTimer = 0;
+  }
+}
+
+function scheduleTaskStatusPoll(delay) {
+  if (taskStatusPollingStopped) return;
+  if (taskStatusPollTimer) {
+    clearTimeout(taskStatusPollTimer);
+  }
+  taskStatusPollTimer = window.setTimeout(pollTaskStatuses, delay);
+}
+
+function updateTaskRowStatus(task) {
+  if (!task || !task.id) return;
+  var row = document.querySelector('[data-task-row][data-task-id="' + String(task.id) + '"]');
+  if (!row) return;
+
+  var enabledBadge = row.querySelector('[data-task-enabled-badge]');
+  var runningWrap = row.querySelector('[data-task-running-wrap]');
+  var nextCell = row.querySelector('[data-task-next]');
+  var lastRunCell = row.querySelector('[data-task-last-run]');
+  var exitCell = row.querySelector('[data-task-exit]');
+  var runBtn = row.querySelector('[data-task-run-btn]');
+  var toggleBtn = row.querySelector('[data-task-toggle-btn]');
+
+  if (enabledBadge) {
+    enabledBadge.textContent = task.enabled ? '启用' : '禁用';
+    enabledBadge.className = 'badge ' + (task.enabled ? 'badge-green' : 'badge-gray');
+  }
+  if (runningWrap) {
+    runningWrap.style.display = task.running ? '' : 'none';
+  }
+  if (nextCell) {
+    nextCell.textContent = task.next || '-';
+  }
+  if (lastRunCell) {
+    lastRunCell.textContent = task.last_run || '—';
+  }
+  if (exitCell) {
+    exitCell.innerHTML = taskExitBadgeHtml(task.last_code);
+  }
+  if (runBtn) {
+    runBtn.disabled = !!task.running;
+    runBtn.textContent = task.running ? '运行中' : '▶▶ 立即执行';
+    if (task.running) {
+      runBtn.style.opacity = '.55';
+      runBtn.style.cursor = 'not-allowed';
+    } else {
+      runBtn.style.opacity = '';
+      runBtn.style.cursor = '';
+    }
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = task.enabled ? '⏸ 禁用' : '▶ 启用';
+    toggleBtn.style.color = task.enabled ? 'var(--yellow)' : 'var(--green)';
+    toggleBtn.style.borderColor = task.enabled ? 'rgba(255,204,68,.35)' : 'rgba(61,255,160,.35)';
+  }
+
+  for (var i = 0; i < TASK_ROWS.length; i++) {
+    if ((TASK_ROWS[i] && TASK_ROWS[i].id) === task.id) {
+      TASK_ROWS[i].enabled = !!task.enabled;
+      TASK_ROWS[i].last_run = task.last_run || '';
+      TASK_ROWS[i].last_code = task.last_code;
+      TASK_ROWS[i]._running = !!task.running;
+      TASK_ROWS[i]._next = task.next || '-';
+      if (!TASK_ROWS[i].runtime || typeof TASK_ROWS[i].runtime !== 'object') {
+        TASK_ROWS[i].runtime = {};
+      }
+      TASK_ROWS[i].runtime.running = !!task.running;
+      TASK_ROWS[i].runtime.started_at = task.started_at || '';
+      break;
+    }
+  }
+}
+
+function pollTaskStatuses() {
+  if (taskStatusPollingStopped) return;
+  if (taskStatusPollInFlight) {
+    scheduleTaskStatusPoll(200);
+    return;
+  }
+  var ids = Array.from(document.querySelectorAll('[data-task-row][data-task-id]'))
+    .map(function(row) { return row.getAttribute('data-task-id') || ''; })
+    .filter(function(id) { return id !== ''; });
+  if (!ids.length) {
+    scheduleTaskStatusPoll(1000);
+    return;
+  }
+
+  taskStatusPollInFlight = true;
+  fetch('api/task_status.php?ids=' + encodeURIComponent(ids.join(',')), { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(payload) {
+      var tasks = payload && payload.tasks ? payload.tasks : {};
+      Object.keys(tasks).forEach(function(id) {
+        updateTaskRowStatus(tasks[id]);
+      });
+    })
+    .catch(function() {})
+    .then(function() {
+      taskStatusPollInFlight = false;
+      scheduleTaskStatusPoll(1000);
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   var inp = document.getElementById('fm-schedule');
   if (inp) inp.addEventListener('input', updateNextTip);
-  var idInp = document.getElementById('fm-id');
-  if (idInp) idInp.addEventListener('input', updateWorkdirPreview);
-  var nameInp = document.getElementById('fm-name');
-  if (nameInp) nameInp.addEventListener('input', function() { updateScriptPreview(null); });
   switchScheduledTab('tasks');
+  taskStatusPollingStopped = false;
+  pollTaskStatuses();
+  document.addEventListener('submit', stopTaskStatusPolling, true);
+  window.addEventListener('beforeunload', stopTaskStatusPolling);
+  window.addEventListener('pagehide', stopTaskStatusPolling);
   // 按 ESC 关闭弹窗
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape') { closeTaskModal(); closeLogModal(); }
@@ -831,6 +860,7 @@ function closeLogModal() {
 function clearCurrentLog() {
   if (!logState.id) return;
   if (!confirm('确定清空当前任务日志？此操作不可恢复。')) return;
+  stopTaskStatusPolling();
   var form = document.createElement('form');
   form.method = 'POST';
   form.action = 'scheduled_tasks.php';

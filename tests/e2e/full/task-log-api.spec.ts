@@ -49,10 +49,7 @@ test('task log api enforces auth and returns paged payload after a task run', as
 
   const row = page.locator('tr', { hasText: taskName }).last();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
-  await row.getByRole('button', { name: /编辑/ }).click();
-  const taskLogFilename = (await page.locator('#fm-log-filename').textContent())?.trim() || '';
-  expect(taskLogFilename).toBeTruthy();
-  await page.getByRole('button', { name: /取消/ }).click();
+  const taskLogFilename = `task_${taskId}.log`;
   await row.getByRole('button', { name: /立即执行/ }).click();
   await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
 

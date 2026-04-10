@@ -157,6 +157,18 @@ function task_try_prepare_cfst_runtime(): array {
     return ['ok' => false, 'msg' => '检测到 /tmp/cfst.lock 且当前运行用户无权清理；这通常是之前以 root 手动运行 cfst 留下的锁文件'];
 }
 
+function task_try_cleanup_stale_lock(string $id): void {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return;
+    }
+    $cmd = 'sudo -n /usr/local/bin/nav-task-compat lock ' . escapeshellarg($id) . ' >/dev/null 2>&1';
+    @exec($cmd, $out, $code);
+    if ($code === 0) {
+        task_dispatch_log('stale task lock cleaned', ['id' => $id]);
+    }
+}
+
 function task_is_valid_script_filename(string $filename): bool {
     $filename = trim($filename);
     if ($filename === '' || basename($filename) !== $filename) {
@@ -392,15 +404,23 @@ function task_read_file_segment(string $path, int $offset): string {
 function task_try_acquire_execution_lock(string $id): array {
     task_ensure_log_dir();
     $path = task_lock_file($id);
-    $handle = @fopen($path, 'c+');
-    if (!is_resource($handle)) {
+    for ($attempt = 0; $attempt < 2; $attempt++) {
+        $handle = @fopen($path, 'c+');
+        if (is_resource($handle)) {
+            if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+                @fclose($handle);
+                return ['ok' => false, 'msg' => '任务已在运行中', 'handle' => null];
+            }
+            return ['ok' => true, 'msg' => 'ok', 'handle' => $handle];
+        }
+        if ($attempt === 0 && file_exists($path)) {
+            task_try_cleanup_stale_lock($id);
+            clearstatcache(true, $path);
+            continue;
+        }
         return ['ok' => false, 'msg' => '任务锁文件打开失败', 'handle' => null];
     }
-    if (!@flock($handle, LOCK_EX | LOCK_NB)) {
-        @fclose($handle);
-        return ['ok' => false, 'msg' => '任务已在运行中', 'handle' => null];
-    }
-    return ['ok' => true, 'msg' => 'ok', 'handle' => $handle];
+    return ['ok' => false, 'msg' => '任务锁文件打开失败', 'handle' => null];
 }
 
 function task_release_execution_lock($handle): void {
@@ -473,6 +493,44 @@ function cron_task_runtime(array $task): array {
 
 function cron_task_is_running(array $task): bool {
     return !empty(cron_task_runtime($task)['running']);
+}
+
+function cron_task_has_active_lock(string $id): bool {
+    $lock = task_try_acquire_execution_lock($id);
+    if ($lock['ok'] ?? false) {
+        task_release_execution_lock($lock['handle'] ?? null);
+        return false;
+    }
+    return ($lock['msg'] ?? '') === '任务已在运行中';
+}
+
+function cron_reconcile_running_state(string $id): bool {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return false;
+    }
+    $data = load_scheduled_tasks();
+    foreach ($data['tasks'] ?? [] as $idx => $task) {
+        if (($task['id'] ?? '') !== $id) {
+            continue;
+        }
+        $runtime = cron_task_runtime($task);
+        if (empty($runtime['running'])) {
+            return false;
+        }
+        if (cron_task_has_active_lock($id)) {
+            return true;
+        }
+        task_try_cleanup_stale_lock($id);
+        if (!isset($data['tasks'][$idx]['runtime']) || !is_array($data['tasks'][$idx]['runtime'])) {
+            $data['tasks'][$idx]['runtime'] = [];
+        }
+        $data['tasks'][$idx]['runtime']['running'] = false;
+        $data['tasks'][$idx]['runtime']['started_at'] = '';
+        save_scheduled_tasks($data);
+        return false;
+    }
+    return false;
 }
 
 function cron_mark_running(string $id, bool $running): bool {
@@ -1170,6 +1228,59 @@ function task_log_page(string $id, int $page = 1): array {
     // 顺序输出（旧的在前，新的在后），默认最后一页
     $slice = array_slice($all, ($page - 1) * $per, $per);
     return ['lines' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages];
+}
+
+function task_status_snapshot(array $task): array {
+    $enabled = !empty($task['enabled']);
+    $id = (string)($task['id'] ?? '');
+    $running = cron_task_is_running($task);
+    if ($running && $id !== '') {
+        $running = cron_reconcile_running_state($id);
+        if (!$running) {
+            $task['runtime'] = array_merge(cron_task_runtime($task), [
+                'running' => false,
+                'started_at' => '',
+            ]);
+        }
+    }
+    return [
+        'id' => $id,
+        'enabled' => $enabled,
+        'running' => $running,
+        'started_at' => (string)(cron_task_runtime($task)['started_at'] ?? ''),
+        'last_run' => (string)($task['last_run'] ?? ''),
+        'last_code' => array_key_exists('last_code', $task) ? $task['last_code'] : null,
+        'next' => ($enabled && !empty($task['schedule'])) ? (cron_next_run((string)$task['schedule']) ?: '-') : '-',
+        'is_system' => cron_is_system_task($task),
+    ];
+}
+
+function scheduled_tasks_status_payload(array $ids = []): array {
+    $idMap = [];
+    foreach ($ids as $id) {
+        $clean = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$id);
+        if ($clean !== '') {
+            $idMap[$clean] = true;
+        }
+    }
+
+    $data = load_scheduled_tasks();
+    $tasks = [];
+    foreach ($data['tasks'] ?? [] as $task) {
+        $id = (string)($task['id'] ?? '');
+        if ($id === '') {
+            continue;
+        }
+        if ($idMap !== [] && !isset($idMap[$id])) {
+            continue;
+        }
+        $tasks[$id] = task_status_snapshot($task);
+    }
+
+    return [
+        'server_time' => date('Y-m-d H:i:s'),
+        'tasks' => $tasks,
+    ];
 }
 
 function cron_run_task_by_id(string $id): void {

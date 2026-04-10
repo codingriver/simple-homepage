@@ -78,14 +78,17 @@ NGINX;
 <html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?></title>
+<script src="/gesture-guard.js" defer></script>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ach:#7c73ff;
 --tx:#e2e4f0;--tm:#7b7f9e;--er:#ff6b6b;--r:12px;
 --fn:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
+html{overscroll-behavior-x:none;overscroll-behavior-y:none}
 body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
 padding:40px 16px;
-background-image:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(108,99,255,.18),transparent 70%)}
+background-image:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(108,99,255,.18),transparent 70%);
+overscroll-behavior-x:none;overscroll-behavior-y:none}
 .wrap{max-width:560px;margin:0 auto}
 .card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);
 padding:40px 36px;box-shadow:0 24px 60px rgba(0,0,0,.4)}

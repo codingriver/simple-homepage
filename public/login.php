@@ -69,6 +69,7 @@ $site_name   = $cfg['site_name'] ?? '导航中心';
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录 — <?= htmlspecialchars($site_name) ?></title>
 <link rel="stylesheet" href="login.css">
+<script src="/gesture-guard.js" defer></script>
 </head><body>
 <div class="card">
   <div class="logo"><div class="icon">🧭</div>

@@ -36,10 +36,13 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
 
   await expect(page.locator('#fm-working-dir-mode')).toHaveCount(0);
   await expect(page.locator('#fm-working-dir')).toHaveCount(0);
-  await expect(page.locator('#fm-workdir-preview')).toHaveText('/var/www/nav/data/tasks');
+  await expect(page.locator('#fm-workdir-preview')).toHaveCount(0);
+  await expect(page.locator('#fm-script-filename')).toHaveCount(0);
+  await expect(page.locator('#fm-script-path')).toHaveCount(0);
+  await expect(page.locator('#fm-log-filename')).toHaveCount(0);
+  await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await page.locator('#fm-name').fill(taskName);
   await page.locator('#fm-schedule').fill('*/10 * * * *');
-  await expect(page.locator('#fm-workdir-preview')).toHaveText('/var/www/nav/data/tasks');
   await page.locator('#fm-command').fill(Array.from({ length: 35 }, (_, i) => `echo line-${i + 1}`).join('\n'));
   await page.getByRole('button', { name: '💾 保存' }).click();
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
@@ -105,7 +108,11 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
   await expect(page.locator('#log-modal')).toBeHidden();
 
   await page.getByRole('button', { name: /新建任务/ }).click();
-  await expect(page.locator('#fm-workdir-preview')).toHaveText('/var/www/nav/data/tasks');
+  await expect(page.locator('#fm-workdir-preview')).toHaveCount(0);
+  await expect(page.locator('#fm-script-filename')).toHaveCount(0);
+  await expect(page.locator('#fm-script-path')).toHaveCount(0);
+  await expect(page.locator('#fm-log-filename')).toHaveCount(0);
+  await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await page.getByRole('button', { name: /取消/ }).click();
   await expect(page.locator('#task-modal')).toBeHidden();
 

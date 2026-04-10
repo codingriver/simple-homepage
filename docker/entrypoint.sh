@@ -217,9 +217,55 @@ cat >/usr/local/bin/nav-task-compat <<'EOF'
 #!/bin/sh
 set -eu
 
+sanitize_task_id() {
+    case "${1:-}" in
+        ''|*[!A-Za-z0-9_-]*)
+            return 1
+            ;;
+        *)
+            printf '%s\n' "$1"
+            ;;
+    esac
+}
+
 case "${1:-}" in
   cfst)
     rm -f /tmp/cfst.lock
+    ;;
+  lock)
+    task_id="$(sanitize_task_id "${2:-}")" || {
+      echo "invalid task id" >&2
+      exit 1
+    }
+    export NAV_TASK_LOCK_PATH="/var/www/nav/data/logs/cron_${task_id}.lock"
+    php <<'PHP'
+<?php
+$path = (string)(getenv('NAV_TASK_LOCK_PATH') ?: '');
+if ($path === '') {
+    fwrite(STDERR, "missing lock path\n");
+    exit(1);
+}
+if (!str_starts_with($path, '/var/www/nav/data/logs/cron_') || !str_ends_with($path, '.lock')) {
+    fwrite(STDERR, "invalid lock path\n");
+    exit(1);
+}
+if (!file_exists($path)) {
+    exit(0);
+}
+$handle = @fopen($path, 'c+');
+if (!is_resource($handle)) {
+    fwrite(STDERR, "open failed\n");
+    exit(1);
+}
+if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+    @fclose($handle);
+    exit(2);
+}
+@unlink($path);
+@flock($handle, LOCK_UN);
+@fclose($handle);
+exit(0);
+PHP
     ;;
   *)
     echo "unsupported compat target" >&2
@@ -228,7 +274,10 @@ case "${1:-}" in
 esac
 EOF
 chmod 755 /usr/local/bin/nav-task-compat
-printf 'navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat cfst\n' > /etc/sudoers.d/nav-task-compat
+cat >/etc/sudoers.d/nav-task-compat <<'EOF'
+navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat cfst
+navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat lock *
+EOF
 chmod 440 /etc/sudoers.d/nav-task-compat
 rm -f /tmp/cfst.lock 2>/dev/null || true
 

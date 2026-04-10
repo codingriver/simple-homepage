@@ -111,12 +111,14 @@ if ($bg_image) {
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($site_name) ?></title>
+<script src="/gesture-guard.js" defer></script>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ac2:#a78bfa;
 --tx:#e2e4f0;--tm:#7b7f9e;--r:14px;--fn:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
+html{overscroll-behavior-x:none;overscroll-behavior-y:none}
 body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
-<?= $bg_style ?>}
+<?= $bg_style ?>overscroll-behavior-x:none;overscroll-behavior-y:none}
 body.search-open{overflow-x:hidden}
 header{padding:12px 18px 10px;
 border-bottom:1px solid var(--bd);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100;
