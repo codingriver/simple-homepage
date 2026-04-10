@@ -24,7 +24,6 @@ const dnsConfigFile = path.join(dataDir, 'dns_config.json');
 const ddnsTasksFile = path.join(dataDir, 'ddns_tasks.json');
 const scheduledTasksFile = path.join(dataDir, 'scheduled_tasks.json');
 const ddnsLogDir = path.join(dataDir, 'logs');
-const taskLogDir = path.join(dataDir, 'logs');
 const taskWorkdirRoot = path.join(dataDir, 'tasks');
 
 function nowId(prefix: string) {
@@ -232,8 +231,8 @@ test('cli/ddns_sync covers missing task branch and due-task batch execution bran
 test('cli/run_scheduled_task validates task id and executes a seeded task', async () => {
   const snapshots = await snapshotLocalFiles([scheduledTasksFile]);
   const taskId = nowId('cli_task');
-  const logFile = path.join(taskLogDir, `cron_${taskId}.log`);
   const taskScriptFile = path.join(taskWorkdirRoot, 'cli_scheduled_task.sh');
+  const taskLogFile = path.join(taskWorkdirRoot, 'cli_scheduled_task.log');
 
   try {
     const invalid = runDockerPhp('/var/www/nav/cli/run_scheduled_task.php');
@@ -263,19 +262,25 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
     expect(success.stdout).toContain('/var/www/nav/data/tasks');
     expect(success.stdout).toContain('cli-scheduled-ok');
     expect(runDockerShell('test -d /var/www/nav/data/tasks').code).toBe(0);
+    expect(runDockerShell('test -d /var/www/nav/data/tasks/.tmp').code).toBe(0);
     await expect(fs.readFile(taskScriptFile, 'utf8')).resolves.toContain('echo cli-scheduled-ok');
+    await expect(fs.readFile(taskLogFile, 'utf8')).resolves.toContain('cli-scheduled-ok');
 
-    const tasksAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as {
-      tasks: Array<{ last_run?: string; last_code?: number; last_output?: string }>;
-    };
-    expect(tasksAfter.tasks[0]?.last_run).toBeTruthy();
-    expect(tasksAfter.tasks[0]?.last_code).toBe(0);
-    expect(tasksAfter.tasks[0]?.last_output).toContain('/var/www/nav/data/tasks');
-    expect(tasksAfter.tasks[0]?.last_output).toContain('cli-scheduled-ok');
-    await expect(fs.access(logFile)).resolves.toBeUndefined();
+    await expect
+      .poll(async () => {
+        const payload = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as {
+          tasks: Array<{ last_run?: string; last_code?: number; last_output?: string }>;
+        };
+        return payload.tasks[0] || null;
+      }, { timeout: 10000 })
+      .toMatchObject({
+        last_run: expect.any(String),
+        last_code: 0,
+        last_output: expect.stringContaining('cli-scheduled-ok'),
+      });
   } finally {
-    await fs.rm(logFile, { force: true }).catch(() => undefined);
     await fs.rm(taskScriptFile, { force: true }).catch(() => undefined);
+    await fs.rm(taskLogFile, { force: true }).catch(() => undefined);
     await restoreLocalFiles(snapshots);
   }
 });

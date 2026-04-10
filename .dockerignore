@@ -23,6 +23,12 @@ docs/
 # 本地开发与测试文件
 local/
 smoke/
+node_modules/
+test-artifacts/
+playwright-report/
+blob-report/
+coverage/
+.nyc_output/
 
 # 可能在宿主机生成的日志目录/文件
 logs/
@@ -46,4 +52,3 @@ local/php-dev.ini
 # 部署编排/调试脚本（不需要打入运行镜像）
 docker-compose.yml
 pack.sh
-

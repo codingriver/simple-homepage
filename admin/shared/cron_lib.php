@@ -18,7 +18,15 @@ define('PHP_BIN_CANDIDATES', [
 
 function task_log_file(string $id): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
-    return DATA_DIR . '/logs/cron_' . $id . '.log';
+    if ($id === '') {
+        return task_log_path_from_filename(task_default_log_filename(''));
+    }
+    $data = load_scheduled_tasks();
+    $task = task_find_by_id($id, $data['tasks'] ?? []);
+    if (is_array($task)) {
+        return task_log_file_for_task($task, $data['tasks'] ?? []);
+    }
+    return task_log_path_from_filename(task_default_log_filename($id));
 }
 
 function task_script_dir(): string {
@@ -37,6 +45,10 @@ function task_script_path_from_filename(string $filename): string {
     return rtrim(task_script_dir(), '/') . '/' . $filename;
 }
 
+function task_log_path_from_filename(string $filename): string {
+    return rtrim(task_script_dir(), '/') . '/' . $filename;
+}
+
 function task_lock_file(string $id): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     return DATA_DIR . '/logs/cron_' . $id . '.lock';
@@ -44,6 +56,11 @@ function task_lock_file(string $id): string {
 
 function task_script_file(string $id): string {
     return task_script_path_from_filename(task_legacy_script_filename($id));
+}
+
+function task_legacy_log_file(string $id): string {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    return DATA_DIR . '/logs/cron_' . $id . '.log';
 }
 
 function task_log_dir(): string {
@@ -109,6 +126,37 @@ function task_normalize_script_contents(string $cmd): string {
     return rtrim($cmd, "\n") . "\n";
 }
 
+function task_runtime_tmp_dir(array $task): string {
+    return rtrim(task_resolve_workdir($task), '/') . '/.tmp';
+}
+
+function task_ensure_runtime_tmp_dir(array $task): string {
+    task_ensure_workdir($task);
+    $dir = task_runtime_tmp_dir($task);
+    if ($dir !== '' && !is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    return $dir;
+}
+
+function task_command_mentions_cfst(string $cmd): bool {
+    return preg_match('/(^|[\\s\\/])(?:\\.\\/)?cfst(?:[-._A-Za-z0-9]*)\\b/i', $cmd) === 1;
+}
+
+function task_try_prepare_cfst_runtime(): array {
+    if (!file_exists('/tmp/cfst.lock')) {
+        return ['ok' => true, 'msg' => ''];
+    }
+    $cmd = 'sudo -n /usr/local/bin/nav-task-compat cfst >/dev/null 2>&1';
+    $out = [];
+    $code = 0;
+    @exec($cmd, $out, $code);
+    if ($code === 0 && !file_exists('/tmp/cfst.lock')) {
+        return ['ok' => true, 'msg' => '已清理 /tmp/cfst.lock'];
+    }
+    return ['ok' => false, 'msg' => '检测到 /tmp/cfst.lock 且当前运行用户无权清理；这通常是之前以 root 手动运行 cfst 留下的锁文件'];
+}
+
 function task_is_valid_script_filename(string $filename): bool {
     $filename = trim($filename);
     if ($filename === '' || basename($filename) !== $filename) {
@@ -134,6 +182,22 @@ function task_default_script_filename(string $id): string {
         $clean = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
     }
     return 'task_' . $clean . '.sh';
+}
+
+function task_log_filename_from_script_filename(string $scriptFilename): string {
+    $scriptFilename = trim($scriptFilename);
+    if ($scriptFilename === '') {
+        return '';
+    }
+    return preg_replace('/\.sh$/i', '.log', $scriptFilename) ?: '';
+}
+
+function task_default_log_filename(string $id): string {
+    $clean = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($clean === '') {
+        $clean = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
+    }
+    return 'task_' . $clean . '.log';
 }
 
 function task_script_filename_conflicts(string $filename, string $taskId, array $allTasks = []): bool {
@@ -171,6 +235,58 @@ function task_resolve_script_filename(array $task, array $allTasks = []): string
 
 function task_script_file_for_task(array $task, array $allTasks = []): string {
     return task_script_path_from_filename(task_resolve_script_filename($task, $allTasks));
+}
+
+function task_resolve_log_filename(array $task, array $allTasks = []): string {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+    $fromScript = task_log_filename_from_script_filename(task_resolve_script_filename($task, $allTasks));
+    if ($fromScript !== '') {
+        return $fromScript;
+    }
+    return task_default_log_filename($id);
+}
+
+function task_log_file_for_task(array $task, array $allTasks = []): string {
+    return task_log_path_from_filename(task_resolve_log_filename($task, $allTasks));
+}
+
+function task_find_by_id(string $id, array $tasks): ?array {
+    foreach ($tasks as $task) {
+        if (is_array($task) && (string)($task['id'] ?? '') === $id) {
+            return $task;
+        }
+    }
+    return null;
+}
+
+function task_existing_log_file(string $id): string {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return '';
+    }
+
+    $data = load_scheduled_tasks();
+    $task = task_find_by_id($id, $data['tasks'] ?? []);
+    if (is_array($task)) {
+        $current = task_log_file_for_task($task, $data['tasks'] ?? []);
+        if (is_file($current)) {
+            return $current;
+        }
+    }
+
+    $default = task_log_path_from_filename(task_default_log_filename($id));
+    if (is_file($default)) {
+        return $default;
+    }
+
+    $legacy = task_legacy_log_file($id);
+    if (is_file($legacy)) {
+        return $legacy;
+    }
+
+    return is_array($task)
+        ? task_log_file_for_task($task, $data['tasks'] ?? [])
+        : $default;
 }
 
 function task_read_script_contents_for_task(array $task, array $allTasks = []): string {
@@ -306,7 +422,7 @@ function task_is_execution_locked(string $id): bool {
 
 function task_append_skip_log(string $id, string $message): void {
     $file = task_log_file($id);
-    task_ensure_log_dir();
+    task_ensure_workdir_root();
     $line = '[' . date('Y-m-d H:i:s') . '] [skip] --- ' . task_execution_label() . ' --- ' . $message;
     @file_put_contents($file, $line . "\n", FILE_APPEND | LOCK_EX);
 }
@@ -334,9 +450,20 @@ function task_rrmdir(string $dir): void {
 }
 
 function task_clear_log(string $id): void {
-    $file = task_log_file($id);
-    if (file_exists($file)) {
-        @unlink($file);
+    $data = load_scheduled_tasks();
+    $task = task_find_by_id($id, $data['tasks'] ?? []);
+    $paths = [
+        task_log_file($id),
+        task_log_path_from_filename(task_default_log_filename($id)),
+        task_legacy_log_file($id),
+    ];
+    if (is_array($task)) {
+        $paths[] = task_log_file_for_task($task, $data['tasks'] ?? []);
+    }
+    foreach (array_unique(array_filter($paths)) as $file) {
+        if (file_exists($file)) {
+            @unlink($file);
+        }
     }
 }
 
@@ -487,6 +614,9 @@ function task_cleanup_on_delete(array $task): void {
     $paths = array_unique([
         task_script_file_for_task($task),
         task_script_file($id),
+        task_log_file_for_task($task),
+        task_log_path_from_filename(task_default_log_filename($id)),
+        task_legacy_log_file($id),
     ]);
     foreach ($paths as $script) {
         if (is_file($script)) {
@@ -500,15 +630,24 @@ function load_scheduled_tasks(): array {
     if (!file_exists(SCHEDULED_TASKS_FILE)) {
         return ['tasks' => []];
     }
-    $raw = file_get_contents(SCHEDULED_TASKS_FILE);
-    $data = json_decode($raw ?: '[]', true);
-    if (!is_array($data)) {
-        return ['tasks' => []];
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        clearstatcache(true, SCHEDULED_TASKS_FILE);
+        $raw = @file_get_contents(SCHEDULED_TASKS_FILE);
+        if ($raw === false || trim($raw) === '') {
+            usleep(50000);
+            continue;
+        }
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            usleep(50000);
+            continue;
+        }
+        if (!isset($data['tasks']) || !is_array($data['tasks'])) {
+            return ['tasks' => []];
+        }
+        return $data;
     }
-    if (!isset($data['tasks']) || !is_array($data['tasks'])) {
-        return ['tasks' => []];
-    }
-    return $data;
+    return ['tasks' => []];
 }
 
 function task_sort_for_display(array $tasks): array {
@@ -543,9 +682,22 @@ function save_scheduled_tasks(array $data): void {
     if (!isset($data['tasks']) || !is_array($data['tasks'])) {
         $data['tasks'] = [];
     }
-    file_put_contents(SCHEDULED_TASKS_FILE,
-        json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        LOCK_EX);
+    $dir = dirname(SCHEDULED_TASKS_FILE);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($json)) {
+        $json = "{\"tasks\":[]}\n";
+    }
+    $tmp = @tempnam($dir, 'scheduled_tasks_');
+    if ($tmp !== false) {
+        if (@file_put_contents($tmp, $json, LOCK_EX) !== false && @rename($tmp, SCHEDULED_TASKS_FILE)) {
+            return;
+        }
+        @unlink($tmp);
+    }
+    file_put_contents(SCHEDULED_TASKS_FILE, $json, LOCK_EX);
 }
 
 function cron_is_system_task(array $task): bool {
@@ -836,11 +988,8 @@ function cron_execute_task(string $id): array {
             ? '当前分组下没有可执行的 DDNS 任务'
             : implode("\n", $results);
         $code = $hasFail ? 1 : 0;
-        $log_dir  = DATA_DIR . '/logs';
-        $log_file = $log_dir . '/cron_' . $id . '.log';
-        if (!is_dir($log_dir)) {
-            mkdir($log_dir, 0755, true);
-        }
+        task_ensure_workdir($task);
+        $log_file = task_log_file_for_task($task, $data['tasks'] ?? []);
         $stamp = date('[Y-m-d H:i:s]') . ' [exit:' . $code . '] --- DDNS 分组' . $runLabel . ' ---';
         file_put_contents($log_file, $stamp . "\n" . rtrim($output) . "\n", FILE_APPEND | LOCK_EX);
         cron_store_run_result($id, $code, $output);
@@ -855,6 +1004,7 @@ function cron_execute_task(string $id): array {
     }
     $workdir = task_resolve_workdir($task);
     task_ensure_workdir($task);
+    $runtimeTmpDir = task_ensure_runtime_tmp_dir($task);
     $script_file = task_script_file_for_task($task, $data['tasks'] ?? []);
     if (!is_file($script_file)) {
         $script_write = task_write_script_file($task, $cmd, $data['tasks'] ?? []);
@@ -864,11 +1014,23 @@ function cron_execute_task(string $id): array {
         }
         $script_file = (string)$script_write['path'];
     }
-    $log_file = task_log_file($id);
-    task_ensure_log_dir();
+    $log_file = task_log_file_for_task($task, $data['tasks'] ?? []);
+    task_ensure_workdir($task);
     $log_offset = task_file_size($log_file);
     $start_stamp = date('[Y-m-d H:i:s]') . ' --- ' . $runLabel . ' ---';
     @file_put_contents($log_file, $start_stamp . "\n", FILE_APPEND | LOCK_EX);
+
+    if (task_command_mentions_cfst($cmd)) {
+        $compat = task_try_prepare_cfst_runtime();
+        if (($compat['msg'] ?? '') !== '') {
+            @file_put_contents($log_file, '[compat] ' . $compat['msg'] . "\n", FILE_APPEND | LOCK_EX);
+        }
+        if (!($compat['ok'] ?? false)) {
+            $output = task_read_file_segment($log_file, $log_offset);
+            cron_store_run_result($id, 1, $output);
+            return ['ok' => false, 'code' => 1, 'output' => $output, 'msg' => $compat['msg']];
+        }
+    }
 
     $desc = [
         0 => ['file', '/dev/null', 'r'],
@@ -886,6 +1048,9 @@ function cron_execute_task(string $id): array {
         'TASK_WORKDIR' => $workdir,
         'TASK_SCRIPT_FILE' => $script_file,
         'TASK_LOG_FILE' => $log_file,
+        'TMPDIR' => $runtimeTmpDir,
+        'TMP' => $runtimeTmpDir,
+        'TEMP' => $runtimeTmpDir,
     ];
     $cmdline = '/bin/bash ' . escapeshellarg($script_file)
         . ' >> ' . escapeshellarg($log_file) . ' 2>&1';
@@ -993,7 +1158,7 @@ function task_toggle_enabled(string $id): bool|null {
  */
 function task_log_page(string $id, int $page = 1): array {
     $id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
-    $file = DATA_DIR . '/logs/cron_' . $id . '.log';
+    $file = task_existing_log_file($id);
     if (!file_exists($file)) {
         return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0];
     }
@@ -1026,6 +1191,13 @@ function cron_run_task_by_id(string $id): void {
     cron_mark_running($id, true);
     try {
         $r = cron_execute_task($id);
+        if (!($r['ok'] ?? false)) {
+            task_dispatch_log('task run failed', [
+                'id' => $id,
+                'code' => $r['code'] ?? null,
+                'msg' => $r['msg'] ?? 'unknown error',
+            ]);
+        }
         if (getenv('TASK_SILENT_CLI') !== '1') {
             echo $r['output'] . "\n";
         }

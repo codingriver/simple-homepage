@@ -120,7 +120,7 @@ if command -v envsubst >/dev/null 2>&1; then
     envsubst '${NAV_PORT}' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp
     mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf
 else
-    # Alpine 上 envsubst 在 gettext 包，降级处理
+    # 极端情况下 gettext-base 不可用时降级为 sed 替换
     sed -i "s/\${NAV_PORT}/${NAV_PORT}/g" /etc/nginx/http.d/nav.conf
 fi
 
@@ -198,8 +198,9 @@ if [ -f /var/www/nav/data/sites.json ]; then
         echo "[entrypoint][WARN] 反代配置预生成失败，容器将继续启动，可稍后在后台手动 Reload Nginx"
 fi
 
-# ── 删除 Alpine Nginx 自带 default.conf（会拦截所有请求返回 404）──
+# ── 删除默认站点配置（会拦截所有请求返回 404）──
 rm -f /etc/nginx/http.d/default.conf
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
 # ── 修正 PHP ini 文件权限（navwww 需要读写 display_errors 开关）──
 if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
@@ -208,10 +209,28 @@ if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
 fi
 
 # ── 创建 nginx 操作包装脚本（供 PHP 后台调用）──
-printf '#!/bin/busybox sh\nif [ ! -f /run/nginx/nginx.pid ]; then\n  echo "nginx pid not found"\n  exit 1\nfi\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
+printf '#!/bin/sh\nif [ ! -f /run/nginx/nginx.pid ]; then\n  echo "nginx pid not found"\n  exit 1\nfi\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
 chmod 755 /usr/local/bin/nginx-reload
-printf '#!/bin/busybox sh\nexec /usr/sbin/nginx -t\n' > /usr/local/bin/nginx-test
+printf '#!/bin/sh\nexec /usr/sbin/nginx -t\n' > /usr/local/bin/nginx-test
 chmod 755 /usr/local/bin/nginx-test
+cat >/usr/local/bin/nav-task-compat <<'EOF'
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  cfst)
+    rm -f /tmp/cfst.lock
+    ;;
+  *)
+    echo "unsupported compat target" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod 755 /usr/local/bin/nav-task-compat
+printf 'navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat cfst\n' > /etc/sudoers.d/nav-task-compat
+chmod 440 /etc/sudoers.d/nav-task-compat
+rm -f /tmp/cfst.lock 2>/dev/null || true
 
 # ── 运行时目录 ──
 mkdir -p /run/nginx /var/log/nginx /var/log/php-fpm

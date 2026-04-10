@@ -1,5 +1,9 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+
+const tasksRoot = path.resolve(__dirname, '../../../data/tasks');
 
 async function waitForTaskLogLines(page: Parameters<typeof loginAsDevAdmin>[0], taskId: string, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
@@ -45,6 +49,10 @@ test('task log api enforces auth and returns paged payload after a task run', as
 
   const row = page.locator('tr', { hasText: taskName }).last();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
+  await row.getByRole('button', { name: /编辑/ }).click();
+  const taskLogFilename = (await page.locator('#fm-log-filename').textContent())?.trim() || '';
+  expect(taskLogFilename).toBeTruthy();
+  await page.getByRole('button', { name: /取消/ }).click();
   await row.getByRole('button', { name: /立即执行/ }).click();
   await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
 
@@ -61,6 +69,15 @@ test('task log api enforces auth and returns paged payload after a task run', as
   expect(ok.json.lines.length).toBeGreaterThan(0);
   expect(ok.json.page).toBe(1);
   expect(ok.json.pages).toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(path.join(tasksRoot, taskLogFilename), 'utf8');
+      } catch {
+        return '';
+      }
+    }, { timeout: 10000 })
+    .toContain('api-log-line-1');
 
   await tracker.assertNoClientErrors();
 });

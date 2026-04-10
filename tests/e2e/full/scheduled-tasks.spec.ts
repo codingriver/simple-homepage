@@ -65,10 +65,15 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   await editedRow.getByRole('button', { name: /编辑/ }).click();
   const taskScriptFilename = await page.locator('#fm-script-filename').textContent();
   const taskScriptPath = await page.locator('#fm-script-path').textContent();
+  const taskLogFilename = await page.locator('#fm-log-filename').textContent();
+  const taskLogPath = await page.locator('#fm-log-path').textContent();
   expect(taskScriptFilename || '').toBeTruthy();
   expect(taskScriptPath || '').toContain('/var/www/nav/data/tasks/');
+  expect(taskLogFilename || '').toBeTruthy();
+  expect(taskLogPath || '').toContain('/var/www/nav/data/tasks/');
   await page.getByRole('button', { name: /取消/ }).click();
   const resolvedTaskScriptPath = path.join(taskScriptsRoot, (taskScriptFilename || '').trim());
+  const resolvedTaskLogPath = path.join(taskScriptsRoot, (taskLogFilename || '').trim());
   await expect
     .poll(async () => {
       try {
@@ -96,6 +101,17 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   );
   await expect(page.locator('#log-modal')).toBeVisible();
   await waitForTaskLogLines(page, taskId);
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(resolvedTaskLogPath, 'utf8');
+      } catch {
+        return '';
+      }
+    }, { timeout: 10000 })
+    .toContain('edited-task');
+  await page.waitForTimeout(2500);
+  await expect(page.locator('#log-body')).not.toContainText('加载中…');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#log-modal').getByRole('button', { name: /清空日志/ }).click();
   await page.waitForURL(/\/admin\/scheduled_tasks\.php/);
@@ -103,6 +119,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   expect(clearedLog.ok()).toBeTruthy();
   const clearedLogJson = await clearedLog.json();
   expect(clearedLogJson.lines ?? []).toHaveLength(0);
+  await expect(fs.access(resolvedTaskLogPath).then(() => true).catch(() => false)).resolves.toBe(false);
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator(`tr:has-text("${editedName}")`).first().getByRole('button', { name: /删除/ }).click();

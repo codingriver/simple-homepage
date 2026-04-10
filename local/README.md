@@ -11,6 +11,8 @@
 
 如果你只是第一次部署项目，先看根目录的 [README.md](../README.md) 就够了。
 
+当前镜像基础已切换到 Debian 系 `php:8.2-fpm-bookworm`。相比 Alpine，镜像体积会更大，但计划任务里执行常见第三方 Linux 二进制的兼容性更好。
+
 ## 1. 生产部署的进阶参数
 
 根目录 README 使用的是最简单的部署方式。下面这些内容适合需要进一步定制的人。
@@ -64,8 +66,10 @@ data/
 - `sites.json` 保存站点和分组
 - `scheduled_tasks.json` 保存计划任务定义和运行结果
 - `logs/` 保存各类日志
-- `tasks/` 是计划任务共享工作目录，任务脚本会持久保存为 `data/tasks/<任务ID>.sh`
-- 计划任务运行日志位于 `data/logs/cron_<任务ID>.log`
+- `tasks/` 是计划任务共享工作目录，任务脚本会持久保存为 `data/tasks/<脚本文件名>.sh`
+- 计划任务脚本和运行日志都位于 `data/tasks/`
+  - 脚本文件为 `xxx.sh`
+  - 对应日志文件为同名 `xxx.log`
 - `backups/` 保存备份快照
 
 ## 2. 容器内 CLI 管理命令

@@ -170,6 +170,8 @@ foreach ($tasks as &$_t) {
     $_t['_workdir_mode_label'] = '任务目录';
     $_t['_script_filename'] = task_resolve_script_filename($_t, $tasks);
     $_t['_script_file'] = task_script_file_for_task($_t, $tasks);
+    $_t['_log_filename'] = task_resolve_log_filename($_t, $tasks);
+    $_t['_log_file'] = task_log_file_for_task($_t, $tasks);
 }
 unset($_t);
 $manual_tasks = array_values(array_filter($tasks, fn($row) => empty($row['_is_system'])));
@@ -552,6 +554,14 @@ $CSRF = csrf_field();
             <label>脚本完整路径</label>
             <div id="fm-script-path" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
           </div>
+          <div class="form-group">
+            <label>日志文件名</label>
+            <div id="fm-log-filename" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
+          </div>
+          <div class="form-group">
+            <label>日志完整路径</label>
+            <div id="fm-log-path" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
+          </div>
           <!-- 启用 -->
           <div class="form-group" style="justify-content:flex-end;padding-bottom:4px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
@@ -570,7 +580,7 @@ $CSRF = csrf_field();
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
             style="font-family:var(--mono);font-size:12px;resize:vertical;
                    min-height:120px;max-height:400px;overflow-y:auto;line-height:1.55"></textarea>
-          <span class="form-hint">保存时会直接把这里的文本写入上面的脚本文件；执行时等价于 <code style="font-family:var(--mono)">/bin/bash script.sh &gt;&gt; data/logs/cron_&lt;任务ID&gt;.log 2&gt;&amp;1</code>。脚本文件默认不删除，后续保存同一个任务时只更新这个固定脚本文件。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
+          <span class="form-hint">保存时会直接把这里的文本写入上面的脚本文件；执行时等价于 <code style="font-family:var(--mono)">/bin/bash script.sh &gt;&gt; data/tasks/同名.log 2&gt;&amp;1</code>。脚本文件默认不删除，后续保存同一个任务时只更新这个固定脚本文件。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
         </div>
       </form>
     </div>
@@ -660,28 +670,53 @@ function suggestTaskScriptFilename(name) {
   return '保存后自动生成';
 }
 
+function taskLogFilenameFromScriptFilename(filename, taskId) {
+  var normalized = (filename || '').trim();
+  if (/\.sh$/i.test(normalized)) {
+    return normalized.replace(/\.sh$/i, '.log');
+  }
+  var safeId = String(taskId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  return safeId ? ('task_' + safeId + '.log') : '保存后自动生成';
+}
+
 function updateScriptPreview(task) {
   var filenameEl = document.getElementById('fm-script-filename');
   var pathEl = document.getElementById('fm-script-path');
+  var logFilenameEl = document.getElementById('fm-log-filename');
+  var logPathEl = document.getElementById('fm-log-path');
   var form = document.getElementById('task-form');
-  if (!filenameEl || !pathEl) return;
+  if (!filenameEl || !pathEl || !logFilenameEl || !logPathEl) return;
   var id = (document.getElementById('fm-id').value || '').trim();
   var name = (document.getElementById('fm-name').value || '').trim();
   var filename = '';
   var fullPath = '';
+  var logFilename = '';
+  var logPath = '';
   if (task && task._script_filename) {
     filename = task._script_filename;
     fullPath = task._script_file || '';
+    logFilename = task._log_filename || '';
+    logPath = task._log_file || '';
   } else if (form && form.dataset.scriptFilename) {
     filename = form.dataset.scriptFilename;
     fullPath = form.dataset.scriptPath || '';
+    logFilename = form.dataset.logFilename || '';
+    logPath = form.dataset.logPath || '';
   }
   if (!filename) {
     filename = suggestTaskScriptFilename(name);
     fullPath = filename === '保存后自动生成' ? '保存后自动生成固定脚本路径' : (TASKS_ROOT + '/' + filename);
   }
+  if (!logFilename) {
+    logFilename = filename === '保存后自动生成' ? '保存后自动生成' : taskLogFilenameFromScriptFilename(filename, id);
+  }
+  if (!logPath) {
+    logPath = logFilename === '保存后自动生成' ? '保存后自动生成固定日志路径' : (TASKS_ROOT + '/' + logFilename);
+  }
   filenameEl.textContent = filename;
   pathEl.textContent = fullPath || (id ? (TASKS_ROOT + '/' + filename) : '保存后自动生成固定脚本路径');
+  logFilenameEl.textContent = logFilename;
+  logPathEl.textContent = logPath;
 }
 
 function openTaskModal(task) {
@@ -697,6 +732,8 @@ function openTaskModal(task) {
   if (form) {
     form.dataset.scriptFilename = isNew ? '' : (task._script_filename || '');
     form.dataset.scriptPath = isNew ? '' : (task._script_file || '');
+    form.dataset.logFilename = isNew ? '' : (task._log_filename || '');
+    form.dataset.logPath = isNew ? '' : (task._log_file || '');
   }
   updateWorkdirPreview();
   updateScriptPreview(isNew ? null : task);
@@ -743,22 +780,49 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 /* ---- 日志弹窗 ---- */
-var logState = { id: '', name: '', page: 1, pages: 1 };
+var logState = { id: '', name: '', page: 1, pages: 1, requestSeq: 0 };
+
+function isLogNearBottom(body) {
+  return (body.scrollHeight - body.scrollTop - body.clientHeight) < 32;
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function renderLogLines(lines) {
+  return lines.map(function(line){
+    var cls = '';
+    var safe = escapeHtml(line);
+    if (/\bFAILED\b|error|fail|fatal|exception/i.test(safe)) cls = 'color:var(--red)';
+    else if (/\bSKIP\b|warn/i.test(safe)) cls = 'color:var(--yellow)';
+    else if (/\bUPDATED\b|\bOK\b|success|done|完成/i.test(safe)) cls = 'color:var(--green)';
+    return cls
+      ? '<div style="' + cls + '"><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>'
+      : '<div><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>';
+  }).join('');
+}
 
 function openLogModal(id, name) {
-  logState = { id: id, name: name, page: 1, pages: 1 };
+  logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0 };
   document.getElementById('log-modal-title').textContent = '运行日志 — ' + name;
   document.getElementById('log-modal').style.display = 'flex';
+  var body = document.getElementById('log-body');
+  body.dataset.signature = '';
   if (logPollTimer) clearInterval(logPollTimer);
   logPollTimer = setInterval(function() {
     if (document.getElementById('log-modal').style.display !== 'flex') return;
-    logLoadPage(logState.page || 1, false);
+    logLoadPage(logState.page || 1, false, { silent: true });
   }, 2000);
   // 先加载第1页获取总页数，再跳到最后一页
-  logLoadPage(1, true);
+  logLoadPage(1, true, { forceScrollBottom: true });
 }
 function closeLogModal() {
   document.getElementById('log-modal').style.display = 'none';
+  logState.requestSeq += 1;
   if (logPollTimer) {
     clearInterval(logPollTimer);
     logPollTimer = 0;
@@ -795,23 +859,30 @@ function copyTaskWorkdir(path) {
   window.prompt('请手动复制工作目录：', path);
 }
 
-function logLoadPage(p, jumpToLast) {
+function logLoadPage(p, jumpToLast, options) {
+  options = options || {};
   if (p < 1 || p > logState.pages) return;
   logState.page = p;
   var body = document.getElementById('log-body');
-  body.innerHTML = '<span style="color:var(--tm)">加载中…</span>';
+  var prevSignature = body.dataset.signature || '';
+  var shouldStickBottom = isLogNearBottom(body) || !!options.forceScrollBottom;
+  if (!options.silent) {
+    body.innerHTML = '<span style="color:var(--tm)">加载中…</span>';
+  }
 
   var url = 'api/task_log.php?id=' + encodeURIComponent(logState.id) + '&page=' + p;
+  var requestSeq = ++logState.requestSeq;
   fetch(url, { credentials: 'same-origin' })
     .then(function(r){ return r.json(); })
     .then(function(d) {
+      if (requestSeq !== logState.requestSeq) return;
       if (d.error) { body.innerHTML = '<span style="color:var(--red)">' + d.error + '</span>'; return; }
       logState.pages = d.pages || 1;
       logState.page  = d.page  || 1;
 
       // 首次打开跳到最后一页
       if (jumpToLast && d.pages > 1) {
-        logLoadPage(d.pages, false);
+        logLoadPage(d.pages, false, { forceScrollBottom: true });
         return;
       }
 
@@ -824,24 +895,24 @@ function logLoadPage(p, jumpToLast) {
       document.getElementById('log-last-btn').disabled = d.page >= d.pages;
 
       if (!d.lines || d.lines.length === 0) {
-        body.innerHTML = '<span style="color:var(--tm)">暂无日志记录</span>';
+        var emptySignature = 'empty:' + d.page + ':' + d.total;
+        if (!options.silent || prevSignature !== emptySignature) {
+          body.innerHTML = '<span style="color:var(--tm)">暂无日志记录</span>';
+          body.dataset.signature = emptySignature;
+        }
         return;
       }
-      var html = d.lines.map(function(line){
-        var cls = '', safe = line
-          .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        if (/\bFAILED\b|error|fail|fatal|exception/i.test(safe)) cls = 'color:var(--red)';
-        else if (/\bSKIP\b|warn/i.test(safe))                    cls = 'color:var(--yellow)';
-        else if (/\bUPDATED\b|\bOK\b|success|done|完成/i.test(safe)) cls = 'color:var(--green)';
-        return cls
-          ? '<div style="' + cls + '"><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>'
-          : '<div><span style="opacity:.35">&gt;&nbsp;</span>' + safe + '</div>';
-      }).join('');
-      body.innerHTML = html;
-      // 默认滚动到底部（最新内容）
-      body.scrollTop = body.scrollHeight;
+      var signature = [d.page, d.pages, d.total, d.lines.length, d.lines[0], d.lines[d.lines.length - 1]].join('|');
+      if (!options.silent || prevSignature !== signature) {
+        body.innerHTML = renderLogLines(d.lines);
+        body.dataset.signature = signature;
+      }
+      if (shouldStickBottom && d.page >= d.pages) {
+        body.scrollTop = body.scrollHeight;
+      }
     })
     .catch(function(e){
+      if (requestSeq !== logState.requestSeq) return;
       body.innerHTML = '<span style="color:var(--red)">请求失败：' + e.message + '</span>';
     });
 }

@@ -147,7 +147,7 @@ function trigger_badge(string $t): string {
   <ul style="color:var(--tm);font-size:13px;line-height:2;padding-left:18px">
     <li><strong>单文件 JSON</strong>：与「设置 → 导出配置」结构相同，一条记录对应一次快照。</li>
     <li><strong>包含内容</strong>：<code>sites</code>（站点分组）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）。</li>
-    <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务运行日志（<code>data/logs/cron_*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
+    <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务脚本与运行日志（<code>data/tasks/*.sh</code>、<code>data/tasks/*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
     <li><strong>恢复与导入</strong>：写入计划任务后会重新生成系统 crontab；写入 DNS 配置后会清除本机 DNS Zone 缓存。</li>
     <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的；恢复或导入前会先自动备份当前状态。</li>
     <li>触发方式：手动 / 自动-导入 / 自动-设置 / 自动-恢复前（见列表中「触发方式」列）。</li>

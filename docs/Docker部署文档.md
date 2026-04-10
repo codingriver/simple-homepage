@@ -31,8 +31,8 @@ docker-compose --version  # docker-compose version 1.29.x
 | 资源 | 最低 | 推荐 | 说明 |
 |---|---|---|---|
 | CPU | 1 核 | 2 核 | PHP-FPM 进程池默认 4 个工作进程 |
-| 内存 | 128MB | 256MB+ | Alpine 镜像极轻量 |
-| 磁盘 | 300MB | 1GB+ | 镜像约 80MB + 数据目录 |
+| 内存 | 128MB | 256MB+ | Debian 单容器方案，兼容性优先 |
+| 磁盘 | 500MB | 1GB+ | 镜像约 180MB + 数据目录 |
 | 端口 | 任意空闲端口 | 8080（默认）| 可通过 `NAV_PORT` 修改 |
 
 ### 0.3 操作系统支持
@@ -41,7 +41,7 @@ docker-compose --version  # docker-compose version 1.29.x
 |---|---|---|
 | Ubuntu 20.04+ / Debian 11+ | ✅ 推荐 | 最佳兼容性 |
 | CentOS 7/8 / RHEL | ✅ 支持 | 需手动安装 Docker |
-| Alpine Linux | ✅ 支持 | — |
+| Alpine Linux | ⚠️ 不再作为默认镜像基础 | 如需极小镜像需自行维护兼容性 |
 | macOS（Apple Silicon / Intel）| ✅ 支持 | 需安装 Docker Desktop |
 | Windows 10/11（WSL2）| ✅ 支持 | 需安装 Docker Desktop + WSL2 |
 | 宝塔面板服务器 | ✅ 支持 | 宝塔软件商店可直接安装 Docker |
@@ -77,18 +77,18 @@ docker-compose --version  # docker-compose version 1.29.x
 
 | 层级 | 组件 | 版本 | 来源 | 说明 |
 |---|---|---|---|---|
-| **基础系统** | Alpine Linux | 3.x（随 php:8.2-fpm-alpine）| Docker 官方镜像 | 极简 Linux，镜像体积最小 |
-| **运行时** | PHP | 8.2-fpm | `php:8.2-fpm-alpine` | 可替换为 8.1/8.0/7.4/7.3 |
-| **Web 服务器** | Nginx | 1.24+（Alpine 仓库）| `apk add nginx` | 处理静态文件和 PHP 转发 |
-| **进程管理** | Supervisor | 4.x（Alpine 仓库）| `apk add supervisor` | 管理 Nginx + PHP-FPM 生命周期 |
+| **基础系统** | Debian Bookworm | 12（随 php:8.2-fpm-bookworm）| Docker 官方镜像 | 兼容第三方 Linux 二进制更好 |
+| **运行时** | PHP | 8.2-fpm | `php:8.2-fpm-bookworm` | 可替换为 8.1/8.0/7.4/7.3 |
+| **Web 服务器** | Nginx | Debian 仓库稳定版 | `apt-get install nginx` | 处理静态文件和 PHP 转发 |
+| **进程管理** | Supervisor | Debian 仓库稳定版 | `apt-get install supervisor` | 管理 Nginx + PHP-FPM 生命周期 |
 | **PHP 扩展** | `fileinfo` | 随 PHP 编译 | `docker-php-ext-install` | 背景图 MIME 检测（可选增强）|
 | **PHP 扩展** | `session` | PHP 核心内置 | 内置 | Cookie/Session 管理 |
 | **PHP 扩展** | `json` | PHP 7.1+ 永久内置 | 内置 | 数据文件读写 |
 | **PHP 扩展** | `hash` | PHP 7.4+ 永久内置 | 内置 | Token 签名和比对 |
 | **PHP 扩展** | `pcre` | PHP 4+ 内置 | 内置 | 正则校验 |
-| **工具** | curl | Alpine 仓库 | `apk add curl` | 健康检查探针 |
-| **工具** | tzdata | Alpine 仓库 | `apk add tzdata` | 时区数据库 |
-| **工具** | bash | Alpine 仓库 | `apk add bash` | 启动脚本依赖 |
+| **工具** | curl | Debian 仓库 | `apt-get install curl` | 健康检查探针 |
+| **工具** | tzdata | Debian 仓库 | `apt-get install tzdata` | 时区数据库 |
+| **工具** | bash | Debian 仓库 | `apt-get install bash` | 启动脚本依赖 |
 
 ### 1.2 内置配置文件
 
@@ -191,14 +191,14 @@ Supervisord（PID 1，守护进程）
 
 | 方案 | 基础镜像 | 体积 | 说明 |
 |---|---|---|---|
-| **当前采用（推荐）** | `php:8.2-fpm-alpine` + Nginx | ~80MB | 单容器，Alpine 最小化，Supervisor 管理进程 |
-| 方案B | `php:8.2-fpm` (Debian) + Nginx | ~180MB | 兼容性更好，调试方便 |
+| **当前采用（推荐）** | `php:8.2-fpm-bookworm` + Nginx | ~180MB | 单容器，Debian 兼容性优先，Supervisor 管理进程 |
+| 方案B | `php:8.2-fpm-alpine` + Nginx | ~80MB | 镜像更小，但第三方二进制兼容性更差 |
 | 方案C | 双容器（nginx + php-fpm） | ~120MB | 标准分离架构，复杂度高 |
 | 方案D | `webdevops/php-nginx:8.2-alpine` | ~120MB | 第三方预制镜像，依赖外部维护 |
 
-**选择单容器 Alpine 方案的理由：**
+**当前选择单容器 Debian 方案的理由：**
 - 导航站属于轻量级应用，无需微服务分离
-- Alpine 镜像体积小，拉取快，冷启动快
+- 对常见第三方 Linux 二进制兼容性更好
 - Supervisor 统一管理 Nginx + PHP-FPM，进程崩溃自动重启
 - 一个 `docker run` / `docker compose up` 搞定，运维简单
 

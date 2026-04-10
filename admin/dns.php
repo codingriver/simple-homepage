@@ -1055,7 +1055,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
         <strong>GET</strong> 与 <strong>POST</strong> 均可；参数可在 Query 或表单/JSON（POST 时正文覆盖 URL 同名参数）。<code style="font-size:12px">query</code> 只读当前解析，便于调试。
       </p>
       <p style="color:var(--tx2);font-size:13px;line-height:1.75;margin:0 0 16px;padding:12px 14px;background:rgba(0,212,170,.06);border:1px solid var(--bd);border-radius:var(--r)">
-        <strong style="color:var(--tx)">与计划任务配合：</strong>在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入该任务的运行日志（界面「日志」或文件 <code style="font-size:11px">data/logs/cron_&lt;任务ID&gt;.log</code>）。下方脚本用 <code style="font-size:12px">log()</code> 把关键步骤同时写入终端与可选文件 <code style="font-size:12px">ddns_manual.log</code>，便于排查。
+        <strong style="color:var(--tx)">与计划任务配合：</strong>在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入该任务的运行日志（界面「日志」或文件 <code style="font-size:11px">data/tasks/对应脚本同名.log</code>）。下方脚本用 <code style="font-size:12px">log()</code> 把关键步骤同时写入终端与可选文件 <code style="font-size:12px">ddns_manual.log</code>，便于排查。
       </p>
       <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
         <div style="color:var(--tm);margin-bottom:8px">查询 query（GET，整段 URL 用引号包住）</div>

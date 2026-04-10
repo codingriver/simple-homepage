@@ -1,35 +1,40 @@
 # ============================================================
 # 导航网站 Docker 镜像
-# 基础：php:8.2-fpm-alpine + Nginx（单容器方案）
+# 基础：php:8.2-fpm-bookworm + Nginx（单容器方案）
 # PHP 版本：8.2（可替换为 8.1 / 8.0 / 7.4 / 7.3）
 # ============================================================
-FROM php:8.2-fpm-alpine
+FROM php:8.2-fpm-bookworm
 
 # ── 代理策略 ──
 # 不在镜像中显式写入 HTTP(S)_PROXY/NO_PROXY。
 # 构建期与运行期均跟随宿主机 / Docker 自身代理配置。
 
-# ── 切换 Alpine 软件源（构建环境访问官方源不稳定时使用国内镜像）──
-RUN printf '%s\n%s\n' \
-    'https://mirrors.aliyun.com/alpine/v3.23/main' \
-    'https://mirrors.aliyun.com/alpine/v3.23/community' \
-    > /etc/apk/repositories
-
 # ── 安装系统依赖 ──
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     supervisor \
-    shadow \
+    passwd \
     tzdata \
     sudo \
-    dcron \
+    cron \
     python3 \
     # fileinfo 扩展依赖
-    libmagic \
-    file-dev \
+    libmagic1 \
+    libmagic-dev \
     # 工具
     curl \
-    bash
+    bash \
+    gettext-base \
+    file \
+    binutils \
+    ca-certificates \
+    procps \
+    psmisc \
+    iproute2 \
+    net-tools \
+    less \
+    vim-tiny && \
+    rm -rf /var/lib/apt/lists/*
 
 # ── 设置时区 ──
 ARG TZ=Asia/Shanghai
@@ -43,14 +48,15 @@ RUN docker-php-ext-install fileinfo
 # session 已内置，json/hash/pcre 均为核心内置，无需额外安装
 
 # ── 创建运行用户（与 Nginx worker 统一）──
-RUN addgroup -g 1000 navwww && \
-    (getent group crontab >/dev/null || addgroup -S crontab) && \
-    adduser -D -u 1000 -G navwww navwww && \
-    adduser navwww crontab && \
-    adduser navwww wheel
+RUN groupadd -g 1000 navwww && \
+    useradd -m -u 1000 -g navwww -s /bin/sh navwww && \
+    usermod -aG crontab,sudo navwww
 
 # ── 复制项目文件 ──
 COPY --chown=navwww:navwww . /var/www/nav/
+
+# ── 预创建配置目录（Debian Nginx 默认不提供 http.d）──
+RUN mkdir -p /etc/nginx/http.d /etc/nginx/conf.d
 
 # ── 复制配置文件 ──
 COPY docker/nginx.conf       /etc/nginx/nginx.conf
@@ -93,8 +99,9 @@ RUN mkdir -p \
     /var/log/php-fpm \
     /run/nginx \
     /etc/nginx/conf.d && \
-    # 删除 Alpine Nginx 自带的 default.conf（会拦截所有请求返回 404）
+    # 删除默认站点配置（会拦截所有请求返回 404）
     rm -f /etc/nginx/http.d/default.conf && \
+    rm -f /etc/nginx/sites-enabled/default && \
     # 配置 sudo 白名单，允许 navwww 执行 nginx -t 和 nginx -s reload
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
