@@ -1,5 +1,9 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+
+const taskScriptsRoot = path.resolve(__dirname, '../../../data/tasks');
 
 async function disableNativeTaskFormValidation(page: Parameters<typeof loginAsDevAdmin>[0]) {
   await page.evaluate(() => {
@@ -58,6 +62,23 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   const editedRow = page.locator(`tr:has-text("${editedName}")`).first();
   const taskId = await editedRow.locator('form input[name="id"]').first().inputValue();
   expect(taskId).not.toBe('');
+  await editedRow.getByRole('button', { name: /编辑/ }).click();
+  const taskScriptFilename = await page.locator('#fm-script-filename').textContent();
+  const taskScriptPath = await page.locator('#fm-script-path').textContent();
+  expect(taskScriptFilename || '').toBeTruthy();
+  expect(taskScriptPath || '').toContain('/var/www/nav/data/tasks/');
+  await page.getByRole('button', { name: /取消/ }).click();
+  const resolvedTaskScriptPath = path.join(taskScriptsRoot, (taskScriptFilename || '').trim());
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(resolvedTaskScriptPath, 'utf8');
+      } catch {
+        return '';
+      }
+    }, { timeout: 10000 })
+    .toContain('echo edited-task');
+
   await editedRow.getByRole('button', { name: /禁用/ }).click();
   await expect(page.locator('body')).toContainText('已禁用');
   await editedRow.getByRole('button', { name: /启用/ }).click();
@@ -86,6 +107,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   page.once('dialog', dialog => dialog.accept());
   await page.locator(`tr:has-text("${editedName}")`).first().getByRole('button', { name: /删除/ }).click();
   await expect(page.locator(`tr:has-text("${editedName}")`)).toHaveCount(0);
+  await expect(fs.access(resolvedTaskScriptPath).then(() => true).catch(() => false)).resolves.toBe(false);
 
   await tracker.assertNoClientErrors();
 });

@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
+async function openDdnsDispatcherTab(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toBeVisible();
+}
+
 async function submitSystemTaskAction(
   page: Parameters<typeof loginAsDevAdmin>[0],
   action: 'task_toggle' | 'task_delete' | 'task_save',
@@ -50,6 +55,7 @@ test('scheduled tasks system dispatchers remain view-only while manual tasks sta
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/scheduled_tasks.php');
+  await openDdnsDispatcherTab(page);
 
   const systemRow = page.locator('tr:has-text("DDNS 调度器")').first();
   if (await systemRow.count()) {
@@ -63,6 +69,7 @@ test('scheduled tasks system dispatchers remain view-only while manual tasks sta
   await page.locator('#fm-command').fill('echo dispatcher-guard');
   await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+  await expect(page.locator('#scheduled-tab-panel-tasks')).toBeVisible();
   const manualRow = page.locator('tr:has-text("手动任务")').first();
   await expect(manualRow.getByRole('button', { name: /编辑/ })).toBeVisible();
   await expect(manualRow.getByRole('button', { name: /删除/ })).toBeVisible();
@@ -80,6 +87,7 @@ test('scheduled tasks reject direct save delete and toggle posts for DDNS dispat
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/scheduled_tasks.php');
+  await openDdnsDispatcherTab(page);
 
   const systemRow = page.locator('tr:has-text("DDNS 调度器")').first();
   await expect(systemRow).toBeVisible();

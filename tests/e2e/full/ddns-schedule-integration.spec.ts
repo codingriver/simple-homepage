@@ -56,10 +56,12 @@ test('ddns tasks sync into scheduled dispatcher groups by cron and update after 
   await createTask(page, taskC, `dispatcher-c-${ts}.606077.xyz`, '*/13 * * * *');
 
   await page.goto('/admin/scheduled_tasks.php');
-  await expect(page.locator('body')).toContainText(/DDNS 调度器/);
-  await expect(page.locator('body')).toContainText(taskA);
-  await expect(page.locator('body')).toContainText(taskB);
-  await expect(page.locator('body')).toContainText(taskC);
+  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toBeVisible();
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(/DDNS 调度器/);
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(taskA);
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(taskB);
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(taskC);
 
   await page.goto('/admin/ddns.php');
   const rowA = page.locator(`tr:has-text("${taskA}")`).first();
@@ -72,7 +74,8 @@ test('ddns tasks sync into scheduled dispatcher groups by cron and update after 
   await expect(rowA).toContainText('禁用');
 
   await page.goto('/admin/scheduled_tasks.php');
-  await expect(page.locator('body')).toContainText(/DDNS 调度器/);
+  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(/DDNS 调度器/);
 
   await tracker.assertNoClientErrors();
 });

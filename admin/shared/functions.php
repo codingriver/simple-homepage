@@ -132,13 +132,23 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
+    $scheduled_tasks = file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [];
+    if (is_array($scheduled_tasks)) {
+        require_once __DIR__ . '/cron_lib.php';
+        foreach ($scheduled_tasks['tasks'] ?? [] as $idx => $task) {
+            if (!is_array($task)) {
+                continue;
+            }
+            $scheduled_tasks['tasks'][$idx]['command'] = task_resolve_command_text($task);
+        }
+    }
 
     return [
         'created_at'      => date('Y-m-d H:i:s'),
         'trigger'         => $trigger,
         'sites'           => json_decode($sites_data, true) ?? [],
         'config'          => json_decode($config_data, true) ?? [],
-        'scheduled_tasks' => file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [],
+        'scheduled_tasks' => $scheduled_tasks,
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
         'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
     ];
@@ -174,6 +184,8 @@ function backup_apply_restored_sections(array $data): void {
             json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             LOCK_EX);
         $wrote_st = true;
+        require_once __DIR__ . '/cron_lib.php';
+        task_sync_scripts_from_scheduled_tasks($data['scheduled_tasks']);
     }
     if (isset($data['dns_config']) && is_array($data['dns_config'])) {
         file_put_contents($dns_file,

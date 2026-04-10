@@ -39,20 +39,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: scheduled_tasks.php'); exit;
         }
         $found = false;
+        $taskRow = null;
         foreach ($data['tasks'] as &$t) {
             if (($t['id'] ?? '') === $id) {
                 $t['name'] = $name; $t['enabled'] = $en;
                 $t['schedule'] = $sched; $t['command'] = $cmd;
                 unset($t['working_dir_mode'], $t['working_dir']);
+                $taskRow = $t;
                 $found = true; break;
             }
         }
         unset($t);
         if (!$found) {
-            $data['tasks'][] = ['id' => $id, 'name' => $name,
-                'enabled' => $en, 'schedule' => $sched, 'command' => $cmd];
+            $taskRow = ['id' => $id, 'name' => $name,
+                'enabled' => $en, 'schedule' => $sched, 'command' => $cmd, 'created_at' => date('Y-m-d H:i:s')];
+            array_unshift($data['tasks'], $taskRow);
+        }
+        if (is_array($taskRow)) {
+            $scriptFilename = task_resolve_script_filename($taskRow, $data['tasks']);
+            foreach ($data['tasks'] as &$t) {
+                if (($t['id'] ?? '') !== $id) {
+                    continue;
+                }
+                $t['script_filename'] = $scriptFilename;
+                $taskRow = $t;
+                break;
+            }
+            unset($t);
         }
         task_ensure_workdir(['id' => $id]);
+        $scriptSync = task_sync_script_for_task($taskRow ?? ['id' => $id, 'name' => $name, 'command' => $cmd], $data['tasks']);
+        if (!$scriptSync['ok']) {
+            flash_set('error', $scriptSync['msg']);
+            header('Location: scheduled_tasks.php'); exit;
+        }
         save_scheduled_tasks($data);
         $r = cron_regenerate();
         flash_set($r['ok'] ? 'success' : 'error',
@@ -137,8 +157,9 @@ require_once __DIR__ . '/shared/cron_lib.php';
 require_once __DIR__ . '/shared/ddns_lib.php';
 
 $ddns_dispatcher = cron_sync_ddns_dispatcher_task();
-$tasks = load_scheduled_tasks()['tasks'] ?? [];
+$tasks = task_sort_for_display(load_scheduled_tasks()['tasks'] ?? []);
 foreach ($tasks as &$_t) {
+    $_t['command'] = task_resolve_command_text($_t);
     $_t['_is_system'] = cron_is_system_task($_t);
     $_t['_running'] = cron_task_is_running($_t);
     $_t['_started_at'] = (string)(cron_task_runtime($_t)['started_at'] ?? '');
@@ -147,8 +168,12 @@ foreach ($tasks as &$_t) {
         : '-';
     $_t['_workdir'] = task_resolve_workdir($_t);
     $_t['_workdir_mode_label'] = '任务目录';
+    $_t['_script_filename'] = task_resolve_script_filename($_t, $tasks);
+    $_t['_script_file'] = task_script_file_for_task($_t, $tasks);
 }
 unset($_t);
+$manual_tasks = array_values(array_filter($tasks, fn($row) => empty($row['_is_system'])));
+$system_tasks = array_values(array_filter($tasks, fn($row) => !empty($row['_is_system'])));
 $default_task_command = <<<'BASH'
 # 这是默认 Bash 脚本，可以直接修改
 
@@ -176,6 +201,7 @@ printf 'TASK_ID=%s\n' "${TASK_ID:-}"
 printf 'TASK_NAME=%s\n' "${TASK_NAME:-}"
 printf 'TASK_WORKDIR=%s\n' "${TASK_WORKDIR:-}"
 printf 'TASK_SCRIPT_FILE=%s\n' "${TASK_SCRIPT_FILE:-}"
+printf 'TASK_LOG_FILE=%s\n' "${TASK_LOG_FILE:-}"
 
 echo
 echo "== all environment variables (sorted) =="
@@ -195,40 +221,26 @@ $CSRF = csrf_field();
   <span style="color:var(--tm);font-size:12px">管理员可执行任意 shell，请自行评估风险。</span>
 </div>
 
-<div class="card" style="margin-bottom:16px">
-  <div class="card-title">DDNS 调度器</div>
-  <?php if (!empty($ddns_dispatcher['enabled'])): ?>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <span class="badge badge-blue">已自动接入</span>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)">系统分组数：<?= count($ddns_dispatcher['groups'] ?? []) ?></span>
-    </div>
-    <div style="margin-top:10px;color:var(--tm);font-size:12px;line-height:1.8">
-      系统会按 DDNS 任务的 Cron 分组，自动生成多个调度器。每个分组只负责执行同一个 cron 下的 DDNS 任务。
-    </div>
-    <div style="margin-top:10px;display:grid;gap:8px">
-      <?php foreach (($ddns_dispatcher['groups'] ?? []) as $cronExpr => $groupTasks): ?>
-        <div style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2)">
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <span class="badge badge-purple">分组</span>
-            <code><?= htmlspecialchars($cronExpr) ?></code>
-            <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)"><?= htmlspecialchars(cron_ddns_dispatcher_id($cronExpr)) ?></span>
-            <span style="font-size:12px;color:var(--tx2)">名称：<?= htmlspecialchars('DDNS 调度器 [' . $cronExpr . ']') ?></span>
-          </div>
-          <div style="margin-top:6px;color:var(--tx2);font-size:12px">
-            任务：<?= htmlspecialchars(implode('、', array_map(fn($row) => (string)($row['name'] ?: $row['id']), $groupTasks))) ?>
-          </div>
-        </div>
-      <?php endforeach; ?>
-    </div>
-  <?php else: ?>
-    <div style="color:var(--tm);font-size:12px;line-height:1.7">当前没有启用的 DDNS 任务，所以不会生成 DDNS 调度器。</div>
-  <?php endif; ?>
+<div class="card" style="margin-bottom:16px;padding:12px 14px">
+  <div role="tablist" aria-label="计划任务页签" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <button type="button" class="btn btn-secondary" id="scheduled-tab-btn-tasks" role="tab" aria-controls="scheduled-tab-panel-tasks" aria-selected="true" onclick="switchScheduledTab('tasks')" style="padding:12px 14px;font-weight:700">
+      左侧页签 · 手动任务
+    </button>
+    <button type="button" class="btn btn-secondary" id="scheduled-tab-btn-ddns" role="tab" aria-controls="scheduled-tab-panel-ddns" aria-selected="false" onclick="switchScheduledTab('ddns')" style="padding:12px 14px;font-weight:700">
+      右侧页签 · DDNS 调度器
+    </button>
+  </div>
 </div>
 
-<!-- ===== 任务列表 ===== -->
-<div class="card">
-<?php if (empty($tasks)): ?>
-  <p style="color:var(--tm);font-size:13px">暂无任务，点击「新建任务」创建第一条。</p>
+<section id="scheduled-tab-panel-tasks" role="tabpanel" aria-labelledby="scheduled-tab-btn-tasks" data-tab-panel="tasks">
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">手动任务</div>
+    <div style="color:var(--tm);font-size:12px;line-height:1.8">这里用于创建和运行普通 Shell 计划任务。DDNS 自动调度已拆分到右侧页签。</div>
+  </div>
+
+  <div class="card">
+<?php if (empty($manual_tasks)): ?>
+  <p style="color:var(--tm);font-size:13px">暂无手动任务，点击「新建任务」创建第一条。</p>
 <?php else: ?>
   <div class="table-wrap"><table>
     <thead><tr>
@@ -242,7 +254,7 @@ $CSRF = csrf_field();
       <th style="min-width:260px">操作</th>
     </tr></thead>
     <tbody>
-    <?php foreach ($tasks as $t):
+    <?php foreach ($manual_tasks as $t):
         $enabled   = !empty($t['enabled']);
         $exitCode  = $t['last_code'] ?? null;
         $exitBadge = $exitCode === null ? '—' :
@@ -358,7 +370,128 @@ $CSRF = csrf_field();
     </tbody>
   </table></div>
 <?php endif; ?>
-</div>
+  </div>
+</section>
+
+<section id="scheduled-tab-panel-ddns" role="tabpanel" aria-labelledby="scheduled-tab-btn-ddns" data-tab-panel="ddns" hidden>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">DDNS 调度器</div>
+    <?php if (!empty($ddns_dispatcher['enabled'])): ?>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <span class="badge badge-blue">已自动接入</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)">系统分组数：<?= count($ddns_dispatcher['groups'] ?? []) ?></span>
+      </div>
+      <div style="margin-top:10px;color:var(--tm);font-size:12px;line-height:1.8">
+        系统会按 DDNS 任务的 Cron 分组，自动生成多个调度器。每个分组只负责执行同一个 cron 下的 DDNS 任务。
+      </div>
+      <div style="margin-top:10px;display:grid;gap:8px">
+        <?php foreach (($ddns_dispatcher['groups'] ?? []) as $cronExpr => $groupTasks): ?>
+          <div style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2)">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <span class="badge badge-purple">分组</span>
+              <code><?= htmlspecialchars($cronExpr) ?></code>
+              <span style="font-family:var(--mono);font-size:12px;color:var(--tx2)"><?= htmlspecialchars(cron_ddns_dispatcher_id($cronExpr)) ?></span>
+              <span style="font-size:12px;color:var(--tx2)">名称：<?= htmlspecialchars('DDNS 调度器 [' . $cronExpr . ']') ?></span>
+            </div>
+            <div style="margin-top:6px;color:var(--tx2);font-size:12px">
+              任务：<?= htmlspecialchars(implode('、', array_map(fn($row) => (string)($row['name'] ?: $row['id']), $groupTasks))) ?>
+            </div>
+          </div>
+        <?php endforeach; ?>
+      </div>
+    <?php else: ?>
+      <div style="color:var(--tm);font-size:12px;line-height:1.7">当前没有启用的 DDNS 任务，所以不会生成 DDNS 调度器。</div>
+    <?php endif; ?>
+  </div>
+
+  <div class="card">
+    <div class="card-title">系统调度器列表</div>
+<?php if (empty($system_tasks)): ?>
+    <p style="color:var(--tm);font-size:13px">当前没有系统调度器。</p>
+<?php else: ?>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>名称</th>
+        <th>Cron 表达式</th>
+        <th>工作目录</th>
+        <th>状态</th>
+        <th>下次运行</th>
+        <th>上次运行</th>
+        <th>退出码</th>
+        <th style="min-width:260px">操作</th>
+      </tr></thead>
+      <tbody>
+      <?php foreach ($system_tasks as $t):
+          $enabled   = !empty($t['enabled']);
+          $exitCode  = $t['last_code'] ?? null;
+          $exitBadge = $exitCode === null ? '—' :
+              ($exitCode === 0
+                  ? '<span class="badge badge-green">0</span>'
+                  : '<span class="badge badge-red">' . (int)$exitCode . '</span>');
+      ?>
+      <tr>
+        <td style="font-weight:600">
+          <?= htmlspecialchars($t['name'] ?? '') ?>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="badge badge-purple">系统任务</span>
+            <?php if (!empty($t['meta']['group_label'])): ?>
+              <span style="font-size:11px;color:var(--tx2)">包含：<?= htmlspecialchars((string)$t['meta']['group_label']) ?></span>
+            <?php endif; ?>
+          </div>
+        </td>
+        <td><code><?= htmlspecialchars($t['schedule'] ?? '') ?></code></td>
+        <td style="font-size:11px;line-height:1.5">
+          <div><span class="badge badge-blue"><?= htmlspecialchars($t['_workdir_mode_label']) ?></span></div>
+          <div style="margin-top:6px;font-family:var(--mono);color:var(--tx2);max-width:280px;word-break:break-all">
+            <?= htmlspecialchars($t['_workdir']) ?>
+          </div>
+        </td>
+        <td>
+          <?php if ($enabled): ?>
+            <span class="badge badge-green">启用</span>
+          <?php else: ?>
+            <span class="badge badge-gray">禁用</span>
+          <?php endif; ?>
+          <?php if (!empty($t['_running'])): ?>
+            <div style="margin-top:6px">
+              <span class="badge badge-blue">运行中</span>
+            </div>
+          <?php endif; ?>
+        </td>
+        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+          <?= htmlspecialchars($t['_next']) ?>
+        </td>
+        <td style="font-size:12px;font-family:var(--mono);color:var(--tx2)">
+          <?= htmlspecialchars($t['last_run'] ?? '—') ?>
+        </td>
+        <td><?= $exitBadge ?></td>
+        <td style="white-space:nowrap">
+          <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">自动维护</button>
+          <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
+          <form method="POST" style="display:inline">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="task_run">
+            <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
+            <button type="submit" class="btn btn-sm btn-secondary" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
+          </form>
+          <button type="button" class="btn btn-sm btn-secondary"
+            onclick="openLogModal(<?= htmlspecialchars(json_encode($t['id'] ?? ''), ENT_QUOTES) ?>,
+                                   <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+            📋 日志
+          </button>
+          <button type="button" class="btn btn-sm btn-secondary"
+            onclick="copyTaskWorkdir(<?= htmlspecialchars(json_encode($t['_workdir'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+            📁 复制目录
+          </button>
+          <button type="button" class="btn btn-sm btn-danger" disabled style="opacity:.55;cursor:not-allowed">✕ 系统维护</button>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+<?php endif; ?>
+  </div>
+</section>
 
 
 <!-- ===================================================
@@ -411,6 +544,14 @@ $CSRF = csrf_field();
             <div id="fm-workdir-preview" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
             <span class="form-hint">所有任务固定使用 data/tasks；目录不存在会自动创建，不再按任务 ID 拆分子目录。</span>
           </div>
+          <div class="form-group">
+            <label>脚本文件名</label>
+            <div id="fm-script-filename" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
+          </div>
+          <div class="form-group">
+            <label>脚本完整路径</label>
+            <div id="fm-script-path" style="padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12px;color:var(--tx2);word-break:break-all"></div>
+          </div>
           <!-- 启用 -->
           <div class="form-group" style="justify-content:flex-end;padding-bottom:4px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
@@ -429,7 +570,7 @@ $CSRF = csrf_field();
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
             style="font-family:var(--mono);font-size:12px;resize:vertical;
                    min-height:120px;max-height:400px;overflow-y:auto;line-height:1.55"></textarea>
-          <span class="form-hint">保存后会先把这里的内容写成真实的 <code style="font-family:var(--mono)">.sh</code> 脚本，再由 <code style="font-family:var(--mono)">/bin/bash</code> 执行，行为尽量与手动在 Bash 中运行一致；脚本执行前会先进入 <code style="font-family:var(--mono)">data/tasks</code>。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
+          <span class="form-hint">保存时会直接把这里的文本写入上面的脚本文件；执行时等价于 <code style="font-family:var(--mono)">/bin/bash script.sh &gt;&gt; data/logs/cron_&lt;任务ID&gt;.log 2&gt;&amp;1</code>。脚本文件默认不删除，后续保存同一个任务时只更新这个固定脚本文件。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
         </div>
       </form>
     </div>
@@ -488,10 +629,64 @@ $CSRF = csrf_field();
 var TASK_ROWS = <?= json_encode($tasks, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var CSRF_TOKEN = <?= json_encode($GLOBALS['_nav_csrf_token'] ?? '') ?>;
 var DEFAULT_TASK_COMMAND = <?= json_encode($default_task_command, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
+var TASKS_ROOT = '/var/www/nav/data/tasks';
+var logPollTimer = 0;
+var scheduledTabState = { active: 'tasks' };
+
+function switchScheduledTab(tab) {
+  scheduledTabState.active = tab === 'ddns' ? 'ddns' : 'tasks';
+  ['tasks', 'ddns'].forEach(function(name) {
+    var btn = document.getElementById('scheduled-tab-btn-' + name);
+    var panel = document.getElementById('scheduled-tab-panel-' + name);
+    var active = name === scheduledTabState.active;
+    if (btn) {
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.style.borderColor = active ? 'var(--ac)' : 'var(--bd)';
+      btn.style.color = active ? 'var(--ac)' : 'var(--tx2)';
+      btn.style.background = active ? 'rgba(61,255,160,.08)' : 'var(--sf2)';
+    }
+    if (panel) {
+      panel.hidden = !active;
+    }
+  });
+}
 
 /* ---- 任务弹窗 ---- */
+function suggestTaskScriptFilename(name) {
+  var trimmed = (name || '').trim();
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(trimmed)) {
+    return trimmed + '.sh';
+  }
+  return '保存后自动生成';
+}
+
+function updateScriptPreview(task) {
+  var filenameEl = document.getElementById('fm-script-filename');
+  var pathEl = document.getElementById('fm-script-path');
+  var form = document.getElementById('task-form');
+  if (!filenameEl || !pathEl) return;
+  var id = (document.getElementById('fm-id').value || '').trim();
+  var name = (document.getElementById('fm-name').value || '').trim();
+  var filename = '';
+  var fullPath = '';
+  if (task && task._script_filename) {
+    filename = task._script_filename;
+    fullPath = task._script_file || '';
+  } else if (form && form.dataset.scriptFilename) {
+    filename = form.dataset.scriptFilename;
+    fullPath = form.dataset.scriptPath || '';
+  }
+  if (!filename) {
+    filename = suggestTaskScriptFilename(name);
+    fullPath = filename === '保存后自动生成' ? '保存后自动生成固定脚本路径' : (TASKS_ROOT + '/' + filename);
+  }
+  filenameEl.textContent = filename;
+  pathEl.textContent = fullPath || (id ? (TASKS_ROOT + '/' + filename) : '保存后自动生成固定脚本路径');
+}
+
 function openTaskModal(task) {
   var m = document.getElementById('task-modal');
+  var form = document.getElementById('task-form');
   var isNew = !task || !task.id;
   document.getElementById('modal-title').textContent = isNew ? '新建任务' : '编辑任务';
   document.getElementById('fm-id').value       = isNew ? ''   : (task.id       || '');
@@ -499,7 +694,12 @@ function openTaskModal(task) {
   document.getElementById('fm-schedule').value = isNew ? '*/5 * * * *' : (task.schedule || '');
   document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
+  if (form) {
+    form.dataset.scriptFilename = isNew ? '' : (task._script_filename || '');
+    form.dataset.scriptPath = isNew ? '' : (task._script_file || '');
+  }
   updateWorkdirPreview();
+  updateScriptPreview(isNew ? null : task);
   updateNextTip();
   m.style.display = 'flex';
   setTimeout(function(){ document.getElementById('fm-name').focus(); }, 80);
@@ -533,6 +733,9 @@ document.addEventListener('DOMContentLoaded', function(){
   if (inp) inp.addEventListener('input', updateNextTip);
   var idInp = document.getElementById('fm-id');
   if (idInp) idInp.addEventListener('input', updateWorkdirPreview);
+  var nameInp = document.getElementById('fm-name');
+  if (nameInp) nameInp.addEventListener('input', function() { updateScriptPreview(null); });
+  switchScheduledTab('tasks');
   // 按 ESC 关闭弹窗
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape') { closeTaskModal(); closeLogModal(); }
@@ -546,11 +749,20 @@ function openLogModal(id, name) {
   logState = { id: id, name: name, page: 1, pages: 1 };
   document.getElementById('log-modal-title').textContent = '运行日志 — ' + name;
   document.getElementById('log-modal').style.display = 'flex';
+  if (logPollTimer) clearInterval(logPollTimer);
+  logPollTimer = setInterval(function() {
+    if (document.getElementById('log-modal').style.display !== 'flex') return;
+    logLoadPage(logState.page || 1, false);
+  }, 2000);
   // 先加载第1页获取总页数，再跳到最后一页
   logLoadPage(1, true);
 }
 function closeLogModal() {
   document.getElementById('log-modal').style.display = 'none';
+  if (logPollTimer) {
+    clearInterval(logPollTimer);
+    logPollTimer = 0;
+  }
 }
 function clearCurrentLog() {
   if (!logState.id) return;

@@ -42,3 +42,38 @@ test('scheduled tasks advanced cases normalize invalid pages and keep system dis
 
   await tracker.assertNoClientErrors();
 });
+
+test('scheduled tasks default to newest-first order by creation time', async ({ page }) => {
+  const tracker = await attachClientErrorTracking(page, {
+    ignoredMessages: [
+      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/,
+    ],
+  });
+  const ts = Date.now();
+  const olderName = `排序旧任务 ${ts}`;
+  const newerName = `排序新任务 ${ts}`;
+
+  await loginAsDevAdmin(page);
+  await page.goto('/admin/scheduled_tasks.php');
+
+  await page.getByRole('button', { name: /新建任务/ }).click();
+  await page.locator('#fm-name').fill(olderName);
+  await page.locator('#fm-schedule').fill('*/17 * * * *');
+  await page.locator('#fm-command').fill('echo older-task');
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+
+  await page.getByRole('button', { name: /新建任务/ }).click();
+  await page.locator('#fm-name').fill(newerName);
+  await page.locator('#fm-schedule').fill('*/19 * * * *');
+  await page.locator('#fm-command').fill('echo newer-task');
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+
+  const firstRowText = await page.locator('#scheduled-tab-panel-tasks tbody tr').first().textContent();
+  expect(firstRowText || '').toContain(newerName);
+  expect(firstRowText || '').not.toContain(olderName);
+
+  await tracker.assertNoClientErrors();
+});

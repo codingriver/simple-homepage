@@ -62,9 +62,10 @@ data/
 
 - `users.json` 保存用户
 - `sites.json` 保存站点和分组
-- `scheduled_tasks.json` 保存计划任务定义
+- `scheduled_tasks.json` 保存计划任务定义和运行结果
 - `logs/` 保存各类日志
-- `tasks/` 是计划任务共享工作目录
+- `tasks/` 是计划任务共享工作目录，任务脚本会持久保存为 `data/tasks/<任务ID>.sh`
+- 计划任务运行日志位于 `data/logs/cron_<任务ID>.log`
 - `backups/` 保存备份快照
 
 ## 2. 容器内 CLI 管理命令

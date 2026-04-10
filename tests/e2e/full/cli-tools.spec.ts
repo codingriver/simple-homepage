@@ -233,7 +233,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
   const snapshots = await snapshotLocalFiles([scheduledTasksFile]);
   const taskId = nowId('cli_task');
   const logFile = path.join(taskLogDir, `cron_${taskId}.log`);
-  const taskWorkdir = path.join(taskWorkdirRoot, taskId);
+  const taskScriptFile = path.join(taskWorkdirRoot, 'cli_scheduled_task.sh');
 
   try {
     const invalid = runDockerPhp('/var/www/nav/cli/run_scheduled_task.php');
@@ -249,6 +249,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
         {
           id: taskId,
           name: 'CLI Scheduled Task',
+          script_filename: 'cli_scheduled_task.sh',
           enabled: true,
           schedule: '*/5 * * * *',
           command: 'pwd\necho cli-scheduled-ok',
@@ -262,6 +263,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
     expect(success.stdout).toContain('/var/www/nav/data/tasks');
     expect(success.stdout).toContain('cli-scheduled-ok');
     expect(runDockerShell('test -d /var/www/nav/data/tasks').code).toBe(0);
+    await expect(fs.readFile(taskScriptFile, 'utf8')).resolves.toContain('echo cli-scheduled-ok');
 
     const tasksAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as {
       tasks: Array<{ last_run?: string; last_code?: number; last_output?: string }>;
@@ -273,7 +275,7 @@ test('cli/run_scheduled_task validates task id and executes a seeded task', asyn
     await expect(fs.access(logFile)).resolves.toBeUndefined();
   } finally {
     await fs.rm(logFile, { force: true }).catch(() => undefined);
-    await fs.rm(taskWorkdir, { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(taskScriptFile, { force: true }).catch(() => undefined);
     await restoreLocalFiles(snapshots);
   }
 });
