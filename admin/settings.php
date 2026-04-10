@@ -140,6 +140,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: settings.php'); exit;
         }
 
+        if ($action === 'clear_scheduled_tasks') {
+            require_once __DIR__ . '/shared/cron_lib.php';
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
+            backup_create('auto_clear_scheduled_tasks');
+            $result = scheduled_tasks_clear_manual_tasks();
+            flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条普通计划任务，DDNS 系统调度器已自动保留/重建');
+            header('Location: settings.php'); exit;
+        }
+
+        if ($action === 'clear_ddns_tasks') {
+            require_once __DIR__ . '/shared/ddns_lib.php';
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
+            backup_create('auto_clear_ddns_tasks');
+            $result = ddns_clear_all_tasks();
+            flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条 DDNS 任务，并同步清理日志与系统调度器');
+            header('Location: settings.php'); exit;
+        }
+
         // ── Nginx 写入 + reload（带预检与失败回滚）──
         if ($action === 'nginx_apply' || $action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
             $do_reload = ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload');
@@ -467,6 +491,25 @@ $cfg = auth_get_config();
     <a href="backups.php" class="btn btn-secondary">📋 备份管理</a>
   </div>
   <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」为同一 JSON 结构（站点、系统配置、计划任务含脚本、DNS 解析账户）。不含用户账户、任务日志、<code>data/tasks/</code> 共享工作目录下的额外文件等。导入时自动识别格式。</div>
+</div>
+
+<div class="card">
+  <div class="card-title" style="color:#ff9f43">⚠ 危险操作</div>
+  <div class="form-hint" style="margin-bottom:12px">
+    下列操作会先自动创建备份，再执行清空。清空计划任务不会删除 <code>data/tasks/</code> 目录中的其他共享文件，只会删除系统管理的任务脚本、任务日志和锁文件。
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <form method="POST" onsubmit="return confirm('确认清空全部普通计划任务？\\n\\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\\n不会删除 data/tasks 目录里的其他共享文件。');">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="clear_scheduled_tasks">
+      <button class="btn btn-danger" type="submit">🗑 清空计划任务</button>
+    </form>
+    <form method="POST" onsubmit="return confirm('确认清空全部 DDNS 任务？\\n\\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。');">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="clear_ddns_tasks">
+      <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
+    </form>
+  </div>
 </div>
 
 <script>

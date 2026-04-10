@@ -13,6 +13,23 @@ function ddns_task_log_file(string $id): string {
     return DATA_DIR . '/logs/ddns_' . $id . '.log';
 }
 
+function ddns_response_preview(string $body, int $max = 240): string {
+    $body = preg_replace('/\s+/', ' ', trim($body)) ?? '';
+    if ($body === '') {
+        return '';
+    }
+    if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+        if (mb_strlen($body, 'UTF-8') <= $max) {
+            return $body;
+        }
+        return mb_substr($body, 0, $max, 'UTF-8') . '...';
+    }
+    if (strlen($body) <= $max) {
+        return $body;
+    }
+    return substr($body, 0, $max) . '...';
+}
+
 function ddns_default_data(): array {
     return ['version' => 1, 'tasks' => []];
 }
@@ -143,6 +160,29 @@ function ddns_task_log_clear(string $id): void {
     if (file_exists($file)) {
         @unlink($file);
     }
+}
+
+function ddns_clear_all_tasks(): array {
+    $data = ddns_load_tasks();
+    $tasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    $removed = 0;
+    foreach ($tasks as $task) {
+        if (!is_array($task)) {
+            continue;
+        }
+        $id = (string)($task['id'] ?? '');
+        if ($id !== '') {
+            ddns_task_log_clear($id);
+        }
+        $removed++;
+    }
+    if (file_exists(DDNS_LOG_FILE)) {
+        @unlink(DDNS_LOG_FILE);
+    }
+    $data['tasks'] = [];
+    ddns_save_tasks($data);
+    cron_regenerate();
+    return ['ok' => true, 'removed' => $removed];
 }
 
 function ddns_make_id(): string {
@@ -328,6 +368,7 @@ function ddns_delete_task(string $id): bool {
         return false;
     }
     ddns_save_tasks($data);
+    ddns_task_log_clear($id);
     return true;
 }
 
@@ -343,7 +384,12 @@ function ddns_toggle_task(string $id): ?bool {
     return null;
 }
 
-function ddns_fetch_url(string $url): array {
+function ddns_fetch_url(string $url, array $logMeta = []): array {
+    $taskId = trim((string)($logMeta['task_id'] ?? ''));
+    $step = trim((string)($logMeta['step'] ?? '来源请求'));
+    if ($taskId !== '') {
+        ddns_task_log($taskId, 'info', $step . '开始', ['url' => $url]);
+    }
     $context = stream_context_create([
         'http' => [
             'timeout' => 15,
@@ -354,6 +400,9 @@ function ddns_fetch_url(string $url): array {
     ]);
     $body = @file_get_contents($url, false, $context);
     if ($body === false) {
+        if ($taskId !== '') {
+            ddns_task_log($taskId, 'error', $step . '失败', ['url' => $url, 'message' => '请求来源失败']);
+        }
         return ['ok' => false, 'msg' => '请求来源失败'];
     }
     $status = 200;
@@ -364,9 +413,23 @@ function ddns_fetch_url(string $url): array {
         }
     }
     if ($status >= 400) {
+        if ($taskId !== '') {
+            ddns_task_log($taskId, 'error', $step . '失败', [
+                'url' => $url,
+                'http_status' => $status,
+                'body_preview' => ddns_response_preview($body),
+            ]);
+        }
         return ['ok' => false, 'msg' => '来源返回 HTTP ' . $status, 'body' => $body];
     }
-    return ['ok' => true, 'body' => $body];
+    if ($taskId !== '') {
+        ddns_task_log($taskId, 'info', $step . '成功', [
+            'url' => $url,
+            'http_status' => $status,
+            'body_preview' => ddns_response_preview($body),
+        ]);
+    }
+    return ['ok' => true, 'body' => $body, 'http_status' => $status];
 }
 
 function ddns_pick_best_candidate(array $rows, array $source): ?array {
@@ -411,7 +474,10 @@ function ddns_pick_best_candidate(array $rows, array $source): ?array {
 }
 
 function ddns_fetch_cf_api4ce(string $line, array $source): array {
-    $r = ddns_fetch_url('https://api.4ce.cn/api/bestCFIP');
+    $r = ddns_fetch_url('https://api.4ce.cn/api/bestCFIP', [
+        'task_id' => (string)($source['__task_log_id'] ?? ''),
+        'step' => '4ce 来源请求',
+    ]);
     if (!$r['ok']) {
         return $r;
     }
@@ -436,7 +502,10 @@ function ddns_fetch_cf_api4ce(string $line, array $source): array {
 }
 
 function ddns_fetch_cf_uouin(string $line, array $source): array {
-    $r = ddns_fetch_url('https://api.uouin.com/cloudflare.html');
+    $r = ddns_fetch_url('https://api.uouin.com/cloudflare.html', [
+        'task_id' => (string)($source['__task_log_id'] ?? ''),
+        'step' => 'uouin 来源请求',
+    ]);
     if (!$r['ok']) {
         return $r;
     }
@@ -492,7 +561,10 @@ function ddns_fetch_cf_uouin(string $line, array $source): array {
 }
 
 function ddns_fetch_cf_164746(array $source): array {
-    $r = ddns_fetch_url('https://ip.164746.xyz');
+    $r = ddns_fetch_url('https://ip.164746.xyz', [
+        'task_id' => (string)($source['__task_log_id'] ?? ''),
+        'step' => '164746 来源请求',
+    ]);
     if (!$r['ok']) {
         return $r;
     }
@@ -555,7 +627,10 @@ function ddns_fetch_cf_vps789(string $line, array $source): array {
     ];
     $lastError = '请求来源失败';
     foreach ($apis as $api) {
-        $r = ddns_fetch_url($api);
+        $r = ddns_fetch_url($api, [
+            'task_id' => (string)($source['__task_log_id'] ?? ''),
+            'step' => 'vps789 来源请求',
+        ]);
         if (!$r['ok']) {
             $lastError = (string)($r['msg'] ?? $lastError);
             continue;
@@ -595,9 +670,13 @@ function ddns_fetch_cf_vps789(string $line, array $source): array {
 
 function ddns_resolve_source(array $task): array {
     $source = is_array($task['source'] ?? null) ? $task['source'] : [];
+    $source['__task_log_id'] = (string)($task['id'] ?? '');
     $type = (string)($source['type'] ?? 'local_ipv4');
     if ($type === 'local_ipv4') {
-        $r = ddns_fetch_url('https://api.ipify.org');
+        $r = ddns_fetch_url('https://api.ipify.org', [
+            'task_id' => (string)($task['id'] ?? ''),
+            'step' => '公网 IPv4 请求',
+        ]);
         if (!$r['ok']) return $r;
         $value = trim((string)($r['body'] ?? ''));
         if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
@@ -606,7 +685,10 @@ function ddns_resolve_source(array $task): array {
         return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv4 成功'];
     }
     if ($type === 'local_ipv6') {
-        $r = ddns_fetch_url('https://api64.ipify.org');
+        $r = ddns_fetch_url('https://api64.ipify.org', [
+            'task_id' => (string)($task['id'] ?? ''),
+            'step' => '公网 IPv6 请求',
+        ]);
         if (!$r['ok']) return $r;
         $value = trim((string)($r['body'] ?? ''));
         if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
@@ -652,23 +734,49 @@ function ddns_call_dns_api(string $domain, string $value, string $recordType, in
             'ok' => false,
             'msg' => (string)($result['msg'] ?? 'DNS API 调用失败'),
             'raw' => $result,
+            'request' => [
+                'url' => DDNS_DEFAULT_DNS_API . '?action=upsert',
+                'domain' => $domain,
+                'value' => $value,
+                'record_type' => $recordType,
+                'ttl' => $ttl,
+            ],
         ];
     }
     return [
         'ok' => true,
         'msg' => (string)($result['msg'] ?? 'ok'),
         'data' => $result['data'] ?? [],
+        'request' => [
+            'url' => DDNS_DEFAULT_DNS_API . '?action=upsert',
+            'domain' => $domain,
+            'value' => $value,
+            'record_type' => $recordType,
+            'ttl' => $ttl,
+        ],
     ];
 }
 
-function ddns_query_dns_value(string $domain, string $recordType): ?string {
+function ddns_query_dns_value(string $domain, string $recordType, string $taskId = ''): ?string {
     $url = DDNS_DEFAULT_DNS_API . '?action=query&domain=' . rawurlencode($domain) . '&type=' . rawurlencode($recordType);
+    if ($taskId !== '') {
+        ddns_task_log($taskId, 'info', '查询当前 DNS 记录', ['url' => $url]);
+    }
     $body = @file_get_contents($url);
     if ($body === false) {
+        if ($taskId !== '') {
+            ddns_task_log($taskId, 'error', '查询当前 DNS 记录失败', ['url' => $url, 'message' => '请求失败']);
+        }
         return null;
     }
     $json = json_decode($body, true);
     if (!is_array($json) || (int)($json['code'] ?? -1) !== 0) {
+        if ($taskId !== '') {
+            ddns_task_log($taskId, 'error', '查询当前 DNS 记录失败', [
+                'url' => $url,
+                'body_preview' => ddns_response_preview($body),
+            ]);
+        }
         return null;
     }
     $records = $json['data']['records'] ?? [];
@@ -677,8 +785,15 @@ function ddns_query_dns_value(string $domain, string $recordType): ?string {
     }
     foreach ($records as $record) {
         if (is_array($record) && strtoupper((string)($record['type'] ?? '')) === strtoupper($recordType)) {
-            return trim((string)($record['value'] ?? ''));
+            $value = trim((string)($record['value'] ?? ''));
+            if ($taskId !== '') {
+                ddns_task_log($taskId, 'info', '当前 DNS 记录查询成功', ['url' => $url, 'value' => $value]);
+            }
+            return $value;
         }
+    }
+    if ($taskId !== '') {
+        ddns_task_log($taskId, 'info', '当前 DNS 记录为空', ['url' => $url]);
     }
     return null;
 }
@@ -735,9 +850,13 @@ function ddns_run_task(array $task): array {
 
     $value = trim((string)($resolved['value'] ?? ''));
     $sourceLabel = ddns_source_label($task);
-    ddns_task_log($id, 'info', '来源解析成功', ['source' => $sourceLabel, 'value' => $value]);
+    ddns_task_log($id, 'info', '来源解析成功', [
+        'source' => $sourceLabel,
+        'value' => $value,
+        'meta' => is_array($resolved['meta'] ?? null) ? $resolved['meta'] : null,
+    ]);
     if ($skipUnchanged) {
-        $current = ddns_query_dns_value($domain, $recordType);
+        $current = ddns_query_dns_value($domain, $recordType, $id);
         if ($current !== null && $current === $value) {
             $msg = '值未变化，已跳过';
             ddns_store_result($id, 'success', $msg, $value);
@@ -757,12 +876,27 @@ function ddns_run_task(array $task): array {
         }
     }
 
+    ddns_task_log($id, 'info', '准备调用 DNS 更新接口', [
+        'url' => DDNS_DEFAULT_DNS_API . '?action=upsert',
+        'domain' => $domain,
+        'record_type' => $recordType,
+        'value' => $value,
+        'ttl' => $ttl,
+    ]);
     $updated = ddns_call_dns_api($domain, $value, $recordType, $ttl);
     if (!$updated['ok']) {
         $msg = (string)($updated['msg'] ?? 'DNS 更新失败');
         ddns_store_result($id, 'fail', $msg, $value);
         ddns_log('error', 'DDNS update failed', ['id' => $id, 'name' => $name, 'domain' => $domain, 'msg' => $msg, 'value' => $value]);
-        ddns_task_log($id, 'error', 'DNS 更新失败', ['domain' => $domain, 'record_type' => $recordType, 'value' => $value, 'message' => $msg, 'detail' => $updated['error'] ?? $updated['raw'] ?? null, 'http_status' => $updated['http_status'] ?? null]);
+        ddns_task_log($id, 'error', 'DNS 更新失败', [
+            'domain' => $domain,
+            'record_type' => $recordType,
+            'value' => $value,
+            'message' => $msg,
+            'request' => $updated['request'] ?? null,
+            'detail' => $updated['error'] ?? $updated['raw'] ?? null,
+            'http_status' => $updated['http_status'] ?? null,
+        ]);
         return [
             'ok' => false,
             'status' => 'fail',
@@ -779,7 +913,14 @@ function ddns_run_task(array $task): array {
     $msg = (string)$updated['msg'];
     ddns_store_result($id, 'success', $msg, $value);
     ddns_log('info', 'DDNS update success', ['id' => $id, 'name' => $name, 'domain' => $domain, 'value' => $value]);
-        ddns_task_log($id, 'info', 'DNS 更新成功', ['domain' => $domain, 'record_type' => $recordType, 'value' => $value, 'message' => $msg, 'action' => $updated['data']['action'] ?? null]);
+        ddns_task_log($id, 'info', 'DNS 更新成功', [
+            'domain' => $domain,
+            'record_type' => $recordType,
+            'value' => $value,
+            'message' => $msg,
+            'request' => $updated['request'] ?? null,
+            'action' => $updated['data']['action'] ?? null,
+        ]);
     return [
         'ok' => true,
         'status' => 'success',

@@ -681,6 +681,39 @@ function task_cleanup_on_delete(array $task): void {
             @unlink($script);
         }
     }
+    $lock = task_lock_file($id);
+    if ($lock !== '' && file_exists($lock)) {
+        @unlink($lock);
+    }
+}
+
+function scheduled_tasks_clear_manual_tasks(): array {
+    $data = load_scheduled_tasks();
+    $allTasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    $kept = [];
+    $removed = 0;
+
+    foreach ($allTasks as $task) {
+        if (!is_array($task)) {
+            continue;
+        }
+        if (cron_is_system_task($task)) {
+            $kept[] = $task;
+            continue;
+        }
+        task_cleanup_on_delete($task);
+        $removed++;
+    }
+
+    $data['tasks'] = $kept;
+    save_scheduled_tasks($data);
+    cron_regenerate();
+
+    return [
+        'ok' => true,
+        'removed' => $removed,
+        'kept_system' => count($kept),
+    ];
 }
 
 /** @return array{tasks: array<int, array>} */

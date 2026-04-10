@@ -53,7 +53,7 @@ test('ddns execution updates latest value and supports multi-page log navigation
     if (typeof fn !== 'function') throw new Error('runTask not found');
     void fn(id);
   }, taskId);
-  await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/, { timeout: 15000 });
+  await expect(row).toContainText(/运行中|成功|失败/, { timeout: 15000 });
   await waitForDdnsSettled(page, taskName);
   await expect(row).toContainText(/\d+\.\d+\.\d+\.\d+|—/);
 
@@ -76,6 +76,9 @@ test('ddns execution updates latest value and supports multi-page log navigation
   await expect(page.locator('#ddns-log-prev')).toBeVisible();
   await expect(page.locator('#ddns-log-next')).toBeVisible();
   await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|任务开始执行|来源解析|DNS 更新|跳过|失败|\[/, {
+    timeout: 10000,
+  });
+  await expect(page.locator('#ddns-log-body')).toContainText(/https:\/\/api\.ipify\.org|https:\/\/api64\.ipify\.org|https:\/\/api\.4ce\.cn|https:\/\/vps789\.com|http:\/\/127\.0\.0\.1\/api\/dns\.php/, {
     timeout: 10000,
   });
 
