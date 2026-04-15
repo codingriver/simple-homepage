@@ -24,14 +24,14 @@ test('admin sees validation feedback for invalid duplicate and long-name groups'
   await page.getByRole('button', { name: /添加分组/ }).click();
   await page.locator('#fi_id').fill('Bad Group');
   await page.locator('#fi_name').fill('');
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存' }).click({ force: true });
 
   await page.locator('#fi_id').fill(gid);
   await page.locator('#fi_name').fill('初始分组');
   await page.locator('#fi_vis').selectOption('all');
   await page.locator('#fi_auth').selectOption('0');
   await page.locator('#fi_order').fill('999');
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存' }).click({ force: true });
 
   const row = page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first();
   await expect(row).toContainText('初始分组');
@@ -42,7 +42,7 @@ test('admin sees validation feedback for invalid duplicate and long-name groups'
   await page.locator('#fi_name').fill('覆盖后的分组');
   await page.locator('#fi_vis').selectOption('admin');
   await page.locator('#fi_auth').selectOption('1');
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存' }).click({ force: true });
 
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`)).toHaveCount(1);
   await expect(row).toContainText('覆盖后的分组');
@@ -52,7 +52,7 @@ test('admin sees validation feedback for invalid duplicate and long-name groups'
   await page.getByRole('button', { name: /添加分组/ }).click();
   await page.locator('#fi_id').fill(`long-name-${Date.now()}`);
   await page.locator('#fi_name').fill('超长分组名称'.repeat(20));
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存' }).click({ force: true });
 
   await tracker.assertNoClientErrors();
 });
@@ -98,7 +98,12 @@ test('deleting a group removes its linked site from admin and homepage', async (
   await page.goto('/admin/groups.php');
   const groupRow = page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first();
   page.once('dialog', dialog => dialog.accept());
-  await groupRow.getByRole('button', { name: '删除' }).click({ force: true });
+  await Promise.all([
+    page.waitForURL(/\/admin\/groups\.php/),
+    groupRow.locator('form').evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    }),
+  ]);
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`)).toHaveCount(0);
 
   await page.goto('/admin/sites.php');

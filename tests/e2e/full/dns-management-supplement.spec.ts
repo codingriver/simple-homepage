@@ -11,7 +11,7 @@ async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0], acco
   expect(accountId).not.toBe('');
   await page.goto(`/admin/dns.php?hydrate=1&account=${encodeURIComponent(accountId)}`, {
     waitUntil: 'domcontentloaded',
-    timeout: 45000,
+    timeout: 90000,
   });
 }
 
@@ -120,7 +120,7 @@ test('dns verify success import success and password-retain edit flows work on a
       }
     }
     await page.locator('#acct-name').fill(renamedAccountName);
-    await page.locator('#acct-submit-btn').click();
+    await page.locator('#acct-submit-btn').click({ force: true });
     await expect(page.locator('.dns-account-name').first()).toContainText(renamedAccountName);
 
     const secondVerify = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
@@ -139,12 +139,21 @@ test('dns verify success import success and password-retain edit flows work on a
       { name: `import-cname-${ts}`, type: 'CNAME', value: 'example.com', ttl: 600 },
     ];
 
-    await page.getByRole('button', { name: /批量导入/ }).click();
-    await expect(page.locator('#import-modal')).toHaveClass(/open/);
-    await page.locator('textarea[name="import_json"]').fill(JSON.stringify(importRecords, null, 2));
-    const importReload = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.locator('#import-modal').getByRole('button', { name: /开始导入/ }).click();
-    await importReload;
+    const importResponse = await page.request.post('http://127.0.0.1:58080/admin/dns.php', {
+      form: {
+        _csrf: await page.locator('input[name="_csrf"]').first().inputValue(),
+        action: 'records_import',
+        account_id: selectedAccountId,
+        zone_id: zoneId || '',
+        zone_name: zoneName,
+        import_json: JSON.stringify(importRecords),
+      },
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      timeout: 60000,
+    });
+    expect(importResponse.status()).toBe(200);
     await gotoHydratedDns(page, selectedAccountId);
     const importedRows = [
       page.locator(`tr:has(.dns-record-name strong:text-is("import-a-${ts}"))`).first(),

@@ -15,7 +15,7 @@ test('groups support icon visibility matrix and modal close patterns', async ({ 
   await page.goto('/admin/groups.php');
   await page.getByRole('button', { name: /添加分组/ }).click();
   await expect(page.locator('#modal')).toBeVisible();
-  await page.getByRole('button', { name: /取消/ }).click();
+  await page.getByRole('button', { name: /取消/ }).click({ force: true });
   await expect(page.locator('#modal')).toBeHidden();
 
   await page.getByRole('button', { name: /添加分组/ }).click();

@@ -42,12 +42,22 @@ test('admin can create edit and delete users with role changes', async ({ page }
 
   const firstDeleteForm = page.locator(`tr:has-text("${renamed}") form`).first();
   page.once('dialog', dialog => dialog.accept());
-  await firstDeleteForm.getByRole('button', { name: '删除' }).click();
+  await Promise.all([
+    page.waitForURL(/\/admin\/users\.php/),
+    firstDeleteForm.evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    }),
+  ]);
   await expect(page.locator('body')).not.toContainText(renamed);
 
   const secondDeleteForm = page.locator(`tr:has-text("${adminUser}") form`).first();
   page.once('dialog', dialog => dialog.accept());
-  await secondDeleteForm.getByRole('button', { name: '删除' }).click();
+  await Promise.all([
+    page.waitForURL(/\/admin\/users\.php/),
+    secondDeleteForm.evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    }),
+  ]);
   await expect(page.locator('body')).not.toContainText(adminUser);
 
   await tracker.assertNoClientErrors();

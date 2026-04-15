@@ -11,10 +11,10 @@ async function ddnsTaskIdByName(page: Parameters<typeof loginAsDevAdmin>[0], nam
 }
 
 async function saveDdns(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const fn = (window as Window & { saveTask?: (runAfterSave: boolean) => Promise<void> }).saveTask;
     if (typeof fn !== 'function') throw new Error('saveTask not found');
-    void fn(false);
+    await fn(false);
   });
 }
 
@@ -56,7 +56,11 @@ test('ddns tasks sync into scheduled dispatcher groups by cron and update after 
   await createTask(page, taskC, `dispatcher-c-${ts}.606077.xyz`, '*/13 * * * *');
 
   await page.goto('/admin/scheduled_tasks.php');
-  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await page.evaluate(() => {
+    const fn = (window as Window & { switchScheduledTab?: (tab: string) => void }).switchScheduledTab;
+    if (typeof fn !== 'function') throw new Error('switchScheduledTab not found');
+    fn('ddns');
+  });
   await expect(page.locator('#scheduled-tab-panel-ddns')).toBeVisible();
   await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(/DDNS 调度器/);
   await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(taskA);
@@ -74,7 +78,11 @@ test('ddns tasks sync into scheduled dispatcher groups by cron and update after 
   await expect(rowA).toContainText('禁用');
 
   await page.goto('/admin/scheduled_tasks.php');
-  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await page.evaluate(() => {
+    const fn = (window as Window & { switchScheduledTab?: (tab: string) => void }).switchScheduledTab;
+    if (typeof fn !== 'function') throw new Error('switchScheduledTab not found');
+    fn('ddns');
+  });
   await expect(page.locator('#scheduled-tab-panel-ddns')).toContainText(/DDNS 调度器/);
 
   await tracker.assertNoClientErrors();

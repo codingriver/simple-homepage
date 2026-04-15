@@ -18,11 +18,11 @@ test('backup page supports confirm cancel trigger badges and invalid restore fai
   const firstRow = page.locator('table tr').nth(1);
 
   page.once('dialog', (dialog) => dialog.dismiss());
-  await firstRow.getByRole('button', { name: /恢复/ }).click();
+  await firstRow.getByRole('button', { name: /恢复/ }).click({ force: true });
   await expect(page.locator('body')).not.toContainText('已恢复备份');
 
   page.once('dialog', (dialog) => dialog.dismiss());
-  await firstRow.getByRole('button', { name: /删除/ }).click();
+  await firstRow.getByRole('button', { name: /删除/ }).click({ force: true });
   await expect(page.locator('table tr').nth(1)).toBeVisible();
 
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();

@@ -11,10 +11,10 @@ async function ddnsTaskIdByName(page: Parameters<typeof loginAsDevAdmin>[0], nam
 }
 
 async function triggerDdnsSave(page: Parameters<typeof loginAsDevAdmin>[0], runAfterSave = false) {
-  await page.evaluate((shouldRun) => {
+  await page.evaluate(async (shouldRun) => {
     const fn = (window as Window & { saveTask?: (runAfterSave: boolean) => Promise<void> }).saveTask;
     if (typeof fn !== 'function') throw new Error('saveTask not found');
-    void fn(shouldRun);
+    await fn(shouldRun);
   }, runAfterSave);
 }
 
@@ -54,13 +54,13 @@ test('ddns fallback task shows combined source label and structured test result'
     if (typeof fn !== 'function') throw new Error('openDdnsModal not found');
     fn(id);
   }, taskId);
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const fn = (window as Window & { testSource?: () => Promise<void> }).testSource;
     if (typeof fn !== 'function') throw new Error('testSource not found');
-    void fn();
+    await fn();
   });
-  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/, { timeout: 20_000 });
-  await expect(page.locator('#fm-test-result')).toContainText(/4ce|164746|回退|失败/, { timeout: 20_000 });
+  await expect(page.locator('#fm-test-result')).toContainText(/状态：成功|状态：失败/, { timeout: 5_000 });
+  await expect(page.locator('#fm-test-result')).toContainText(/4ce|164746|回退|失败/, { timeout: 5_000 });
 
   await tracker.assertNoClientErrors();
 });

@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id    = trim((string)($_POST['id']       ?? ''));
         $name  = trim((string)($_POST['name']     ?? ''));
         $sched = trim((string)($_POST['schedule'] ?? ''));
-        $cmd   = (string)($_POST['command']       ?? '');
+        $cmd   = task_normalize_editor_contents((string)($_POST['command'] ?? ''));
         $en    = !empty($_POST['enabled']);
         if ($id === '') $id = 't_' . bin2hex(random_bytes(8));
         if (!preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
@@ -177,6 +177,8 @@ unset($_t);
 $manual_tasks = array_values(array_filter($tasks, fn($row) => empty($row['_is_system'])));
 $system_tasks = array_values(array_filter($tasks, fn($row) => !empty($row['_is_system'])));
 $default_task_command = <<<'BASH'
+#!/bin/bash
+
 # 这是默认 Bash 脚本，可以直接修改
 
 echo "== basic commands =="
@@ -215,6 +217,7 @@ $CSRF = csrf_field();
 <!-- ===== 工具栏 ===== -->
 <div class="toolbar">
   <button type="button" class="btn btn-primary" onclick="openTaskModal(null)">＋ 新建任务</button>
+  <a href="task_templates.php" class="btn btn-secondary">🧱 任务模板</a>
   <form method="POST" style="display:inline">
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="cron_reload">

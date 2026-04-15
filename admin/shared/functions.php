@@ -132,6 +132,8 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
+    $tpl_file  = DATA_DIR . '/task_templates.json';
+    $notify_file = DATA_DIR . '/notifications.json';
     $scheduled_tasks = file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [];
     if (is_array($scheduled_tasks)) {
         require_once __DIR__ . '/cron_lib.php';
@@ -151,6 +153,8 @@ function backup_collect_payload(string $trigger = 'manual'): array {
         'scheduled_tasks' => $scheduled_tasks,
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
         'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
+        'task_templates'  => file_exists($tpl_file) ? (json_decode(file_get_contents($tpl_file), true) ?? []) : [],
+        'notifications'   => file_exists($notify_file) ? (json_decode(file_get_contents($notify_file), true) ?? []) : [],
     ];
 }
 
@@ -164,6 +168,8 @@ function backup_apply_restored_sections(array $data): void {
     $wrote_st   = false;
     $wrote_dns  = false;
     $wrote_ddns = false;
+    $wrote_templates = false;
+    $wrote_notifications = false;
 
     if (isset($data['sites'])) {
         file_put_contents(SITES_FILE,
@@ -179,6 +185,8 @@ function backup_apply_restored_sections(array $data): void {
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
+    $tpl_file  = DATA_DIR . '/task_templates.json';
+    $notify_file = DATA_DIR . '/notifications.json';
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
         file_put_contents($st_file,
             json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -199,6 +207,18 @@ function backup_apply_restored_sections(array $data): void {
             LOCK_EX);
         $wrote_ddns = true;
     }
+    if (isset($data['task_templates']) && is_array($data['task_templates'])) {
+        file_put_contents($tpl_file,
+            json_encode($data['task_templates'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+        $wrote_templates = true;
+    }
+    if (isset($data['notifications']) && is_array($data['notifications'])) {
+        file_put_contents($notify_file,
+            json_encode($data['notifications'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+        $wrote_notifications = true;
+    }
 
     if ($wrote_st) {
         require_once __DIR__ . '/cron_lib.php';
@@ -210,6 +230,12 @@ function backup_apply_restored_sections(array $data): void {
     }
     if ($wrote_ddns && !file_exists($ddns_file)) {
         file_put_contents($ddns_file, json_encode(['version' => 1, 'tasks' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    }
+    if ($wrote_templates && !file_exists($tpl_file)) {
+        file_put_contents($tpl_file, json_encode(['version' => 1, 'templates' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    }
+    if ($wrote_notifications && !file_exists($notify_file)) {
+        file_put_contents($notify_file, json_encode(['version' => 1, 'channels' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
     }
 }
 
@@ -227,9 +253,26 @@ function backup_create(string $trigger = 'manual'): string {
 
     $filename = 'backup_' . date('Ymd_His') . '_' . $trigger . '.json';
     $path     = BACKUPS_DIR . '/' . $filename;
-    file_put_contents($path, json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    $written = file_put_contents($path, json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    if ($written === false) {
+        if (function_exists('notify_event')) {
+            notify_event('backup_failed', [
+                'trigger' => $trigger,
+                'path' => $path,
+                'message' => '备份文件写入失败',
+            ]);
+        }
+        return '';
+    }
 
     backup_cleanup();
+    if (function_exists('notify_event')) {
+        notify_event('backup_succeeded', [
+            'trigger' => $trigger,
+            'path' => $path,
+            'filename' => basename($path),
+        ]);
+    }
 
     return $path;
 }

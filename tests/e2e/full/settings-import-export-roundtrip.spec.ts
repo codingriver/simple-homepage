@@ -37,7 +37,12 @@ test('admin can export config, mutate data, and restore it via import', async ({
 
   await page.goto('/admin/groups.php');
   page.once('dialog', dialog => dialog.accept());
-  await groupRow.getByRole('button', { name: '删除' }).click();
+  await Promise.all([
+    page.waitForURL(/\/admin\/groups\.php/),
+    groupRow.locator('form').evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    }),
+  ]);
   await expect(page.locator(`tr:has(input[name="gid"][value="${groupId}"])`)).toHaveCount(0);
 
   await page.goto('/admin/settings.php');

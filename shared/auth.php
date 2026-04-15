@@ -30,6 +30,7 @@ define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
 
 // 请求收到/响应结束耗时日志（data/logs/request_timing.log），关闭：环境变量 NAV_REQUEST_TIMING=0
 require_once __DIR__ . '/request_timing.php';
+require_once __DIR__ . '/notify_runtime.php';
 
 /**
  * 系统配置默认值（单一来源）
@@ -58,6 +59,13 @@ function auth_default_config(): array {
         'webhook_url'         => '',
         'webhook_tg_chat'     => '',
         'webhook_events'      => 'FAIL,IP_LOCKED',
+        'webdav_enabled'      => '0',
+        'webdav_username'     => '',
+        'webdav_password_hash' => '',
+        'webdav_root'         => '/var/www/nav/data',
+        'webdav_readonly'     => '0',
+        'ssh_terminal_persist' => '1',
+        'ssh_terminal_idle_minutes' => 120,
         'nginx_last_applied'  => 0,
     ];
 }
@@ -599,7 +607,7 @@ function auth_check_setup(bool $is_setup_page = false): void {
 /**
  * 生成 Token
  * @param string $username    用户名
- * @param string $role        角色（admin/user）
+ * @param string $role        角色（admin/user/host_admin/host_viewer）
  * @param bool   $remember_me 是否记住我
  */
 function auth_generate_token(string $username, string $role = 'user', bool $remember_me = false): string {
@@ -732,6 +740,82 @@ function auth_dev_qa_user_record(): array {
     ];
 }
 
+function auth_role_labels(): array {
+    return [
+        'user' => '普通用户',
+        'admin' => '管理员',
+        'host_admin' => '主机管理员',
+        'host_viewer' => '主机只读',
+    ];
+}
+
+function auth_role_permissions_map(): array {
+    return [
+        'admin' => ['*'],
+        'host_admin' => [
+            'ssh.view',
+            'ssh.manage',
+            'ssh.config.manage',
+            'ssh.service.manage',
+            'ssh.batch',
+            'ssh.remote_hosts',
+            'ssh.keys',
+            'ssh.files',
+            'ssh.files.write',
+            'ssh.terminal',
+            'ssh.audit',
+            'ssh.audit.export',
+        ],
+        'host_viewer' => [
+            'ssh.view',
+            'ssh.audit',
+            'ssh.files',
+        ],
+        'user' => [],
+    ];
+}
+
+function auth_user_record_by_username(string $username): ?array {
+    $users = auth_load_users();
+    if (!isset($users[$username]) || !is_array($users[$username])) {
+        return null;
+    }
+    return $users[$username] + ['username' => $username];
+}
+
+function auth_user_permissions(?array $user = null): array {
+    if (!$user) {
+        $user = auth_get_current_user();
+    }
+    if (!$user) {
+        return [];
+    }
+    $username = trim((string)($user['username'] ?? ''));
+    $role = trim((string)($user['role'] ?? 'user'));
+    $record = $username !== '' ? auth_user_record_by_username($username) : null;
+    $permissions = [];
+    if (is_array($record) && !empty($record['permissions']) && is_array($record['permissions'])) {
+        $permissions = array_values(array_unique(array_map('strval', $record['permissions'])));
+    } else {
+        $permissions = auth_role_permissions_map()[$role] ?? [];
+    }
+    if ($role === 'admin' && !in_array('*', $permissions, true)) {
+        $permissions[] = '*';
+    }
+    return $permissions;
+}
+
+function auth_user_has_permission(string $permission, ?array $user = null): bool {
+    if ($permission === '') {
+        return false;
+    }
+    $permissions = auth_user_permissions($user);
+    if (in_array('*', $permissions, true)) {
+        return true;
+    }
+    return in_array($permission, $permissions, true);
+}
+
 /**
  * 读取用户列表
  */
@@ -793,6 +877,7 @@ function auth_save_user(string $username, string $password, string $role = 'admi
     $users[$username] = [
         'password_hash' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]),
         'role'          => $role,
+        'permissions'   => $users[$username]['permissions'] ?? (auth_role_permissions_map()[$role] ?? []),
         'created_at'    => $users[$username]['created_at'] ?? date('Y-m-d H:i:s'),
         'updated_at'    => date('Y-m-d H:i:s'),
     ];
@@ -824,6 +909,15 @@ function auth_require_admin(): array {
     if (($user['role'] ?? '') !== 'admin') {
         http_response_code(403);
         die('403 Forbidden: 需要管理员权限。');
+    }
+    return $user;
+}
+
+function auth_require_permission(string $permission): array {
+    $user = auth_require_login();
+    if (!auth_user_has_permission($permission, $user)) {
+        http_response_code(403);
+        die('403 Forbidden: 权限不足。');
     }
     return $user;
 }
@@ -1030,6 +1124,14 @@ function auth_write_log(string $type, string $username, string $ip, string $note
     // 触发 Webhook 通知（webhook_send 由 admin/shared/functions.php 提供，仅在已加载时调用）
     if (function_exists('webhook_send')) {
         webhook_send($type, $username, $ip, $note);
+    }
+    if (in_array($type, ['FAIL', 'IP_LOCKED'], true) && function_exists('notify_event')) {
+        notify_event('login_abnormal', [
+            'type' => $type,
+            'username' => $username ?: '-',
+            'ip' => $ip,
+            'note' => $note,
+        ]);
     }
 }
 

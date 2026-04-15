@@ -41,6 +41,46 @@ foreach ($groups as $g) {
     if (!($g['auth_required'] ?? true)) { $has_public = true; break; }
 }
 
+function homepage_group_is_visible(array $group, bool $is_admin, $user): bool {
+    if (($group['visible_to'] ?? 'all') === 'admin' && !$is_admin) {
+        return false;
+    }
+    if (($group['auth_required'] ?? true) && !$user) {
+        return false;
+    }
+    return true;
+}
+
+function homepage_site_tags(array $site): array {
+    $raw = $site['tags'] ?? [];
+    if (is_string($raw)) {
+        $raw = preg_split('/[,，\n\r]+/', $raw) ?: [];
+    }
+    if (!is_array($raw)) {
+        return [];
+    }
+    $tags = [];
+    foreach ($raw as $tag) {
+        $tag = trim((string)$tag);
+        if ($tag !== '') {
+            $tags[] = $tag;
+        }
+    }
+    return array_values(array_unique($tags));
+}
+
+function homepage_days_left(string $date): ?int {
+    $date = trim($date);
+    if ($date === '') {
+        return null;
+    }
+    $ts = strtotime($date . ' 00:00:00');
+    if ($ts === false) {
+        return null;
+    }
+    return (int)floor(($ts - strtotime(date('Y-m-d 00:00:00'))) / 86400);
+}
+
 function homepage_pending_proxy_sites(): array {
     $cfg_path = CONFIG_FILE;
     $sites_path = DATA_DIR . '/sites.json';
@@ -93,6 +133,163 @@ function build_nav_url(array $site, string $token): string {
         default: return $site['url'] ?? '#';
     }
 }
+
+function homepage_render_site_card(array $site, array $group, string $href, string $token, array $health_cache, bool $showHealth): string {
+    $type = (string)($site['type'] ?? 'external');
+    $typeClass = ['internal' => 'bi', 'proxy' => 'bp', 'external' => 'be'][$type] ?? 'be';
+    $typeLabel = ['internal' => '内站', 'proxy' => '代理', 'external' => '外链'][$type] ?? '外链';
+    $iconUrl = (string)($site['url'] ?? ($site['proxy_target'] ?? ''));
+    $domain = parse_url($iconUrl, PHP_URL_HOST) ?? '';
+    $healthUrl = $type === 'proxy' ? (string)($site['proxy_target'] ?? '') : (string)($site['url'] ?? '');
+    $healthEntry = $health_cache[$healthUrl] ?? null;
+    $healthStatus = 'unknown';
+    if ($healthEntry && (time() - ($healthEntry['checked_at'] ?? 0)) < 600) {
+        $healthStatus = (string)($healthEntry['status'] ?? 'unknown');
+    }
+    $tags = homepage_site_tags($site);
+    $favorite = !empty($site['favorite']);
+    $pinned = !empty($site['pinned']);
+    $statusBadge = trim((string)($site['status_badge'] ?? ''));
+    $assetType = trim((string)($site['asset_type'] ?? ''));
+    $env = trim((string)($site['env'] ?? ''));
+    $owner = trim((string)($site['owner'] ?? ''));
+    $notes = trim((string)($site['notes'] ?? ''));
+    $renewUrl = trim((string)($site['renew_url'] ?? ''));
+    $domainExpireAt = trim((string)($site['domain_expire_at'] ?? ''));
+    $sslExpireAt = trim((string)($site['ssl_expire_at'] ?? ''));
+    $domainDays = homepage_days_left($domainExpireAt);
+    $sslDays = homepage_days_left($sslExpireAt);
+    $siteKey = (string)($group['id'] ?? '') . ':' . (string)($site['id'] ?? '');
+    $searchBlob = strtolower(implode(' ', array_filter([
+        (string)($site['name'] ?? ''),
+        (string)($site['desc'] ?? ''),
+        (string)($group['name'] ?? ''),
+        implode(' ', $tags),
+        $assetType,
+        $env,
+        $owner,
+        $statusBadge,
+        $notes,
+    ])));
+
+    ob_start();
+    ?>
+  <a class="card<?= empty($site['desc']) ? ' no-desc' : '' ?>"
+     href="<?= htmlspecialchars($href) ?>"
+     target="_blank"
+     rel="noopener noreferrer"
+     data-site-key="<?= htmlspecialchars($siteKey) ?>"
+     data-name="<?= htmlspecialchars(strtolower((string)($site['name'] ?? ''))) ?>"
+     data-desc="<?= htmlspecialchars(strtolower((string)($site['desc'] ?? ''))) ?>"
+     data-group="<?= htmlspecialchars(strtolower((string)($group['name'] ?? ''))) ?>"
+     data-tags="<?= htmlspecialchars(strtolower(implode(',', $tags))) ?>"
+     data-env="<?= htmlspecialchars(strtolower($env)) ?>"
+     data-asset-type="<?= htmlspecialchars(strtolower($assetType)) ?>"
+     data-status-badge="<?= htmlspecialchars(strtolower($statusBadge)) ?>"
+     data-favorite="<?= $favorite ? '1' : '0' ?>"
+     data-pinned="<?= $pinned ? '1' : '0' ?>"
+     data-search="<?= htmlspecialchars($searchBlob) ?>">
+    <span class="bx <?= htmlspecialchars($typeClass) ?>"><?= htmlspecialchars($typeLabel) ?></span>
+    <?php if ($showHealth && $healthStatus !== 'unknown'): ?>
+    <span class="hd" style="position:absolute;bottom:5px;right:6px;width:7px;height:7px;border-radius:50%;background:<?= $healthStatus === 'up' ? '#4ade80' : '#f87171' ?>;box-shadow:0 0 5px <?= $healthStatus === 'up' ? '#4ade80' : '#f87171' ?>;" title="<?= $healthStatus === 'up' ? '在线' : '离线' ?>"></span>
+    <?php endif; ?>
+    <div class="ci">
+      <?php if ($domain && !is_private_ip((string)$domain)): ?>
+      <img src="/favicon.php?url=<?= urlencode('https://' . $domain) ?>"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
+           alt="" loading="lazy">
+      <span style="display:none"><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
+      <?php else: ?>
+      <span><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
+      <?php endif; ?>
+    </div>
+    <div class="cn"><?= htmlspecialchars((string)($site['name'] ?? '')) ?></div>
+    <div class="card-meta-line">
+      <?php if ($favorite): ?><span class="mini-badge mini-star">收藏</span><?php endif; ?>
+      <?php if ($pinned): ?><span class="mini-badge mini-pin">常用</span><?php endif; ?>
+      <?php if ($assetType !== ''): ?><span class="mini-badge"><?= htmlspecialchars($assetType) ?></span><?php endif; ?>
+      <?php if ($env !== ''): ?><span class="mini-badge"><?= htmlspecialchars($env) ?></span><?php endif; ?>
+      <?php if ($statusBadge !== ''): ?><span class="mini-badge mini-status"><?= htmlspecialchars($statusBadge) ?></span><?php endif; ?>
+    </div>
+    <div class="cd"><?= htmlspecialchars((string)($site['desc'] ?? $typeLabel)) ?></div>
+    <?php if ($tags !== []): ?>
+    <div class="tag-row">
+      <?php foreach (array_slice($tags, 0, 4) as $tag): ?>
+      <span class="tag-chip"><?= htmlspecialchars($tag) ?></span>
+      <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+    <?php if (($domainDays !== null && $domainDays <= 30) || ($sslDays !== null && $sslDays <= 30)): ?>
+    <div class="expiry-row">
+      <?php if ($domainDays !== null && $domainDays <= 30): ?>
+      <span class="expiry-chip">域名 <?= $domainDays < 0 ? '已过期' : ('剩余 ' . $domainDays . ' 天') ?></span>
+      <?php endif; ?>
+      <?php if ($sslDays !== null && $sslDays <= 30): ?>
+      <span class="expiry-chip">SSL <?= $sslDays < 0 ? '已过期' : ('剩余 ' . $sslDays . ' 天') ?></span>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    <div class="group-chip">#<?= htmlspecialchars((string)($group['name'] ?? '')) ?></div>
+    <?php if (!empty($site['desc']) || $iconUrl !== '' || $notes !== '' || $renewUrl !== ''): ?>
+    <div class="tt">
+      <?php if (!empty($site['desc'])): ?><p><?= htmlspecialchars((string)$site['desc']) ?></p><?php endif; ?>
+      <?php if ($notes !== ''): ?><p>备注：<?= htmlspecialchars($notes) ?></p><?php endif; ?>
+      <?php if ($owner !== ''): ?><p>负责人：<?= htmlspecialchars($owner) ?></p><?php endif; ?>
+      <?php if ($renewUrl !== ''): ?><p>续费：<?= htmlspecialchars($renewUrl) ?></p><?php endif; ?>
+      <span class="tt-url"><?= htmlspecialchars($iconUrl) ?></span>
+    </div>
+    <?php endif; ?>
+  </a>
+    <?php
+    return (string)ob_get_clean();
+}
+
+$visible_groups = [];
+$visible_sites = [];
+foreach ($groups as $group) {
+    if (!homepage_group_is_visible($group, $is_admin, $user)) {
+        continue;
+    }
+    $groupSites = [];
+    foreach ($group['sites'] ?? [] as $site) {
+        if (!is_array($site)) {
+            continue;
+        }
+        $href = build_nav_url($site, $token);
+        $groupSites[] = ['site' => $site, 'href' => $href];
+        $visible_sites[] = ['group' => $group, 'site' => $site, 'href' => $href];
+    }
+    $group['_render_sites'] = $groupSites;
+    $visible_groups[] = $group;
+}
+
+$favorite_sites = array_values(array_filter($visible_sites, static fn($row) => !empty($row['site']['favorite'])));
+$pinned_sites = array_values(array_filter($visible_sites, static fn($row) => !empty($row['site']['pinned'])));
+$tag_options = [];
+$env_options = [];
+$asset_type_options = [];
+$status_badge_options = [];
+foreach ($visible_sites as $row) {
+    foreach (homepage_site_tags($row['site']) as $tag) {
+        $tag_options[$tag] = true;
+    }
+    $env = trim((string)($row['site']['env'] ?? ''));
+    if ($env !== '') {
+        $env_options[$env] = true;
+    }
+    $assetType = trim((string)($row['site']['asset_type'] ?? ''));
+    if ($assetType !== '') {
+        $asset_type_options[$assetType] = true;
+    }
+    $statusBadge = trim((string)($row['site']['status_badge'] ?? ''));
+    if ($statusBadge !== '') {
+        $status_badge_options[$statusBadge] = true;
+    }
+}
+ksort($tag_options, SORT_NATURAL | SORT_FLAG_CASE);
+ksort($env_options, SORT_NATURAL | SORT_FLAG_CASE);
+ksort($asset_type_options, SORT_NATURAL | SORT_FLAG_CASE);
+ksort($status_badge_options, SORT_NATURAL | SORT_FLAG_CASE);
 
 // 构造背景样式（安全校验 bg_image，防路径遍历）
 $bg_style = '';
@@ -158,6 +355,24 @@ main{max-width:1280px;margin:0 auto;padding:22px 16px}
 .sec{display:none}.sec.active{display:block}
 .section-label{display:none;margin-bottom:10px;color:var(--tm);font-size:12px;letter-spacing:.04em}
 body.search-open .section-label{display:block}
+.filter-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 16px}
+.filter-cell{display:flex;flex-direction:column;gap:6px}
+.filter-cell label{font-size:11px;color:var(--tm);letter-spacing:.04em}
+.filter-cell select,.filter-cell button{width:100%}
+.quick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.quick-section{margin-bottom:18px}
+.quick-section.hidden{display:none}
+.quick-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.quick-title strong{font-size:13px}
+.quick-title span{font-size:11px;color:var(--tm)}
+.card-meta-line,.tag-row,.expiry-row{display:flex;gap:6px;flex-wrap:wrap}
+.card-meta-line{min-height:20px}
+.mini-badge,.tag-chip,.expiry-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:10px;line-height:1.5;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:var(--tx2)}
+.mini-star{background:rgba(251,191,36,.14);color:#fbbf24;border-color:rgba(251,191,36,.28)}
+.mini-pin{background:rgba(96,165,250,.14);color:#93c5fd;border-color:rgba(96,165,250,.24)}
+.mini-status{background:rgba(74,222,128,.12);color:#86efac;border-color:rgba(74,222,128,.24)}
+.tag-chip{color:var(--ac2);border-color:rgba(167,139,250,.22)}
+.expiry-chip{color:#fca5a5;border-color:rgba(248,113,113,.28);background:rgba(248,113,113,.1)}
 <?php
 // ── 方向映射 ──
 $dir_map = [
@@ -277,6 +492,9 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   .card .cd{display:block;font-size:10px;line-height:1.35;color:var(--tm);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;min-height:1.35em;max-width:100%}
   .group-chip{padding-top:5px;font-size:9px}
   .bx{top:8px;right:8px;font-size:9px;padding:2px 6px;border-radius:999px;opacity:.92}
+  .filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card-meta-line{min-height:0}
   #proxy-pending-bar{padding:12px;border-radius:12px}
   #proxy-pending-bar .proxy-pending-text{font-size:12px}
   #proxy-pending-bar .proxy-pending-action{width:100%;justify-content:center;display:inline-flex}
@@ -341,56 +559,95 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   <?php endif; ?>
 </div>
 <?php endif; ?>
-<?php $first_grp = true; foreach($groups as $grp):
-  if(($grp['visible_to']??'all')==='admin'&&!$is_admin)continue;
-  if(($grp['auth_required']??true)&&!$user)continue;
-  $gid=htmlspecialchars($grp['id']);
+
+<section class="quick-section" id="homepage-filters">
+  <div class="quick-title">
+    <strong>资产筛选</strong>
+    <span id="searchMetaInline">默认显示当前分组，可按标签、环境、类型、徽标快速过滤</span>
+  </div>
+  <div class="filter-bar">
+    <div class="filter-cell">
+      <label for="filterTag">标签</label>
+      <select class="sb" id="filterTag">
+        <option value="">全部标签</option>
+        <?php foreach (array_keys($tag_options) as $tag): ?>
+        <option value="<?= htmlspecialchars(strtolower((string)$tag)) ?>"><?= htmlspecialchars((string)$tag) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-cell">
+      <label for="filterEnv">环境</label>
+      <select class="sb" id="filterEnv">
+        <option value="">全部环境</option>
+        <?php foreach (array_keys($env_options) as $env): ?>
+        <option value="<?= htmlspecialchars(strtolower((string)$env)) ?>"><?= htmlspecialchars((string)$env) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-cell">
+      <label for="filterAssetType">资产类型</label>
+      <select class="sb" id="filterAssetType">
+        <option value="">全部类型</option>
+        <?php foreach (array_keys($asset_type_options) as $assetType): ?>
+        <option value="<?= htmlspecialchars(strtolower((string)$assetType)) ?>"><?= htmlspecialchars((string)$assetType) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-cell">
+      <label for="filterStatusBadge">徽标</label>
+      <select class="sb" id="filterStatusBadge">
+        <option value="">全部徽标</option>
+        <?php foreach (array_keys($status_badge_options) as $statusBadge): ?>
+        <option value="<?= htmlspecialchars(strtolower((string)$statusBadge)) ?>"><?= htmlspecialchars((string)$statusBadge) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="filter-cell">
+      <label>&nbsp;</label>
+      <button type="button" class="nl" id="onlyFavorites">仅看收藏</button>
+    </div>
+    <div class="filter-cell">
+      <label>&nbsp;</label>
+      <button type="button" class="nl" id="onlyPinned">仅看常用</button>
+    </div>
+  </div>
+</section>
+
+<?php if ($favorite_sites !== []): ?>
+<section class="quick-section" id="favoritesSection">
+  <div class="quick-title"><strong>收藏站点</strong><span><?= count($favorite_sites) ?> 个</span></div>
+  <div class="quick-grid">
+    <?php foreach ($favorite_sites as $row): ?>
+      <?= homepage_render_site_card($row['site'], $row['group'], $row['href'], $token, $health_cache, (bool)$user) ?>
+    <?php endforeach; ?>
+  </div>
+</section>
+<?php endif; ?>
+
+<?php if ($pinned_sites !== []): ?>
+<section class="quick-section" id="pinnedSection">
+  <div class="quick-title"><strong>常用站点</strong><span><?= count($pinned_sites) ?> 个</span></div>
+  <div class="quick-grid">
+    <?php foreach ($pinned_sites as $row): ?>
+      <?= homepage_render_site_card($row['site'], $row['group'], $row['href'], $token, $health_cache, (bool)$user) ?>
+    <?php endforeach; ?>
+  </div>
+</section>
+<?php endif; ?>
+
+<section class="quick-section hidden" id="recentSection">
+  <div class="quick-title"><strong>最近访问</strong><span>基于当前浏览器本地记录</span></div>
+  <div class="quick-grid" id="recentGrid"></div>
+</section>
+
+<?php $first_grp = true; foreach($visible_groups as $grp):
+  $gid=htmlspecialchars((string)$grp['id']);
 ?>
 <div class="sec<?= $first_grp ? ' active' : '' ?>" id="g-<?=$gid?>">
   <div class="section-label">#<?= htmlspecialchars($grp['name']) ?></div>
   <div class="grid">
-  <?php foreach($grp['sites']??[] as $s):
-    $href=build_nav_url($s,$token);
-    $tc=['internal'=>'bi','proxy'=>'bp','external'=>'be'][$s['type']??'']??'be';
-    $tl=['internal'=>'内站','proxy'=>'代理','external'=>'外链'][$s['type']??'']??'';
-    $icon_url=($s['url']??$s['proxy_target']??'');
-    $domain=parse_url($icon_url,PHP_URL_HOST)??'';
-    // 健康状态（仅登录用户可见）
-    $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
-    $h_entry = $health_cache[$h_url] ?? null;
-    $h_status = 'unknown';
-    if ($h_entry && (time() - ($h_entry['checked_at']??0)) < 600) {
-        $h_status = $h_entry['status'] ?? 'unknown';
-    }
-  ?>
-  <a class="card<?= empty($s['desc']) ? ' no-desc' : '' ?>" href="<?= htmlspecialchars($href) ?>" target="_blank" rel="noopener noreferrer"
-     data-name="<?= htmlspecialchars(strtolower($s['name'])) ?>"
-     data-desc="<?= htmlspecialchars(strtolower($s['desc']??'')) ?>"
-     data-group="<?= htmlspecialchars(strtolower($grp['name']??'')) ?>">
-    <span class="bx <?=$tc?>"><?=$tl?></span>
-    <?php if ($user && $h_status !== 'unknown'): ?>
-    <span class="hd" style="position:absolute;bottom:5px;right:6px;width:7px;height:7px;border-radius:50%;background:<?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;box-shadow:0 0 5px <?= $h_status==='up' ? '#4ade80' : '#f87171' ?>;" title="<?= $h_status==='up' ? '在线' : '离线' ?>"></span>
-    <?php endif; ?>
-    <div class="ci">
-      <?php if($domain&&!is_private_ip($domain)):?>
-      <img src="/favicon.php?url=<?= urlencode('https://'.$domain) ?>"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
-           alt="" loading="lazy">
-      <span style="display:none"><?= htmlspecialchars($s['icon']??'🔗') ?></span>
-      <?php else:?>
-      <span><?= htmlspecialchars($s['icon']??'🔗') ?></span>
-      <?php endif;?>
-    </div>
-    <div class="cn"><?= htmlspecialchars($s['name']) ?></div>
-    <div class="cd"><?= htmlspecialchars($s['desc'] ?? $tl) ?></div>
-    <div class="group-chip">#<?= htmlspecialchars($grp['name']) ?></div>
-    <?php if(!empty($s['desc']) || !empty($href)): ?>
-    <div class="tt">
-      <?php if(!empty($s['desc'])): ?><p><?= htmlspecialchars($s['desc']) ?></p><?php endif; ?>
-      <span class="tt-url"><?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></span>
-    </div>
-    <?php endif; ?>
-  </a>
+  <?php foreach($grp['_render_sites'] ?? [] as $row): ?>
+    <?= homepage_render_site_card($row['site'], $grp, $row['href'], $token, $health_cache, (bool)$user) ?>
   <?php endforeach;?></div>
 </div>
 <?php $first_grp = false; endforeach;?></main>
@@ -402,8 +659,32 @@ var searchInput=document.getElementById('sq');
 var searchToggle=document.getElementById('searchToggle');
 var searchClose=document.getElementById('searchClose');
 var searchMeta=document.getElementById('searchMeta');
+var searchMetaInline=document.getElementById('searchMetaInline');
 var tabs=document.querySelectorAll('.na[data-tab]');
 var secs=document.querySelectorAll('.sec');
+var filterTag=document.getElementById('filterTag');
+var filterEnv=document.getElementById('filterEnv');
+var filterAssetType=document.getElementById('filterAssetType');
+var filterStatusBadge=document.getElementById('filterStatusBadge');
+var onlyFavoritesBtn=document.getElementById('onlyFavorites');
+var onlyPinnedBtn=document.getElementById('onlyPinned');
+var favoritesSection=document.getElementById('favoritesSection');
+var pinnedSection=document.getElementById('pinnedSection');
+var recentSection=document.getElementById('recentSection');
+var recentGrid=document.getElementById('recentGrid');
+var filterState={onlyFavorites:false,onlyPinned:false};
+
+function hasActiveFilters(){
+  return !!(
+    (searchInput&&searchInput.value.trim())||
+    (filterTag&&filterTag.value)||
+    (filterEnv&&filterEnv.value)||
+    (filterAssetType&&filterAssetType.value)||
+    (filterStatusBadge&&filterStatusBadge.value)||
+    filterState.onlyFavorites||
+    filterState.onlyPinned
+  );
+}
 function showTab(id){
   tabs.forEach(function(t){t.classList.toggle('active',t.dataset.tab===id);});
   secs.forEach(function(s){s.classList.toggle('active',s.id===id);});
@@ -414,6 +695,8 @@ function restoreTabView(){
   secs.forEach(function(s){s.classList.toggle('active',!cur||s.id===cur);s.style.display='';});
   secs.forEach(function(s){s.querySelectorAll('.card').forEach(function(c){c.style.display='';});});
   if(searchMeta) searchMeta.textContent='输入关键词，跨分组搜索站点';
+  if(searchMetaInline) searchMetaInline.textContent='默认显示当前分组，可按标签、环境、类型、徽标快速过滤';
+  [favoritesSection,pinnedSection,recentSection].forEach(function(sec){ if(sec) sec.classList.remove('hidden'); });
 }
 function openSearch(){
   body.classList.add('search-open');
@@ -424,7 +707,81 @@ function closeSearch(){
   body.classList.remove('search-open');
   if(searchToggle) searchToggle.setAttribute('aria-expanded','false');
   if(searchInput){ searchInput.value=''; searchInput.blur(); }
-  restoreTabView();
+  applyFilters();
+}
+function updateRecentSection(){
+  if(!recentGrid||!recentSection) return;
+  var raw=localStorage.getItem('nav_recent_sites')||'[]';
+  var keys=[];
+  try{keys=JSON.parse(raw)||[];}catch(e){keys=[];}
+  keys=Array.isArray(keys)?keys:[];
+  recentGrid.innerHTML='';
+  keys.slice(0,8).forEach(function(key){
+    var source=document.querySelector('.sec .card[data-site-key="'+CSS.escape(key)+'"]');
+    if(!source) return;
+    var clone=source.cloneNode(true);
+    recentGrid.appendChild(clone);
+  });
+  recentSection.classList.toggle('hidden', recentGrid.children.length===0 || hasActiveFilters());
+}
+function rememberSite(card){
+  var key=card&&card.getAttribute('data-site-key');
+  if(!key) return;
+  var raw=localStorage.getItem('nav_recent_sites')||'[]';
+  var list=[];
+  try{list=JSON.parse(raw)||[];}catch(e){list=[];}
+  if(!Array.isArray(list)) list=[];
+  list=list.filter(function(item){return item!==key;});
+  list.unshift(key);
+  list=list.slice(0,12);
+  localStorage.setItem('nav_recent_sites',JSON.stringify(list));
+}
+function setFilterToggle(btn, active){
+  if(!btn) return;
+  btn.dataset.active=active?'1':'0';
+  btn.style.borderColor=active?'rgba(108,99,255,.48)':'';
+  btn.style.background=active?'rgba(108,99,255,.16)':'';
+  btn.style.color=active?'var(--tx)':'';
+}
+function applyFilters(){
+  var q=(searchInput&&searchInput.value||'').toLowerCase().trim();
+  var tag=(filterTag&&filterTag.value||'').toLowerCase().trim();
+  var env=(filterEnv&&filterEnv.value||'').toLowerCase().trim();
+  var assetType=(filterAssetType&&filterAssetType.value||'').toLowerCase().trim();
+  var statusBadge=(filterStatusBadge&&filterStatusBadge.value||'').toLowerCase().trim();
+  var total=0;
+  var active=hasActiveFilters();
+  if(q){ openSearch(); }
+  secs.forEach(function(sec){
+    var cards=sec.querySelectorAll('.card');
+    var any=false;
+    cards.forEach(function(c){
+      var matchesQ=!q||(c.dataset.search||'').includes(q);
+      var matchesTag=!tag||(c.dataset.tags||'').split(',').filter(Boolean).includes(tag);
+      var matchesEnv=!env||(c.dataset.env||'')===env;
+      var matchesType=!assetType||(c.dataset.assetType||'')===assetType;
+      var matchesStatus=!statusBadge||(c.dataset.statusBadge||'')===statusBadge;
+      var matchesFavorite=!filterState.onlyFavorites||c.dataset.favorite==='1';
+      var matchesPinned=!filterState.onlyPinned||c.dataset.pinned==='1';
+      var show=matchesQ&&matchesTag&&matchesEnv&&matchesType&&matchesStatus&&matchesFavorite&&matchesPinned;
+      c.style.display=show?'':'none';
+      if(show){ any=true; total++; }
+    });
+    if(active){
+      sec.classList.toggle('active',any);
+      sec.style.display=any?'':'none';
+    }else{
+      sec.style.display='';
+    }
+  });
+  if(active){
+    if(searchMeta) searchMeta.textContent=total>0?('找到 '+total+' 个结果'):'没有找到匹配结果';
+    if(searchMetaInline) searchMetaInline.textContent=total>0?('筛选后共 '+total+' 个站点'):'当前筛选条件下没有结果';
+    [favoritesSection,pinnedSection,recentSection].forEach(function(sec){ if(sec) sec.classList.add('hidden'); });
+  }else{
+    restoreTabView();
+    updateRecentSection();
+  }
 }
 // 恢复上次选中的 Tab
 var savedTab=localStorage.getItem('nav_tab');
@@ -434,28 +791,21 @@ tabs.forEach(function(t){
 });
 if(searchToggle){ searchToggle.addEventListener('click',function(){ body.classList.contains('search-open') ? closeSearch() : openSearch(); }); }
 if(searchClose){ searchClose.addEventListener('click',closeSearch); }
+if(filterTag){ filterTag.addEventListener('change',applyFilters); }
+if(filterEnv){ filterEnv.addEventListener('change',applyFilters); }
+if(filterAssetType){ filterAssetType.addEventListener('change',applyFilters); }
+if(filterStatusBadge){ filterStatusBadge.addEventListener('change',applyFilters); }
+if(onlyFavoritesBtn){ onlyFavoritesBtn.addEventListener('click',function(){ filterState.onlyFavorites=!filterState.onlyFavorites; setFilterToggle(onlyFavoritesBtn,filterState.onlyFavorites); applyFilters(); }); }
+if(onlyPinnedBtn){ onlyPinnedBtn.addEventListener('click',function(){ filterState.onlyPinned=!filterState.onlyPinned; setFilterToggle(onlyPinnedBtn,filterState.onlyPinned); applyFilters(); }); }
+document.querySelectorAll('.card[data-site-key]').forEach(function(card){
+  card.addEventListener('click',function(){ rememberSite(card); });
+});
 // ── 搜索 ──
 document.addEventListener('keydown',function(e){
   if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();openSearch();}
   if(e.key==='Escape')closeSearch();
 });
-searchInput.addEventListener('input',function(){
-  var q=this.value.toLowerCase().trim();
-  if(!q){
-    restoreTabView();
-    return;
-  }
-  openSearch();
-  var total=0;
-  secs.forEach(function(sec){
-    var cards=sec.querySelectorAll('.card');var any=false;
-    cards.forEach(function(c){
-      var m=(c.dataset.name||'').includes(q)||(c.dataset.desc||'').includes(q)||(c.dataset.group||'').includes(q);
-      c.style.display=m?'':'none';if(m){any=true;total++;}
-    });
-    sec.classList.toggle('active',any);
-    sec.style.display=any?'':'none';
-  });
-  if(searchMeta) searchMeta.textContent=total>0?('找到 '+total+' 个结果'):'没有找到匹配结果';
-});
+searchInput.addEventListener('input',applyFilters);
+updateRecentSection();
+applyFilters();
 </script></body></html>

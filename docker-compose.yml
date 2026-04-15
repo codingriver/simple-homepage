@@ -25,6 +25,9 @@ services:
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里
       - ./data:/var/www/nav/data
+      # 可选：仅在后台“一键安装 / 升级 host-agent”时临时挂载
+      # 安装成功并确认 host-agent 功能正常后，建议移除该挂载
+      # - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:
       disable: true

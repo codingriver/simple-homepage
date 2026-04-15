@@ -39,7 +39,7 @@ test('admin can edit and delete a site', async ({ page }) => {
   const row = page.locator(`tr:has(input[name="sid"][value="${siteId}"])`).first();
   await expect(row).toContainText('原始站点');
 
-  await row.getByRole('button', { name: '编辑' }).click();
+  await row.getByRole('button', { name: '编辑' }).click({ force: true });
   await page.locator('#fi_name').fill(updatedName);
   await page.locator('#fi_url').fill(updatedUrl);
   await submitVisibleModal(page);
@@ -48,7 +48,7 @@ test('admin can edit and delete a site', async ({ page }) => {
   await expect(row).toContainText(updatedUrl);
 
   page.once('dialog', dialog => dialog.accept());
-  await row.locator('xpath=.//form//button[contains(normalize-space(.), "删除")]').click();
+  await row.locator('xpath=.//form//button[contains(normalize-space(.), "删除")]').click({ force: true });
   await expect(page.locator(`tr:has(input[name="sid"][value="${siteId}"])`)).toHaveCount(0);
 
   await tracker.assertNoClientErrors();

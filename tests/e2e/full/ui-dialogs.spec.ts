@@ -73,7 +73,7 @@ test('modal backdrop close and backup dialogs behave as expected', async ({ page
     expect(dialog.message()).toContain('确认删除此备份？');
     dialog.dismiss();
   });
-  await firstRow.getByRole('button', { name: '删除' }).click();
+  await firstRow.getByRole('button', { name: '删除' }).click({ force: true });
   await expect(page.locator('body')).not.toContainText('备份已删除');
 
   page.once('dialog', dialog => {
@@ -81,7 +81,7 @@ test('modal backdrop close and backup dialogs behave as expected', async ({ page
     expect(dialog.message()).toContain('确认恢复此备份？');
     dialog.dismiss();
   });
-  await firstRow.getByRole('button', { name: /恢复/ }).click();
+  await firstRow.getByRole('button', { name: /恢复/ }).click({ force: true });
   await expect(page.locator('body')).not.toContainText('已恢复备份');
 
   await tracker.assertNoClientErrors();

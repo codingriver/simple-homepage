@@ -845,6 +845,16 @@ function ddns_run_task(array $task): array {
         ddns_store_result($id, 'fail', $msg);
         ddns_log('error', 'DDNS source failed', ['id' => $id, 'name' => $name, 'msg' => $msg]);
         ddns_task_log($id, 'error', '来源解析失败', ['message' => $msg]);
+        if (function_exists('notify_event')) {
+            notify_event('ddns_failed', [
+                'task' => $name,
+                'task_id' => $id,
+                'domain' => $domain,
+                'record_type' => $recordType,
+                'message' => $msg,
+                'stage' => 'resolve_source',
+            ]);
+        }
         return ['ok' => false, 'status' => 'fail', 'msg' => $msg, 'task_name' => $name];
     }
 
@@ -862,6 +872,18 @@ function ddns_run_task(array $task): array {
             ddns_store_result($id, 'success', $msg, $value);
             ddns_log('info', 'DDNS skip unchanged', ['id' => $id, 'name' => $name, 'domain' => $domain, 'value' => $value]);
             ddns_task_log($id, 'info', '值未变化，跳过更新', ['domain' => $domain, 'record_type' => $recordType, 'value' => $value]);
+            if (function_exists('notify_event')) {
+                notify_event('ddns_succeeded', [
+                    'task' => $name,
+                    'task_id' => $id,
+                    'domain' => $domain,
+                    'record_type' => $recordType,
+                    'value' => $value,
+                    'message' => $msg,
+                    'source' => $sourceLabel,
+                    'state' => 'skipped_unchanged',
+                ]);
+            }
             return [
                 'ok' => true,
                 'status' => 'success',
@@ -897,6 +919,18 @@ function ddns_run_task(array $task): array {
             'detail' => $updated['error'] ?? $updated['raw'] ?? null,
             'http_status' => $updated['http_status'] ?? null,
         ]);
+        if (function_exists('notify_event')) {
+            notify_event('ddns_failed', [
+                'task' => $name,
+                'task_id' => $id,
+                'domain' => $domain,
+                'record_type' => $recordType,
+                'value' => $value,
+                'message' => $msg,
+                'source' => $sourceLabel,
+                'stage' => 'update_dns',
+            ]);
+        }
         return [
             'ok' => false,
             'status' => 'fail',
@@ -921,6 +955,18 @@ function ddns_run_task(array $task): array {
             'request' => $updated['request'] ?? null,
             'action' => $updated['data']['action'] ?? null,
         ]);
+    if (function_exists('notify_event')) {
+        notify_event('ddns_succeeded', [
+            'task' => $name,
+            'task_id' => $id,
+            'domain' => $domain,
+            'record_type' => $recordType,
+            'value' => $value,
+            'message' => $msg,
+            'source' => $sourceLabel,
+            'state' => 'updated',
+        ]);
+    }
     return [
         'ok' => true,
         'status' => 'success',

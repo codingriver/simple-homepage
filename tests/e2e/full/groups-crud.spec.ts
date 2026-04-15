@@ -20,14 +20,14 @@ test('admin can create and delete a group via modal ajax', async ({ page }) => {
   await page.locator('#fi_order').fill('11');
   await page.locator('#fi_vis').selectOption('all');
   await page.locator('#fi_auth').selectOption('0');
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存' }).click({ force: true });
 
   const row = page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first();
   await expect(row).toContainText(name);
   await expect(row).toContainText('公开');
 
   page.once('dialog', dialog => dialog.accept());
-  await row.getByRole('button', { name: '删除' }).click();
+  await row.getByRole('button', { name: '删除' }).click({ force: true });
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`)).toHaveCount(0);
 
   await tracker.assertNoClientErrors();

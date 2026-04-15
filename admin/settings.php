@@ -6,6 +6,7 @@
 // ── 所有需要在 HTML 之前输出的操作（文件下载/导出）──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
+    require_once __DIR__ . '/shared/host_agent_lib.php';
 
     $current_admin = auth_get_current_user();
     if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
@@ -164,6 +165,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: settings.php'); exit;
         }
 
+        if ($action === 'host_agent_install') {
+            $result = host_agent_install();
+            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 安装失败'));
+            header('Location: settings.php#host-agent'); exit;
+        }
+
         // ── Nginx 写入 + reload（带预检与失败回滚）──
         if ($action === 'nginx_apply' || $action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
             $do_reload = ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload');
@@ -254,6 +261,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (isset($_POST['proxy_params_mode'])) {
                 $cfg['proxy_params_mode']  = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
             }
+            $cfg['ssh_terminal_persist'] = ($_POST['ssh_terminal_persist'] ?? '1') === '1' ? '1' : '0';
+            $cfg['ssh_terminal_idle_minutes'] = max(5, min(10080, (int)($_POST['ssh_terminal_idle_minutes'] ?? 120)));
             // ── 卡片尺寸（支持自定义）──
             $card_size_raw = $_POST['card_size'] ?? '140';
             if ($card_size_raw === 'custom' || !empty($_POST['card_size_custom'])) {
@@ -353,6 +362,15 @@ $cfg = auth_get_config();
         <input type="number" name="login_fail_limit" value="<?= (int)($cfg['login_fail_limit']??5) ?>" min="1"></div>
       <div class="form-group"><label>IP锁定时长（分钟）</label>
         <input type="number" name="login_lock_minutes" value="<?= (int)($cfg['login_lock_minutes']??15) ?>" min="1"></div>
+      <div class="form-group"><label>SSH Web 终端默认后台继续</label>
+        <select name="ssh_terminal_persist" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">
+          <option value="1" <?= ($cfg['ssh_terminal_persist'] ?? '1') === '1' ? 'selected' : '' ?>>开启</option>
+          <option value="0" <?= ($cfg['ssh_terminal_persist'] ?? '1') !== '1' ? 'selected' : '' ?>>关闭</option>
+        </select>
+        <div class="form-hint" style="margin-top:6px">开启后，Web 终端在浏览器页面关闭后仍会继续后台运行，可在主机管理页恢复会话。</div></div>
+      <div class="form-group"><label>SSH Web 终端空闲保留时长（分钟）</label>
+        <input type="number" name="ssh_terminal_idle_minutes" value="<?= (int)($cfg['ssh_terminal_idle_minutes']??120) ?>" min="5" max="10080">
+        <div class="form-hint" style="margin-top:6px">超过该时长且无人继续查看或输入时，会自动清理终端会话。</div></div>
       <div class="form-group">
         <label>Cookie Secure 模式</label>
         <select name="cookie_secure" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">
@@ -510,6 +528,42 @@ $cfg = auth_get_config();
       <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
     </form>
   </div>
+</div>
+
+<div class="card" id="host-agent">
+  <div class="card-title">🧩 Host-Agent
+    <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">宿主机能力桥接</span>
+  </div>
+  <div id="host-agent-banner" class="form-hint" style="margin-bottom:12px">
+    正在检测 docker.sock 挂载和 host-agent 运行状态...
+  </div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px">
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
+      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">安装模式</div>
+      <div id="host-agent-mode" style="font-size:14px;font-weight:700;color:var(--tx)">待检测</div>
+      <div class="form-hint" style="margin-top:8px">默认不强制启用。只有你主动给当前应用容器临时挂载 <code>/var/run/docker.sock</code> 时，后台才会允许一键安装独立的 <code>host-agent</code> 容器；确认正常后建议移除该挂载。</div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
+      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">运行状态</div>
+      <div id="host-agent-status-text" style="font-size:14px;font-weight:700;color:var(--tx)">待检测</div>
+      <div id="host-agent-container-name" class="form-hint" style="margin-top:8px;font-family:var(--mono)"></div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
+      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">服务入口</div>
+      <div id="host-agent-service-url" style="font-size:13px;font-family:var(--mono);word-break:break-all;color:var(--tx)">待检测</div>
+      <div class="form-hint" style="margin-top:8px">后续本机文件管理、终端、本机 SSH 配置修改与服务控制都将优先通过 host-agent 处理，不再依赖 SSH 连接宿主机。</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+    <form method="POST" id="host-agent-install-form" style="display:inline" onsubmit="return confirmHostAgentInstall()">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="host_agent_install">
+      <button class="btn btn-primary" id="host-agent-install-btn" type="submit">🚀 一键安装 Host-Agent</button>
+    </form>
+    <button type="button" class="btn btn-secondary" id="host-agent-refresh-btn" onclick="loadHostAgentStatus(true)">🔄 刷新状态</button>
+  </div>
+  <div id="host-agent-socket-note" class="form-hint"></div>
+  <pre id="host-agent-compose-snippet" style="margin-top:10px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;font-size:12px;display:none;overflow:auto"></pre>
 </div>
 
 <script>
@@ -930,6 +984,77 @@ function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+var HOST_AGENT_STATUS = null;
+
+function updateHostAgentUi(data) {
+    HOST_AGENT_STATUS = data || {};
+    var banner = document.getElementById('host-agent-banner');
+    var mode = document.getElementById('host-agent-mode');
+    var status = document.getElementById('host-agent-status-text');
+    var name = document.getElementById('host-agent-container-name');
+    var url = document.getElementById('host-agent-service-url');
+    var note = document.getElementById('host-agent-socket-note');
+    var snippet = document.getElementById('host-agent-compose-snippet');
+    var installBtn = document.getElementById('host-agent-install-btn');
+    if (!banner || !mode || !status || !name || !url || !note || !snippet || !installBtn) return;
+
+    mode.textContent = data.install_mode === 'simulate' ? 'simulate（开发/测试安全模式）' : 'host（宿主机真实安装模式）';
+    status.textContent = data.healthy ? '已运行并健康' : (data.running ? '已运行，等待健康检查' : (data.installed ? '已安装未运行' : '未安装'));
+    name.textContent = '容器名：' + (data.container_name || '-');
+    url.textContent = data.service_url || '-';
+    banner.className = data.healthy ? 'alert alert-success' : (data.docker_socket_mounted ? 'alert alert-info' : 'alert alert-warn');
+    banner.textContent = data.message || '未获取到 host-agent 状态。';
+
+    if (!data.docker_accessible) {
+        note.textContent = data.docker_mount_hint || '';
+        snippet.style.display = 'block';
+        snippet.textContent = 'docker-compose.yml 临时挂载示例：\n'
+            + 'services:\n'
+            + '  simple-homepage:\n'
+            + '    volumes:\n'
+            + '      - ./data:/var/www/nav/data\n'
+            + '      # 仅在后台一键安装 / 升级 host-agent 时临时挂载\n'
+            + '      - ' + (data.docker_socket_path || '/var/run/docker.sock') + ':' + (data.docker_socket_path || '/var/run/docker.sock') + '\n';
+        installBtn.disabled = true;
+    } else {
+        note.textContent = '已检测到可用 docker.sock。安装完成并确认功能正常后，请从当前应用容器移除该挂载；后续只有升级或重装 host-agent 时才需要再次挂回。';
+        snippet.style.display = 'none';
+        installBtn.disabled = false;
+    }
+}
+
+function loadHostAgentStatus(force) {
+    if (window.__hostAgentLoaded && !force) return;
+    window.__hostAgentLoaded = true;
+    fetch('settings_ajax.php?action=host_agent_status', {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function(r){ return r.json(); })
+      .then(updateHostAgentUi)
+      .catch(function(err){
+          updateHostAgentUi({
+              docker_socket_mounted: false,
+              docker_socket_path: '/var/run/docker.sock',
+              install_mode: 'host',
+              installed: false,
+              running: false,
+              healthy: false,
+              container_name: 'host-agent',
+              service_url: '-',
+              message: 'host-agent 状态检测失败：' + (err && err.message ? err.message : 'unknown error'),
+              docker_mount_hint: '请先检查当前容器是否挂载了 docker.sock，并确保后台容器对该 socket 拥有读写权限。'
+          });
+      });
+}
+
+function confirmHostAgentInstall() {
+    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
+        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法一键安装 host-agent。');
+        return false;
+    }
+    return confirm('确认一键安装 host-agent？\n\n1. 后台会通过 docker.sock 创建一个独立的 host-agent 容器\n2. 安装完成后请先确认 host-agent 功能正常\n3. 验证通过后请从当前应用容器移除 docker.sock 挂载\n4. 后续只有升级或重装 host-agent 时才需要再次挂回');
+}
+
 // ── 惰性：登录日志、Nginx sudo 检测（进入视口或锚点时再请求，首屏不读日志、不 exec）──
 (function initSettingsLazy() {
     var logsLoaded = false;
@@ -1053,6 +1178,7 @@ function escHtml(s) {
     }
     if (location.hash === '#logs') loadLoginLogsOnce();
     if (location.hash === '#nginx') loadNginxSudoOnce();
+    loadHostAgentStatus(false);
 })();
 </script>
 

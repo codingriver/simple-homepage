@@ -3,6 +3,7 @@
  * 系统设置页惰性数据（避免首屏 exec / 大 JSON）
  */
 require_once __DIR__ . '/shared/functions.php';
+require_once __DIR__ . '/shared/host_agent_lib.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -48,6 +49,11 @@ if ($action === 'health_sites_meta') {
         }
     }
     echo json_encode(['ok' => true, 'sites' => $sites], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($action === 'host_agent_status') {
+    echo json_encode(host_agent_status_summary(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 

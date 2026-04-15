@@ -14,6 +14,9 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
     ],
+    ignoredFailedRequests: [
+      /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+    ],
   });
 
   await loginAsDevAdmin(adminPage);
@@ -41,6 +44,9 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+    ],
+    ignoredFailedRequests: [
+      /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
     ],
   });
 

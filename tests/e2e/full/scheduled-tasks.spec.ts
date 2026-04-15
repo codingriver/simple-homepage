@@ -51,16 +51,16 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   await expect(page.locator('#fm-log-filename')).toHaveCount(0);
   await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await page.locator('#fm-command').fill('echo from-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|crontab/);
   const row = page.locator(`tr:has-text("${name}")`).first();
   await expect(row).toBeVisible();
   await expect(row).toContainText('启用');
 
-  await row.getByRole('button', { name: /编辑/ }).click();
+  await row.getByRole('button', { name: /编辑/ }).click({ force: true });
   await page.locator('#fm-name').fill(editedName);
   await page.locator('#fm-command').fill('echo edited-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
   await expect(page.locator(`tr:has-text("${editedName}")`).first()).toBeVisible();
 
   const editedRow = page.locator(`tr:has-text("${editedName}")`).first();
@@ -78,12 +78,12 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
     }, { timeout: 10000 })
     .toContain('echo edited-task');
 
-  await editedRow.getByRole('button', { name: /禁用/ }).click();
+  await editedRow.getByRole('button', { name: /禁用/ }).click({ force: true });
   await expect(page.locator('body')).toContainText('已禁用');
-  await editedRow.getByRole('button', { name: /启用/ }).click();
+  await editedRow.getByRole('button', { name: /启用/ }).click({ force: true });
   await expect(page.locator('body')).toContainText('已启用');
 
-  await editedRow.getByRole('button', { name: /立即执行/ }).click();
+  await editedRow.getByRole('button', { name: /立即执行/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
   await page.evaluate(
     ({ id, name }) => {
@@ -107,7 +107,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   await page.waitForTimeout(2500);
   await expect(page.locator('#log-body')).not.toContainText('加载中…');
   page.once('dialog', dialog => dialog.accept());
-  await page.locator('#log-modal').getByRole('button', { name: /清空日志/ }).click();
+  await page.locator('#log-modal').getByRole('button', { name: /清空日志/ }).click({ force: true });
   await page.waitForURL(/\/admin\/scheduled_tasks\.php/);
   const clearedLog = await page.request.get(`/admin/api/task_log.php?id=${encodeURIComponent(taskId)}&page=1`);
   expect(clearedLog.ok()).toBeTruthy();
@@ -116,9 +116,85 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   await expect(fs.access(resolvedTaskLogPath).then(() => true).catch(() => false)).resolves.toBe(false);
 
   page.once('dialog', dialog => dialog.accept());
-  await page.locator(`tr:has-text("${editedName}")`).first().getByRole('button', { name: /删除/ }).click();
+  await page.locator(`tr:has-text("${editedName}")`).first().getByRole('button', { name: /删除/ }).click({ force: true });
   await expect(page.locator(`tr:has-text("${editedName}")`)).toHaveCount(0);
   await expect(fs.access(resolvedTaskScriptPath).then(() => true).catch(() => false)).resolves.toBe(false);
+
+  await tracker.assertNoClientErrors();
+});
+
+test('scheduled tasks default bash template starts with shebang and multiline script keeps line count after reopen', async ({ page }) => {
+  test.setTimeout(120000);
+  const tracker = await attachClientErrorTracking(page, {
+    ignoredMessages: [
+      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
+      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+    ],
+  });
+  const ts = Date.now();
+  const name = `多行脚本 ${ts}`;
+  const script = [
+    '#!/bin/bash',
+    'echo start',
+    '',
+    'echo middle',
+    'echo end',
+  ].join('\n');
+
+  await loginAsDevAdmin(page);
+  await page.goto('/admin/scheduled_tasks.php');
+  await page.getByRole('button', { name: /新建任务/ }).click();
+  await expect(page.locator('#fm-command')).toHaveValue(/^#!\/bin\/bash/);
+
+  await page.locator('#fm-name').fill(name);
+  await page.locator('#fm-schedule').fill('*/7 * * * *');
+  await page.locator('#fm-command').fill(script);
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+
+  const row = page.locator(`tr:has-text("${name}")`).first();
+  const taskId = await row.locator('form input[name="id"]').first().inputValue();
+  const scriptPath = path.join(taskScriptsRoot, `task_${taskId}.sh`);
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(scriptPath, 'utf8');
+      } catch {
+        return '';
+      }
+    }, { timeout: 10000 })
+    .toBe(script + '\n');
+
+  await page.evaluate((id) => {
+    const rows = (window as Window & { TASK_ROWS?: Array<Record<string, any>> }).TASK_ROWS || [];
+    const task = rows.find((item) => item && item.id === id);
+    const fn = (window as Window & { openTaskModal?: (task: Record<string, any>) => void }).openTaskModal;
+    if (!task || typeof fn !== 'function') throw new Error('task modal helpers not found');
+    fn(task);
+  }, taskId);
+  await expect(page.locator('#fm-command')).toHaveValue(script + '\n');
+
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(scriptPath, 'utf8');
+      } catch {
+        return '';
+      }
+    }, { timeout: 10000 })
+    .toBe(script + '\n');
+
+  await page.evaluate((id) => {
+    const rows = (window as Window & { TASK_ROWS?: Array<Record<string, any>> }).TASK_ROWS || [];
+    const task = rows.find((item) => item && item.id === id);
+    const fn = (window as Window & { openTaskModal?: (task: Record<string, any>) => void }).openTaskModal;
+    if (!task || typeof fn !== 'function') throw new Error('task modal helpers not found');
+    fn(task);
+  }, taskId);
+  await expect(page.locator('#fm-command')).toHaveValue(script + '\n');
 
   await tracker.assertNoClientErrors();
 });
@@ -145,7 +221,7 @@ test('scheduled tasks validate invalid fields and support crontab reload', async
   await page.locator('#fm-name').fill(`非法任务 ${ts}`);
   await page.locator('#fm-schedule').fill('*/5 * * * *');
   await page.locator('#fm-command').fill('echo invalid-id');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
   await expect(page.locator('body')).toContainText('任务 ID 仅允许字母数字、下划线、短横线');
 
   const emptyNameResponse = await page.request.post('http://127.0.0.1:58080/admin/scheduled_tasks.php', {
@@ -186,7 +262,7 @@ test('scheduled tasks validate invalid fields and support crontab reload', async
   await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await expect(page.locator('#fm-working-dir-mode')).toHaveCount(0);
   await expect(page.locator('#fm-working-dir')).toHaveCount(0);
-  await page.getByRole('button', { name: /取消/ }).click();
+  await page.getByRole('button', { name: /取消/ }).click({ force: true });
 
   await page.getByRole('button', { name: /重新安装 crontab/ }).click();
   await expect(page.locator('body')).toContainText(/已重新安装 crontab|crontab/);

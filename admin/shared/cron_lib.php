@@ -122,8 +122,45 @@ function task_ensure_workdir(array $task): void {
 }
 
 function task_normalize_script_contents(string $cmd): string {
-    $cmd = str_replace("\r\n", "\n", str_replace("\r", "\n", $cmd));
+    $cmd = task_normalize_editor_contents($cmd);
     return rtrim($cmd, "\n") . "\n";
+}
+
+function task_maybe_fix_doubled_blank_lines(string $cmd): string {
+    $lines = explode("\n", $cmd);
+    $lineCount = count($lines);
+    if ($lineCount < 4) {
+        return $cmd;
+    }
+
+    $alternatingBlanks = 0;
+    $checkedPairs = 0;
+    for ($i = 1; $i < $lineCount; $i += 2) {
+        $checkedPairs++;
+        if (trim($lines[$i]) === '') {
+            $alternatingBlanks++;
+        }
+    }
+
+    if ($checkedPairs < 2 || $alternatingBlanks !== $checkedPairs) {
+        return $cmd;
+    }
+
+    $collapsed = [];
+    for ($i = 0; $i < $lineCount; $i += 2) {
+        $collapsed[] = $lines[$i];
+    }
+    if ($lineCount % 2 === 0 && trim((string)end($lines)) === '') {
+        $collapsed[] = '';
+    }
+    return implode("\n", $collapsed);
+}
+
+function task_normalize_editor_contents(string $cmd): string {
+    $cmd = preg_replace("/\r+\n?/", "\n", $cmd);
+    $cmd = is_string($cmd) ? $cmd : '';
+    $cmd = task_maybe_fix_doubled_blank_lines($cmd);
+    return is_string($cmd) ? $cmd : '';
 }
 
 function task_runtime_tmp_dir(array $task): string {
@@ -316,9 +353,9 @@ function task_read_script_contents_for_task(array $task, array $allTasks = []): 
 function task_resolve_command_text(array $task): string {
     $fromScript = task_read_script_contents_for_task($task);
     if ($fromScript !== '') {
-        return $fromScript;
+        return task_normalize_editor_contents($fromScript);
     }
-    return str_replace("\r\n", "\n", str_replace("\r", "\n", (string)($task['command'] ?? '')));
+    return task_normalize_editor_contents((string)($task['command'] ?? ''));
 }
 
 function task_write_script_file(array $task, string $cmd, array $allTasks = []): array {
@@ -663,6 +700,7 @@ function cron_dispatch_task_async(string $id): array {
     if (!$spawn['ok']) {
         return $spawn;
     }
+    cron_mark_running($id, true);
     return ['ok' => true, 'msg' => '已开始后台执行'];
 }
 
@@ -714,6 +752,87 @@ function scheduled_tasks_clear_manual_tasks(): array {
         'removed' => $removed,
         'kept_system' => count($kept),
     ];
+}
+
+function scheduled_task_upsert(array $input): array {
+    $data = load_scheduled_tasks();
+    $id = trim((string)($input['id'] ?? ''));
+    $name = trim((string)($input['name'] ?? ''));
+    $schedule = trim((string)($input['schedule'] ?? ''));
+    $command = task_normalize_editor_contents((string)($input['command'] ?? ''));
+    $enabled = !empty($input['enabled']);
+
+    if ($id === '') {
+        $id = 't_' . bin2hex(random_bytes(8));
+    }
+    if (!preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
+        return ['ok' => false, 'msg' => '任务 ID 仅允许字母数字、下划线、短横线'];
+    }
+    if ($name === '') {
+        return ['ok' => false, 'msg' => '请填写任务名称'];
+    }
+    if (cron_is_ddns_dispatcher_id($id)) {
+        return ['ok' => false, 'msg' => 'DDNS 调度器由系统自动维护，不能手动编辑'];
+    }
+    if (!cron_validate_schedule($schedule)) {
+        return ['ok' => false, 'msg' => 'Cron 表达式无效（需至少 5 个时间字段）'];
+    }
+
+    $taskRow = null;
+    $found = false;
+    foreach ($data['tasks'] as &$task) {
+        if (($task['id'] ?? '') !== $id) {
+            continue;
+        }
+        $task['name'] = $name;
+        $task['enabled'] = $enabled;
+        $task['schedule'] = $schedule;
+        $task['command'] = $command;
+        unset($task['working_dir_mode'], $task['working_dir']);
+        $taskRow = $task;
+        $found = true;
+        break;
+    }
+    unset($task);
+
+    if (!$found) {
+        $taskRow = [
+            'id' => $id,
+            'name' => $name,
+            'enabled' => $enabled,
+            'schedule' => $schedule,
+            'command' => $command,
+            'created_at' => date('Y-m-d H:i:s'),
+        ];
+        array_unshift($data['tasks'], $taskRow);
+    }
+
+    if (is_array($taskRow)) {
+        $scriptFilename = task_resolve_script_filename($taskRow, $data['tasks']);
+        foreach ($data['tasks'] as &$task) {
+            if (($task['id'] ?? '') !== $id) {
+                continue;
+            }
+            $task['script_filename'] = $scriptFilename;
+            $taskRow = $task;
+            break;
+        }
+        unset($task);
+    }
+
+    task_ensure_workdir(['id' => $id]);
+    $scriptSync = task_sync_script_for_task($taskRow ?? ['id' => $id, 'name' => $name, 'command' => $command], $data['tasks']);
+    if (!($scriptSync['ok'] ?? false)) {
+        return ['ok' => false, 'msg' => (string)($scriptSync['msg'] ?? '任务脚本写入失败')];
+    }
+
+    save_scheduled_tasks($data);
+    $regen = cron_regenerate();
+    if (!($regen['ok'] ?? false)) {
+        return ['ok' => false, 'msg' => (string)($regen['msg'] ?? 'crontab 更新失败')];
+    }
+
+    return ['ok' => true, 'msg' => '已保存并更新 crontab', 'id' => $id, 'task' => $taskRow];
 }
 
 /** @return array{tasks: array<int, array>} */
@@ -1335,6 +1454,17 @@ function cron_run_task_by_id(string $id): void {
     cron_mark_running($id, true);
     try {
         $r = cron_execute_task($id);
+        $task = task_find_by_id($id, load_scheduled_tasks()['tasks'] ?? []);
+        $taskName = is_array($task) ? (string)($task['name'] ?? $id) : $id;
+        if (function_exists('notify_event')) {
+            notify_event(($r['ok'] ?? false) ? 'task_succeeded' : 'task_failed', [
+                'task' => $taskName,
+                'task_id' => $id,
+                'source' => task_execution_source(),
+                'exit_code' => (string)($r['code'] ?? ''),
+                'message' => (string)($r['msg'] ?? ''),
+            ]);
+        }
         if (!($r['ok'] ?? false)) {
             task_dispatch_log('task run failed', [
                 'id' => $id,

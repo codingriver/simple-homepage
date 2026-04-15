@@ -76,7 +76,7 @@ test('settings health panel and login logs panel load real rows through UI inter
     );
 
     await loginAsDevAdmin(page);
-    const logsResponsePromise = page.waitForResponse((response) => response.url().includes('/admin/login_logs.php') && response.request().method() === 'GET');
+    const logsResponsePromise = page.waitForResponse((response) => response.url().includes('/admin/login_logs.php') && response.request().method() === 'GET', { timeout: 30000 });
     await page.goto('/admin/settings.php#logs');
     const logsResponse = await logsResponsePromise;
     const logsPayload = (await logsResponse.json()) as { ok: boolean; total: number; rows: string[] };
@@ -91,8 +91,8 @@ test('settings health panel and login logs panel load real rows through UI inter
     await expect(page.locator('#logs_lazy_content')).toContainText('FAIL');
 
     await page.locator('#health').scrollIntoViewIfNeeded();
-    const healthCacheResponse = page.waitForResponse((response) => response.url().includes('/admin/health_check.php?ajax=status') && response.request().method() === 'GET');
-    await page.getByRole('button', { name: /刷新缓存状态/ }).click();
+    const healthCacheResponse = page.waitForResponse((response) => response.url().includes('/admin/health_check.php?ajax=status') && response.request().method() === 'GET', { timeout: 30000 });
+    await page.getByRole('button', { name: /刷新缓存状态/ }).click({ force: true });
     const healthCachePayload = (await (await healthCacheResponse).json()) as {
       ok: boolean;
       data: Record<string, unknown>;

@@ -32,6 +32,12 @@ test('admin ajax endpoints return expected payloads for login logs settings and 
   expect(sitesMeta.status()).toBe(200);
   expect(await sitesMeta.json()).toMatchObject({ ok: true });
 
+  const hostAgentStatus = await page.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=host_agent_status', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  });
+  expect(hostAgentStatus.status()).toBe(200);
+  expect(await hostAgentStatus.json()).toMatchObject({ ok: true, docker_socket_mounted: expect.any(Boolean) });
+
   const settingsPlain = await page.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=nginx_sudo');
   expect(settingsPlain.status()).toBe(400);
 
@@ -71,6 +77,11 @@ test('admin ajax endpoints return expected payloads for login logs settings and 
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
   expect(deniedSettings.status()).toBe(403);
+
+  const deniedHostAgent = await anonPage.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=host_agent_status', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  });
+  expect(deniedHostAgent.status()).toBe(403);
   await anonContext.close();
 
   await tracker.assertNoClientErrors();

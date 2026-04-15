@@ -6,6 +6,51 @@ async function openDdnsDispatcherTab(page: Parameters<typeof loginAsDevAdmin>[0]
   await expect(page.locator('#scheduled-tab-panel-ddns')).toBeVisible();
 }
 
+async function ensureDdnsDispatcherExists(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  const existingRow = page.locator('tr:has-text("DDNS 调度器")').first();
+  if (await existingRow.count()) {
+    return;
+  }
+
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+  const ts = Date.now();
+  const response = await page.request.post('http://127.0.0.1:58080/admin/ddns_ajax.php', {
+    data: {
+      _csrf: csrf,
+      action: 'save',
+      task: {
+        name: `调度器种子 ${ts}`,
+        enabled: true,
+        source: {
+          type: 'local_ipv4',
+          line: 'CT',
+          pick_strategy: 'best_score',
+          max_latency: 250,
+          max_loss_rate: 5,
+          fallback_type: '',
+        },
+        target: {
+          domain: `dispatcher-seed-${ts}.example.com`,
+          record_type: 'A',
+          ttl: 120,
+          skip_when_unchanged: true,
+        },
+        schedule: {
+          cron: '*/30 * * * *',
+        },
+      },
+    },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    timeout: 30000,
+  });
+  expect(response.status()).toBe(200);
+  await page.reload();
+  await openDdnsDispatcherTab(page);
+}
+
 async function submitSystemTaskAction(
   page: Parameters<typeof loginAsDevAdmin>[0],
   action: 'task_toggle' | 'task_delete' | 'task_save',
@@ -67,7 +112,7 @@ test('scheduled tasks system dispatchers remain view-only while manual tasks sta
   await page.locator('#fm-name').fill(`手动任务 ${Date.now()}`);
   await page.locator('#fm-schedule').fill('*/20 * * * *');
   await page.locator('#fm-command').fill('echo dispatcher-guard');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
   await expect(page.locator('#scheduled-tab-panel-tasks')).toBeVisible();
   const manualRow = page.locator('tr:has-text("手动任务")').first();
@@ -88,6 +133,7 @@ test('scheduled tasks reject direct save delete and toggle posts for DDNS dispat
   await loginAsDevAdmin(page);
   await page.goto('/admin/scheduled_tasks.php');
   await openDdnsDispatcherTab(page);
+  await ensureDdnsDispatcherExists(page);
 
   const systemRow = page.locator('tr:has-text("DDNS 调度器")').first();
   await expect(systemRow).toBeVisible();

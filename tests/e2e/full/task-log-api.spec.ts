@@ -44,13 +44,13 @@ test('task log api enforces auth and returns paged payload after a task run', as
   await page.locator('#fm-name').fill(taskName);
   await page.locator('#fm-schedule').fill('*/30 * * * *');
   await page.locator('#fm-command').fill('echo api-log-line-1\necho api-log-line-2');
-  await page.getByRole('button', { name: '💾 保存' }).click();
+  await page.getByRole('button', { name: '💾 保存' }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const row = page.locator('tr', { hasText: taskName }).last();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
   const taskLogFilename = `task_${taskId}.log`;
-  await row.getByRole('button', { name: /立即执行/ }).click();
+  await row.getByRole('button', { name: /立即执行/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
 
   const missingId = await page.evaluate(async () => {

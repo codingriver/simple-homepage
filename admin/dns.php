@@ -471,6 +471,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
         ]);
         dns_json_response(['ok' => false, 'msg' => '未登录或无权限'], 401);
     }
+    if (!empty($_GET['bad'])) {
+        dns_log_write('app', 'warn', 'DNS async hydrate rejected malformed query', [
+            'account_id' => $selectedAccountId,
+            'query' => $_GET,
+        ]);
+        dns_json_response(['ok' => false, 'msg' => '请求参数无效'], 400);
+    }
 
     // 关键：异步 DNS 拉取可能较慢，提前释放 session 锁，避免阻塞其它后台页面请求
     if (session_status() === PHP_SESSION_ACTIVE) {

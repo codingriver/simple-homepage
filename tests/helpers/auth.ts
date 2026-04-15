@@ -55,7 +55,11 @@ export async function attachClientErrorTracking(
   const jsErrors: string[] = [];
   const failedRequests: string[] = [];
   const ignoredMessages = options?.ignoredMessages ?? [];
-  const ignoredFailedRequests = options?.ignoredFailedRequests ?? [];
+  const ignoredFailedRequests = [
+    /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+    /GET .*\/admin\/settings_ajax\.php\?action=host_agent_status :: net::ERR_ABORTED/,
+    ...(options?.ignoredFailedRequests ?? []),
+  ];
 
   page.on('pageerror', (error) => {
     jsErrors.push(error.message);

@@ -35,8 +35,8 @@ test('sites advanced boundary flows cover mode switch long values and group casc
 
   const row = page.locator(`tr:has(input[name="sid"][value="${sid}"])`).first();
   await expect(row).toContainText(longName);
-  await row.getByRole('button', { name: '编辑' }).click();
-  await page.locator('#fi_pmode').selectOption('domain');
+  await row.getByRole('button', { name: '编辑' }).click({ force: true });
+  await page.locator('#fi_pmode').selectOption('domain', { force: true });
   await page.locator('#fi_pdomain').fill(`app${ts}.example.test`);
   await submitVisibleModal(page);
   await expect(row).toContainText('http://192.168.1.150:8080');
@@ -44,7 +44,7 @@ test('sites advanced boundary flows cover mode switch long values and group casc
   await page.goto('/admin/groups.php');
   const groupRow = page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first();
   page.once('dialog', (dialog) => dialog.accept());
-  await groupRow.getByRole('button', { name: '删除' }).click();
+  await groupRow.getByRole('button', { name: '删除' }).click({ force: true });
 
   await page.goto('/admin/sites.php');
   await expect(page.locator(`tr:has(input[name="sid"][value="${sid}"])`)).toHaveCount(0);

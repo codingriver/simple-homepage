@@ -10,7 +10,8 @@
 require_once __DIR__ . '/functions.php';
 
 // 验证管理员权限（未登录或非admin跳转）
-$current_admin = auth_require_admin();
+$page_permission = isset($page_permission) ? trim((string)$page_permission) : '';
+$current_admin = $page_permission !== '' ? auth_require_permission($page_permission) : auth_require_admin();
 // 提前建立 Session，避免输出后再 session_start 导致 CSRF 失效
 csrf_token();
 
@@ -44,14 +45,39 @@ $nav_items = [
     ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
+    ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
+    ['file' => 'hosts.php',    'icon' => '🖥', 'label' => '主机管理'],
+    ['file' => 'host_runtime.php', 'icon' => '🧰', 'label' => '宿主机运维'],
+    ['file' => 'docker_hosts.php', 'icon' => '🐳', 'label' => 'Docker 管理'],
+    ['file' => 'files.php',    'icon' => '🗂', 'label' => '文件系统'],
+    ['file' => 'webdav.php',   'icon' => '🧷', 'label' => 'WebDAV'],
+    ['file' => 'task_templates.php', 'icon' => '🧱', 'label' => '任务模板'],
+    ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知中心'],
+    ['file' => 'expiry.php',   'icon' => '📆', 'label' => '到期管理'],
     ['sep'],
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
-    ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
-
 ];
+$nav_items = array_values(array_filter($nav_items, static function(array $item): bool {
+    if (!isset($item['file'])) {
+        return true;
+    }
+    if (($item['file'] ?? '') === 'hosts.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'host_runtime.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'docker_hosts.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'files.php') {
+        return auth_user_has_permission('ssh.files');
+    }
+    return true;
+}));
 ?>
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -78,6 +104,116 @@ function showToast(msg, type) {
         + (colors[type] || colors.info);
     document.body.appendChild(t);
     setTimeout(function(){ t.style.opacity='0';t.style.transition='opacity .3s'; setTimeout(function(){t.remove();},300); }, 3500);
+}
+
+function navStatusEscape(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function navCreateAsyncStatus(options) {
+    options = options || {};
+    var seq = 0;
+    var tasks = {};
+    var progressTexts = options.progressTexts || {};
+    var keepErrorScopes = options.keepErrorScopes || {};
+
+    function refsFor(scope) {
+        return typeof options.getRefs === 'function' ? (options.getRefs(scope) || {}) : {};
+    }
+
+    function renderFallback(refs, title, detail, percent, tone) {
+        if (!refs.wrap) return;
+        refs.wrap.style.display = '';
+        refs.wrap.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">'
+            + '<div><div style="font-weight:700">' + navStatusEscape(title || '处理中') + '</div>'
+            + '<div style="font-size:12px;color:var(--tm);margin-top:4px">' + navStatusEscape(detail || '正在执行…') + '</div></div>'
+            + '<div style="font-family:var(--mono);font-size:12px;color:' + (tone === 'error' ? 'var(--red)' : 'var(--tm)') + '">' + Math.max(0, Math.min(100, Math.round(percent || 0))) + '%</div></div>'
+            + '<div style="margin-top:10px;height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden"><div style="height:100%;width:' + Math.max(0, Math.min(100, percent || 0)) + '%;background:linear-gradient(90deg,' + (tone === 'error' ? 'var(--red),#ff8a96' : 'var(--ac),#64ffd9') + ');transition:width .25s ease"></div></div>';
+    }
+
+    function set(scope, title, detail, percent, tone) {
+        var refs = refsFor(scope);
+        if (refs.wrap && refs.title && refs.text && refs.meta && refs.bar) {
+            refs.wrap.style.display = '';
+            refs.title.textContent = title || '处理中';
+            refs.text.textContent = detail || '正在等待返回…';
+            refs.meta.textContent = Math.max(0, Math.min(100, Math.round(percent || 0))) + '%';
+            refs.bar.style.width = Math.max(0, Math.min(100, percent || 0)) + '%';
+            if (refs.bar.dataset) refs.bar.dataset.tone = tone || '';
+            return;
+        }
+        renderFallback(refs, title, detail, percent, tone);
+    }
+
+    function hide(scope) {
+        var refs = refsFor(scope);
+        if (!refs.wrap) return;
+        refs.wrap.style.display = 'none';
+        if (refs.bar) refs.bar.style.width = '0%';
+        if (refs.title) refs.title.textContent = '';
+        if (refs.text) refs.text.textContent = '';
+        if (refs.meta) refs.meta.textContent = '';
+        if (!refs.title || !refs.text || !refs.meta || !refs.bar) {
+            refs.wrap.innerHTML = '';
+        }
+    }
+
+    function start(scope, title, detail) {
+        var id = 'task_' + (++seq);
+        var startedAt = Date.now();
+        var ticker = setInterval(function() {
+            var elapsed = Date.now() - startedAt;
+            var percent = elapsed < 800 ? 12 + elapsed / 80 : elapsed < 2400 ? 22 + (elapsed - 800) / 40 : Math.min(92, 62 + (elapsed - 2400) / 180);
+            var phase = elapsed < 1000
+                ? (progressTexts.connecting || '正在连接服务端…')
+                : elapsed < 2600
+                    ? (progressTexts.loading || '正在获取数据…')
+                    : (progressTexts.processing || '数据较多，继续处理中…');
+            set(scope, title || '处理中', detail || phase, percent);
+        }, 180);
+        tasks[id] = { scope: scope, title: title || '处理中', ticker: ticker };
+        set(scope, title || '处理中', detail || '正在准备请求…', 8);
+        return id;
+    }
+
+    function finish(id, ok, detail) {
+        var task = tasks[id];
+        if (!task) return;
+        clearInterval(task.ticker);
+        set(task.scope, task.title, detail || (ok ? '已完成' : '执行失败'), 100, ok ? 'success' : 'error');
+        setTimeout(function() {
+            if (!ok && keepErrorScopes[task.scope]) return;
+            hide(task.scope);
+        }, ok ? 500 : 1800);
+        delete tasks[id];
+    }
+
+    async function run(scope, title, detail, runner, optionsRun) {
+        var taskId = start(scope, title, detail);
+        try {
+            var result = await runner();
+            var treatUndefinedAsOk = !(optionsRun && optionsRun.undefinedOk === false);
+            var ok = !!(result && (treatUndefinedAsOk ? (result.ok === undefined || result.ok) : result.ok));
+            finish(taskId, ok, ok ? ((optionsRun && optionsRun.successText) || '处理完成') : ((result && result.msg) || ((optionsRun && optionsRun.failureText) || '执行失败')));
+            return result;
+        } catch (err) {
+            finish(taskId, false, '请求异常：' + ((err && err.message) ? err.message : 'unknown error'));
+            throw err;
+        }
+    }
+
+    return {
+        set: set,
+        hide: hide,
+        start: start,
+        finish: finish,
+        run: run
+    };
 }
 </script>
 

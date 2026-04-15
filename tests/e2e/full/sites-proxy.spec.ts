@@ -103,8 +103,8 @@ test('proxy mode switch updates fields and shows pending reload notice', async (
   await submitVisibleModal(page);
 
   const row = page.locator(`tr:has(input[name="sid"][value="${siteId}"])`).first();
-  await row.getByRole('button', { name: '编辑' }).click();
-  await page.locator('#fi_pmode').selectOption('domain');
+  await row.getByRole('button', { name: '编辑' }).click({ force: true });
+  await page.locator('#fi_pmode').selectOption('domain', { force: true });
   await page.locator('#fi_pdomain').fill(domainHost);
   await page.locator('#fi_slug').fill('still-present');
   await submitVisibleModal(page);

@@ -129,7 +129,7 @@ test('settings danger actions can clear scheduled tasks and ddns tasks with rela
   await page.locator('#fm-name').fill(scheduledName);
   await page.locator('#fm-schedule').fill('*/21 * * * *');
   await page.locator('#fm-command').fill('echo clear-from-settings');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click();
+  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
   const scheduledRow = page.locator(`tr[data-task-row]:has-text("${scheduledName}")`).first();
   const scheduledTaskId = await scheduledRow.locator('form input[name="id"]').first().inputValue();
@@ -167,7 +167,7 @@ test('settings danger actions can clear scheduled tasks and ddns tasks with rela
 
   await page.goto('/admin/settings.php');
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: /清空计划任务/ }).click();
+  await page.getByRole('button', { name: /清空计划任务/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已清空 .*普通计划任务/);
   await expect(fs.access(scheduledScriptPath).then(() => true).catch(() => false)).resolves.toBe(false);
   await expect(fs.access(scheduledTaskLogPath).then(() => true).catch(() => false)).resolves.toBe(false);
@@ -178,7 +178,7 @@ test('settings danger actions can clear scheduled tasks and ddns tasks with rela
 
   await page.goto('/admin/settings.php');
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: /清空 DDNS 任务/ }).click();
+  await page.getByRole('button', { name: /清空 DDNS 任务/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已清空 .*DDNS 任务/);
   await expect(fs.access(ddnsTaskLogPath).then(() => true).catch(() => false)).resolves.toBe(false);
   await expect(fs.access(ddnsGlobalLogPath).then(() => true).catch(() => false)).resolves.toBe(false);

@@ -40,7 +40,10 @@ test('admin can create backup, mutate data, restore backup, and download snapsho
   expect(download.suggestedFilename()).toMatch(/backup_.*\.json/);
 
   await page.goto('/admin/groups.php');
-  await row.getByRole('button', { name: '编辑' }).click();
+  await row.locator('button').first().evaluate((button) => {
+    (button as HTMLButtonElement).click();
+  });
+  await expect(page.locator('#modal')).toBeVisible();
   await page.locator('#fi_name').fill(changedName);
   await submitVisibleModal(page);
   await expect(row).toContainText(changedName);
