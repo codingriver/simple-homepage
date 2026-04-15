@@ -6,6 +6,7 @@
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
+require_once __DIR__ . '/../shared/request_timing.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
 auth_bootstrap_initial_admin_if_needed();
 if (!auth_needs_setup()) {

@@ -36,4 +36,5 @@ export default defineConfig({
       use: { ...devices['Pixel 7'], channel: 'chrome' },
     },
   ],
+  /* 默认执行全部 projects；可通过 --project=chromium 单独指定桌面端 */
 });

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../shared/auth.php';
+require_once __DIR__ . '/../shared/request_timing.php';
 
 $logFile = DATA_DIR . '/logs/notify_probe.log';
 $dir = dirname($logFile);

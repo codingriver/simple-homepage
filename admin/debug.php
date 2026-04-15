@@ -7,21 +7,6 @@
 if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
 
-    // AJAX 日志读取
-    if (isset($_GET['ajax']) && $_GET['ajax'] === 'log') {
-        $current_admin = auth_get_current_user();
-        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
-            http_response_code(401);
-            header('Content-Type: text/plain; charset=utf-8');
-            echo '（未登录或无权限）'; exit;
-        }
-        $type  = in_array($_GET['type'] ?? '', ['nginx_access','nginx_error','nginx_main','php_fpm','request_timing','dns','dns_python'], true)
-                 ? $_GET['type'] : 'nginx_access';
-        $lines = min(500, max(10, (int)($_GET['lines'] ?? 100)));
-        header('Content-Type: text/plain; charset=utf-8');
-        echo debug_read_log($type, $lines); exit;
-    }
-
     if (isset($_GET['ajax']) && $_GET['ajax'] === 'github_main_commit') {
         $current_admin = auth_get_current_user();
         if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
@@ -73,41 +58,6 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['ok' => false, 'msg' => '无法获取 GitHub main 最新提交']); exit;
         }
         echo json_encode(['ok' => true, 'sha' => (string)$data['sha']]); exit;
-    }
-
-    // AJAX 清空日志
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['ajax'] ?? '') === 'clear_log')) {
-        $current_admin = auth_get_current_user();
-        if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
-            http_response_code(401); echo json_encode(['ok'=>false,'msg'=>'未登录']); exit;
-        }
-        csrf_check();
-        header('Content-Type: application/json; charset=utf-8');
-        $log_map = [
-            'nginx_access' => '/var/log/nginx/nav.access.log',
-            'nginx_error'  => '/var/log/nginx/nav.error.log',
-            'nginx_main'   => '/var/log/nginx/error.log',
-            'php_fpm'      => '/var/log/php-fpm/error.log',
-            'dns'          => DATA_DIR . '/logs/dns.log',
-            'dns_python'   => DATA_DIR . '/logs/dns_python.log',
-        ];
-        $cleared = [];
-        $failed  = [];
-        foreach ($log_map as $key => $path) {
-            if (!file_exists($path)) continue;
-            if (file_put_contents($path, '') !== false) {
-                $cleared[] = $key;
-            } else {
-                $failed[] = $key;
-            }
-        }
-        echo json_encode([
-            'ok'      => empty($failed),
-            'cleared' => $cleared,
-            'failed'  => $failed,
-            'msg'     => empty($failed) ? '已清空 ' . count($cleared) . ' 个日志文件' : '部分日志清空失败：' . implode(', ', $failed),
-        ]);
-        exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -220,91 +170,5 @@ $build_info = nav_read_build_info();
       <b>display_errors</b>：点击 Toggle 切换状态。开启后 PHP 错误直接输出到页面，方便调试；<span style="color:#ff6b6b">生产环境请保持关闭</span>。
     </div>
 </div>
-
-<!-- 日志查看器 -->
-<div class="card" id="logs-viewer">
-  <div class="card-title">📄 日志查看器</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    <button class="btn btn-secondary btn-sm log-tab active" data-log="nginx_access">Nginx 访问日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_error">Nginx 错误日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="nginx_main">Nginx 主错误日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="php_fpm">PHP-FPM 日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="request_timing">请求耗时 (recv/done)</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="dns">DNS 应用日志</button>
-    <button class="btn btn-secondary btn-sm log-tab" data-log="dns_python">DNS Python 错误日志</button>
-    <button class="btn btn-secondary btn-sm" onclick="refreshLog()">🔄 刷新</button>
-    <button class="btn btn-sm" onclick="clearAllLogs()" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:#ff6b6b">🗑 清空所有日志</button>
-    <select id="logLines" onchange="refreshLog()" style="background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:5px 10px;color:var(--tx);font-size:12px">
-      <option value="50">最近 50 行</option>
-      <option value="100" selected>最近 100 行</option>
-      <option value="200">最近 200 行</option>
-    </select>
-  </div>
-  <pre id="logContent" style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;
-padding:14px;font-size:11px;font-family:monospace;color:#a5f3a5;overflow-x:auto;
-max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all">加载中...</pre>
-</div>
-
-<script>
-var currentLog = 'nginx_access';
-var logTabs = document.querySelectorAll('.log-tab');
-logTabs.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-        logTabs.forEach(function(b){ b.classList.remove('active'); b.style.borderColor=''; b.style.color=''; });
-        this.classList.add('active');
-        this.style.borderColor = 'var(--ac)';
-        this.style.color = 'var(--ac2)';
-        currentLog = this.dataset.log;
-        refreshLog();
-    });
-});
-// 初始化第一个 tab 样式
-logTabs[0] && (logTabs[0].style.borderColor = 'var(--ac)', logTabs[0].style.color = 'var(--ac2)');
-
-function refreshLog() {
-    var lines = document.getElementById('logLines').value;
-    var pre   = document.getElementById('logContent');
-    pre.textContent = '加载中...';
-    fetch('debug.php?ajax=log&type=' + currentLog + '&lines=' + lines, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.text(); }).then(function(t){
-        pre.textContent = t;
-    }).catch(function(){
-        pre.textContent = '加载失败，请重试';
-    });
-}
-function clearAllLogs() {
-    if (!confirm('确认清空所有日志文件？此操作不可恢复。')) return;
-    var pre = document.getElementById('logContent');
-    pre.textContent = '清空中...';
-    var form = new FormData();
-    form.append('ajax', 'clear_log');
-    form.append('_csrf', window.DEBUG_CSRF || '');
-    fetch('debug.php', {
-        method: 'POST',
-        body: form,
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.json(); }).then(function(d){
-        if (d.ok) {
-            pre.textContent = '✅ ' + d.msg + '\n\n日志已清空，刷新中...';
-            setTimeout(refreshLog, 1000);
-        } else {
-            pre.textContent = '❌ ' + d.msg;
-        }
-    }).catch(function(){
-        pre.textContent = '清空请求失败，请重试';
-    });
-}
-var debugUrl = new URL(window.location.href);
-var skipAutoLog = debugUrl.searchParams.get('de_toggled') === '1';
-if (skipAutoLog) {
-    document.getElementById('logContent').textContent = 'display_errors 切换后 PHP-FPM 正在后台重载，请手动刷新日志。';
-    debugUrl.searchParams.delete('de_toggled');
-    history.replaceState(null, '', debugUrl.pathname + (debugUrl.search ? debugUrl.search : '') + debugUrl.hash);
-} else {
-    refreshLog();
-}
-</script>
-<script>window.DEBUG_CSRF = <?= json_encode(csrf_token()) ?>;</script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

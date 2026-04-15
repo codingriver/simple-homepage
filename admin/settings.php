@@ -784,12 +784,12 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   <div id="nginx-reload-note" class="form-hint" style="margin-top:10px">按钮始终可点击；环境检测未通过时，提交后会显示明确错误原因。</div>
 </div>
 
-<!-- 登录日志（惰性：进入视口或 #logs 锚点时再请求） -->
+<!-- 登录日志入口 -->
 <div class="card" id="logs">
-  <div class="card-title">📋 登录日志
-    <span id="logs_total_label" style="font-size:12px;color:var(--tm);font-weight:400;margin-left:8px"></span></div>
-  <div id="logs_lazy_state" style="color:var(--tm);font-size:13px">向下滚动到此处或从控制台链接进入时将自动加载…</div>
-  <div id="logs_lazy_content" style="display:none"></div>
+  <div class="card-title">📋 登录日志</div>
+  <p style="color:var(--tm);font-size:13px;margin:0">
+    登录日志已迁移到 <a href="logs.php">日志中心</a>，与系统日志、应用日志统一查看与管理。
+  </p>
 </div>
 
 <!-- Webhook 通知 -->
@@ -1086,45 +1086,6 @@ function confirmHostAgentInstall() {
         });
     }
 
-    function loadLoginLogsOnce() {
-        if (logsLoaded) return;
-        logsLoaded = true;
-        var st = document.getElementById('logs_lazy_state');
-        if (st) st.textContent = '加载中…';
-        fetch('login_logs.php', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            .then(function(r){ return r.json(); })
-            .then(function(d){
-                if (!d.ok) { if (st) st.textContent = d.msg || '加载失败'; return; }
-                var lbl = document.getElementById('logs_total_label');
-                if (lbl) lbl.textContent = '共 ' + d.total + ' 条（最多保留 ' + d.max + ' 条）';
-                var wrap = document.getElementById('logs_lazy_content');
-                if (st) st.style.display = 'none';
-                if (wrap) {
-                    wrap.style.display = 'block';
-                    if (!d.rows || !d.rows.length) {
-                        wrap.innerHTML = '<p style="color:var(--tm);font-size:13px">暂无日志</p>';
-                        return;
-                    }
-                    var bc = { SUCCESS:'badge-green', FAIL:'badge-red', IP_LOCKED:'badge-yellow', LOGOUT:'badge-blue', SETUP:'badge-purple' };
-                    var rows = '';
-                    d.rows.forEach(function(row) {
-                        var m = row.match(/^\[(.+?)\]\s+(\S+)\s+user=(\S+)\s+ip=(\S+)(?:\s+note=(\S+))?/);
-                        var t = m ? m[1] : '-', ty = m ? m[2] : '-', u = m ? m[3] : '-', ip = m ? m[4] : '-', note = m ? (m[5]||'') : '';
-                        var bcc = bc[ty] || 'badge-gray';
-                        rows += '<tr><td style="font-family:monospace;font-size:11px;white-space:nowrap">' + escHtml(t) + '</td>'
-                            + '<td><span class="badge ' + bcc + '">' + escHtml(ty) + '</span></td>'
-                            + '<td>' + escHtml(u) + '</td>'
-                            + '<td style="font-family:monospace;font-size:11px">' + escHtml(ip) + '</td>'
-                            + '<td style="font-size:11px;color:var(--tm)">' + escHtml(note) + '</td></tr>';
-                    });
-                    wrap.innerHTML = '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>用户</th><th>IP</th><th>备注</th></tr>' + rows + '</table></div>';
-                }
-            })
-            .catch(function(){
-                if (st) st.textContent = '加载失败，请刷新重试';
-            });
-    }
-
     var nginxLoaded = false;
     function loadNginxSudoOnce() {
         if (nginxLoaded) return;
@@ -1157,15 +1118,8 @@ function confirmHostAgentInstall() {
             });
     }
 
-    var logs = document.getElementById('logs');
     var nginx = document.getElementById('nginx');
     if (window.IntersectionObserver) {
-        if (logs) {
-            var io1 = new IntersectionObserver(function(entries){
-                entries.forEach(function(e){ if (e.isIntersecting) loadLoginLogsOnce(); });
-            }, { rootMargin: '80px' });
-            io1.observe(logs);
-        }
         if (nginx) {
             var io2 = new IntersectionObserver(function(entries){
                 entries.forEach(function(e){ if (e.isIntersecting) loadNginxSudoOnce(); });
@@ -1173,10 +1127,8 @@ function confirmHostAgentInstall() {
             io2.observe(nginx);
         }
     } else {
-        if (logs) loadLoginLogsOnce();
         if (nginx) loadNginxSudoOnce();
     }
-    if (location.hash === '#logs') loadLoginLogsOnce();
     if (location.hash === '#nginx') loadNginxSudoOnce();
     loadHostAgentStatus(false);
 })();

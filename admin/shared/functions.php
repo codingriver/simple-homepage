@@ -4,6 +4,7 @@
  * 包含：站点数据读写、配置读写、CSRF、Flash消息、备份/恢复、统计
  */
 require_once __DIR__ . '/../../shared/auth.php';
+require_once __DIR__ . '/../../shared/notify_runtime.php';
 
 // 数据文件路径常量
 define('SITES_FILE',   DATA_DIR . '/sites.json');
@@ -13,22 +14,12 @@ define('MAX_BACKUPS',  20); // 最多保留备份数
 
 // ── 站点数据 ──
 
-/** 读取站点配置（同一请求内缓存；文件变更后按 mtime 自动失效） */
+/** 读取站点配置 */
 function load_sites(): array {
-    static $cache = null;
-    static $cache_mtime = null;
-    $mtime = file_exists(SITES_FILE) ? filemtime(SITES_FILE) : 0;
-    if ($cache !== null && $mtime === $cache_mtime) {
-        return $cache;
-    }
     if (!file_exists(SITES_FILE)) {
-        $cache = ['groups' => []];
-        $cache_mtime = 0;
-        return $cache;
+        return ['groups' => []];
     }
-    $cache = json_decode(file_get_contents(SITES_FILE), true) ?? ['groups' => []];
-    $cache_mtime = $mtime;
-    return $cache;
+    return json_decode(file_get_contents(SITES_FILE), true) ?? ['groups' => []];
 }
 
 /** 写入站点配置 */
@@ -414,32 +405,13 @@ function debug_get_display_errors(): bool {
 }
 
 /**
- * 设置 PHP display_errors（修改 ini 文件 + 异步重启 PHP-FPM）
+ * 设置 PHP display_errors（持久化到 config.json，由入口文件运行时应用）
  */
 function debug_set_display_errors(bool $on): array {
-    $ini_file = '/usr/local/etc/php/conf.d/99-nav-custom.ini';
-    if (!file_exists($ini_file)) {
-        return ['ok' => false, 'msg' => 'ini 文件不存在：' . $ini_file];
-    }
-    $content = file_get_contents($ini_file);
-    $value   = $on ? 'On' : 'Off';
-    if (preg_match('/^\s*display_errors\s*=/mi', $content)) {
-        $content = preg_replace('/^(\s*display_errors\s*=\s*).*/mi', '${1}' . $value, $content);
-    } else {
-        $content .= "\ndisplay_errors = {$value}\n";
-    }
-    if (preg_match('/^\s*display_startup_errors\s*=/mi', $content)) {
-        $content = preg_replace('/^(\s*display_startup_errors\s*=\s*).*/mi', '${1}' . $value, $content);
-    }
-    file_put_contents($ini_file, $content, LOCK_EX);
-
-    // 异步重启 PHP-FPM，避免杀死当前进程导致 502
-    $cmd = 'nohup /usr/bin/supervisorctl -c /etc/supervisord.conf restart php-fpm >/tmp/fpm-restart.log 2>&1 &';
-    $run = admin_run_command($cmd);
-    if (!$run['ok']) {
-        return ['ok' => false, 'msg' => 'ini 已更新，但 PHP-FPM 重启触发失败：' . $run['output']];
-    }
-    return ['ok' => true, 'msg' => 'ini 已更新，PHP-FPM 正在后台重启'];
+    $cfg = load_config();
+    $cfg['display_errors'] = $on ? '1' : '0';
+    save_config($cfg);
+    return ['ok' => true, 'msg' => '设置已保存，下次请求生效'];
 }
 
 /**
@@ -886,6 +858,15 @@ function webhook_test(): array {
 
 
 /**
+ * 清洗即将写入 Nginx 配置的用户输入字段
+ */
+function nginx_sanitize_config_literal(string $s): string {
+    // 禁止换行、回车、空字符、Nginx 语句结束符
+    $s = preg_replace('/[\r\n\0;]/', '', $s);
+    return trim($s);
+}
+
+/**
  * 根据当前 sites.json 生成 Nginx 反代配置片段
  * 输出到：
  *   - /etc/nginx/conf.d/nav-proxy.conf        （路径前缀模式）
@@ -917,11 +898,11 @@ function nginx_generate_proxy_conf(): array {
         foreach ($grp['sites'] ?? [] as $s) {
             if (($s['type'] ?? '') !== 'proxy') continue;
             $target = rtrim($s['proxy_target'] ?? '', '/');
-            // 校验 proxy_target 格式，防止配置注入（仅允许 http(s)://host:port 形式）
-            if (!preg_match('#^https?://[a-zA-Z0-9._-]+(:\d+)?(/[^\n\r]*)?$#', $target)) {
+            // 校验 proxy_target 格式，防止配置注入（仅允许 http(s)://host:port/path 形式，禁止 ..）
+            if (!preg_match('#^https?://[a-zA-Z0-9._-]+(:\d+)?(/[a-zA-Z0-9._~!$&\'()*+,;=:@/-]*)?$#', $target) || str_contains($target, '..')) {
                 continue; // 格式非法，跳过此站点，不写入 Nginx 配置
             }
-            $name   = $s['name'] ?? $s['id'];
+            $name   = nginx_sanitize_config_literal($s['name'] ?? $s['id']);
 
             if (($s['proxy_mode'] ?? 'path') === 'path') {
                 $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
@@ -938,8 +919,8 @@ function nginx_generate_proxy_conf(): array {
                 $path_blocks[] = implode("\n", $block_lines);
             } else {
                 // 子域名模式：独立 server 块
-                $pd = $s['proxy_domain'] ?? '';
-                if (!$pd) continue;
+                $pd = nginx_sanitize_config_literal($s['proxy_domain'] ?? '');
+                if (!$pd || !preg_match('/^[a-zA-Z0-9._-]+$/', $pd)) continue;
                 $block_lines = [
                     "server {",
                     "    listen {$port};",

@@ -58,6 +58,7 @@ $nav_items = [
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
+    ['file' => 'logs.php',     'icon' => '📄', 'label' => '日志中心'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
 ];
 $nav_items = array_values(array_filter($nav_items, static function(array $item): bool {

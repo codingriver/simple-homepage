@@ -46,17 +46,28 @@ test('admin ajax endpoints return expected payloads for login logs settings and 
   });
   expect(settingsUnknown.status()).toBe(404);
 
-  const debugLog = await page.request.get('http://127.0.0.1:58080/admin/debug.php?ajax=log&type=dns&lines=20', {
+  const logsList = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=list', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  expect(debugLog.status()).toBe(200);
-  expect(await debugLog.text()).toBeTruthy();
+  expect(logsList.status()).toBe(200);
+  const logsListBody = await logsList.json();
+  expect(logsListBody.ok).toBe(true);
+  expect(typeof logsListBody.sources).toBe('object');
+  expect(logsListBody.sources.dns).toMatchObject({ key: 'dns', label: expect.any(String) });
 
-  await page.goto('/admin/debug.php');
-  const csrf = await page.evaluate(() => (window as any).DEBUG_CSRF as string);
-  const clearLog = await page.request.post('http://127.0.0.1:58080/admin/debug.php', {
+  const logsRead = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=dns&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { ajax: 'clear_log', _csrf: csrf },
+  });
+  expect(logsRead.status()).toBe(200);
+  const logsReadBody = await logsRead.json();
+  expect(logsReadBody.ok).toBe(true);
+  expect(Array.isArray(logsReadBody.lines)).toBe(true);
+
+  await page.goto('/admin/logs.php');
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+  const clearLog = await page.request.post('http://127.0.0.1:58080/admin/logs_api.php?action=clear&type=dns', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    form: { _csrf: csrf },
   });
   expect(clearLog.status()).toBe(200);
   expect(await clearLog.json()).toMatchObject({ ok: expect.any(Boolean) });
@@ -68,10 +79,10 @@ test('admin ajax endpoints return expected payloads for login logs settings and 
   });
   expect(deniedLoginLogs.status()).toBe(403);
 
-  const deniedDebug = await anonPage.request.get('http://127.0.0.1:58080/admin/debug.php?ajax=log&type=dns&lines=20', {
+  const deniedLogs = await anonPage.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=dns&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  expect(deniedDebug.status()).toBe(401);
+  expect(deniedLogs.status()).toBe(403);
 
   const deniedSettings = await anonPage.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=nginx_sudo', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },

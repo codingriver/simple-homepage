@@ -16,7 +16,9 @@ define('COOKIE_DOMAIN',     '.yourdomain.com');   // 前面有点，支持所有
 define('NAV_LOGIN_URL',     'https://nav.yourdomain.com/login.php');
 
 // 数据目录（相对于本文件的上级目录）
-define('DATA_DIR',          dirname(__DIR__) . '/data');
+if (!defined('DATA_DIR')) {
+    define('DATA_DIR', dirname(__DIR__) . '/data');
+}
 define('USERS_FILE',        DATA_DIR . '/users.json');
 define('CONFIG_FILE',       DATA_DIR . '/config.json');
 define('IP_LOCKS_FILE',     DATA_DIR . '/ip_locks.json');
@@ -28,9 +30,14 @@ define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 /** 开发模式标记（容器 entrypoint 根据 NAV_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
 define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
 
-// 请求收到/响应结束耗时日志（data/logs/request_timing.log），关闭：环境变量 NAV_REQUEST_TIMING=0
-require_once __DIR__ . '/request_timing.php';
-require_once __DIR__ . '/notify_runtime.php';
+/** Token 默认有效期（小时） */
+define('AUTH_TOKEN_EXPIRE_HOURS_DEFAULT', 8);
+/** 记住我有效期（天） */
+define('AUTH_REMEMBER_ME_DAYS_DEFAULT', 60);
+/** 登录失败限制次数 */
+define('AUTH_LOGIN_FAIL_LIMIT_DEFAULT', 5);
+/** 登录锁定时间（分钟） */
+define('AUTH_LOGIN_LOCK_MINUTES_DEFAULT', 15);
 
 /**
  * 系统配置默认值（单一来源）
@@ -39,10 +46,10 @@ function auth_default_config(): array {
     return [
         'site_name'           => '导航中心',
         'nav_domain'          => '',
-        'token_expire_hours'  => 8,
-        'remember_me_days'    => 60,
-        'login_fail_limit'    => 5,
-        'login_lock_minutes'  => 15,
+        'token_expire_hours'  => AUTH_TOKEN_EXPIRE_HOURS_DEFAULT,
+        'remember_me_days'    => AUTH_REMEMBER_ME_DAYS_DEFAULT,
+        'login_fail_limit'    => AUTH_LOGIN_FAIL_LIMIT_DEFAULT,
+        'login_lock_minutes'  => AUTH_LOGIN_LOCK_MINUTES_DEFAULT,
         'bg_color'            => '',
         'bg_image'            => '',
         'cookie_secure'       => 'off',
@@ -303,14 +310,22 @@ function auth_current_login_url(): string {
  * 读取系统配置，带默认值
  */
 function auth_get_config(): array {
-    static $cfg = null;
-    if ($cfg !== null) return $cfg;
+    global $auth_config_cache;
+    if ($auth_config_cache !== null) return $auth_config_cache;
     $cfg = [];
     if (file_exists(CONFIG_FILE)) {
         $cfg = json_decode(file_get_contents(CONFIG_FILE), true) ?? [];
     }
-    $cfg += auth_default_config();
-    return $cfg;
+    $auth_config_cache = $cfg + auth_default_config();
+    return $auth_config_cache;
+}
+
+/**
+ * 重置配置缓存（供测试使用）
+ */
+function auth_reset_config_cache(): void {
+    global $auth_config_cache;
+    $auth_config_cache = null;
 }
 
 /** Token 默认有效期（秒） */
@@ -610,16 +625,16 @@ function auth_check_setup(bool $is_setup_page = false): void {
  * @param string $role        角色（admin/user/host_admin/host_viewer）
  * @param bool   $remember_me 是否记住我
  */
-function auth_generate_token(string $username, string $role = 'user', bool $remember_me = false): string {
+function auth_generate_token(string $username, string $role = 'user', bool $remember_me = false, array $extraClaims = []): string {
     $expire  = $remember_me ? auth_remember_expire() : auth_token_expire();
-    $payload = [
+    $payload = array_merge([
         'username'    => $username,
         'role'        => $role,
         'iat'         => time(),
         'exp'         => time() + $expire,
         'remember_me' => $remember_me,
         'jti'         => bin2hex(random_bytes(16)), // 唯一ID，防重放
-    ];
+    ], $extraClaims);
     $data = base64_encode(json_encode($payload));
     $sig  = hash_hmac('sha256', $data, auth_secret_key());
     return $data . '.' . $sig;
@@ -651,16 +666,13 @@ function auth_verify_token(string $token) {
 /**
  * @return array|false
  */
-function auth_get_current_user() {
-    $token = null;
-    if (!empty($_COOKIE[SESSION_COOKIE_NAME])) {
-        $token = $_COOKIE[SESSION_COOKIE_NAME];
-    } elseif (!empty($_GET['_nav_token'])) {
-        // 子站通过 URL 参数传入 Token，必须是字符串
-        $token = (string) $_GET['_nav_token'];
+function auth_get_current_user(): ?array {
+    $token = $_COOKIE[SESSION_COOKIE_NAME] ?? '';
+    if (!$token) {
+        return null;
     }
-    if (!$token) return false;
-    return auth_verify_token($token);
+    $payload = auth_verify_token($token);
+    return is_array($payload) ? $payload : null;
 }
 
 // ============================================================
@@ -926,24 +938,27 @@ function auth_require_permission(string $permission): array {
 // IP 登录失败锁定
 // ============================================================
 
+function ip_locks_load_raw(): array {
+    if (!file_exists(IP_LOCKS_FILE)) return [];
+    return json_decode(file_get_contents(IP_LOCKS_FILE), true) ?? [];
+}
+
+function ip_locks_prune(array $data): array {
+    $now = time();
+    foreach ($data as $ip => $info) {
+        $locked_until = (int)($info['locked_until'] ?? 0);
+        if ($locked_until > 0 && $locked_until < $now && ($info['fails'] ?? 0) > 0) {
+            $data[$ip] = ['fails' => 0, 'locked_until' => 0, 'last_fail' => $info['last_fail'] ?? 0];
+        }
+    }
+    return $data;
+}
+
 /**
  * 读取 IP 锁定记录（同时清理已过期的条目）
  */
 function ip_locks_load(): array {
-    if (!file_exists(IP_LOCKS_FILE)) return [];
-    $data = json_decode(file_get_contents(IP_LOCKS_FILE), true) ?? [];
-    // 顺带清理过期记录
-    $now = time();
-    $changed = false;
-    foreach ($data as $ip => $info) {
-        $locked_until = (int)($info['locked_until'] ?? 0);
-        if ($locked_until > 0 && $locked_until < $now && ($info['fails'] ?? 0) > 0) {
-            // 锁定已过期，重置
-            $data[$ip] = ['fails' => 0, 'locked_until' => 0, 'last_fail' => $info['last_fail'] ?? 0];
-            $changed = true;
-        }
-    }
-    if ($changed) ip_locks_save($data);
+    $data = ip_locks_prune(ip_locks_load_raw());
     return $data;
 }
 
@@ -954,6 +969,33 @@ function ip_locks_save(array $data): void {
     $dir = dirname(IP_LOCKS_FILE);
     if (!is_dir($dir)) mkdir($dir, 0700, true);
     file_put_contents(IP_LOCKS_FILE, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
+/**
+ * 原子化修改 IP 锁定记录（防止读-改-写竞争）
+ */
+function ip_locks_atomic(callable $mutator): void {
+    $dir = dirname(IP_LOCKS_FILE);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0700, true);
+    }
+    $lockFile = IP_LOCKS_FILE . '.lock';
+    $fp = fopen($lockFile, 'c');
+    if (!$fp) {
+        return;
+    }
+    if (!flock($fp, LOCK_EX)) {
+        fclose($fp);
+        return;
+    }
+    try {
+        $data = ip_locks_prune(ip_locks_load_raw());
+        $mutator($data);
+        ip_locks_save($data);
+    } finally {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+    }
 }
 
 /**
@@ -1014,27 +1056,27 @@ function ip_is_locked(string $ip): bool {
  */
 function ip_record_fail(string $ip): void {
     $cfg   = auth_get_config();
-    $limit = (int)($cfg['login_fail_limit'] ?? 5);
-    $mins  = (int)($cfg['login_lock_minutes'] ?? 15);
-    $locks = ip_locks_load();
-    if (!isset($locks[$ip])) $locks[$ip] = ['fails' => 0, 'locked_until' => 0];
-    $locks[$ip]['fails']++;
-    $locks[$ip]['last_fail'] = time();
-    if ($locks[$ip]['fails'] >= $limit) {
-        $locks[$ip]['locked_until'] = time() + $mins * 60;
-    }
-    ip_locks_save($locks);
+    $limit = (int)($cfg['login_fail_limit'] ?? AUTH_LOGIN_FAIL_LIMIT_DEFAULT);
+    $mins  = (int)($cfg['login_lock_minutes'] ?? AUTH_LOGIN_LOCK_MINUTES_DEFAULT);
+    ip_locks_atomic(function(&$locks) use ($ip, $limit, $mins) {
+        if (!isset($locks[$ip])) $locks[$ip] = ['fails' => 0, 'locked_until' => 0];
+        $locks[$ip]['fails']++;
+        $locks[$ip]['last_fail'] = time();
+        if ($locks[$ip]['fails'] >= $limit) {
+            $locks[$ip]['locked_until'] = time() + $mins * 60;
+        }
+    });
 }
 
 /**
  * 登录成功后重置 IP 失败计数
  */
 function ip_reset_fails(string $ip): void {
-    $locks = ip_locks_load();
-    if (isset($locks[$ip])) {
-        $locks[$ip] = ['fails' => 0, 'locked_until' => 0];
-        ip_locks_save($locks);
-    }
+    ip_locks_atomic(function(&$locks) use ($ip) {
+        if (isset($locks[$ip])) {
+            $locks[$ip] = ['fails' => 0, 'locked_until' => 0];
+        }
+    });
 }
 
 // ============================================================
@@ -1286,3 +1328,13 @@ if (!function_exists('csrf_token')) {
         }
     }
 } 
+
+// 运行时应用 display_errors 配置（不修改 ini 文件，避免 FPM 重启）
+try {
+    $cfg = auth_get_config();
+    $de = ($cfg['display_errors'] ?? '0') === '1' ? '1' : '0';
+    @ini_set('display_errors', $de);
+    @ini_set('display_startup_errors', $de);
+} catch (\Throwable $e) {
+    // ignore
+}

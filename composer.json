@@ -1,0 +1,22 @@
+{
+  "name": "codingriver/simple-homepage",
+  "description": "Simple Homepage Navigation Panel",
+  "type": "project",
+  "require": {
+    "php": ">=8.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.0"
+  },
+  "autoload": {
+    "classmap": [
+      "shared/",
+      "admin/shared/"
+    ]
+  },
+  "autoload-dev": {
+    "classmap": [
+      "tests/phpunit/"
+    ]
+  }
+}

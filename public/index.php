@@ -4,6 +4,7 @@
  * 展示分组+站点卡片，支持搜索、折叠、Favicon异步加载、自定义背景
  */
 require_once __DIR__ . '/../shared/auth.php';
+require_once __DIR__ . '/../shared/request_timing.php';
 auth_check_setup();
 
 $cfg       = auth_get_config();

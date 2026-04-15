@@ -37,12 +37,12 @@ test('csrf guards reject admin mutations without valid token', async ({ page }) 
   });
   expect(backupRes.status()).toBe(403);
 
-  await page.goto('/admin/debug.php');
-  const debugRes = await page.request.post('http://127.0.0.1:58080/admin/debug.php', {
+  await page.goto('/admin/logs.php');
+  const logsRes = await page.request.post('http://127.0.0.1:58080/admin/logs_api.php?action=clear&type=dns', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { ajax: 'clear_log' },
+    form: {},
   });
-  expect(debugRes.status()).toBe(403);
+  expect(logsRes.status()).toBe(403);
 
   await page.goto('/admin/settings.php');
   const csrf = await currentCsrf(page);

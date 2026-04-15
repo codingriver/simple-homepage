@@ -23,8 +23,34 @@ if (PHP_SAPI === 'cli' && getenv('NAV_REQUEST_TIMING_CLI') !== '1') {
     return;
 }
 
+if (!defined('DATA_DIR')) {
+    // Attempt to infer DATA_DIR from this file location
+    define('DATA_DIR', dirname(__DIR__) . '/data');
+}
 if (!defined('NAV_TIMING_LOG_FILE')) {
     define('NAV_TIMING_LOG_FILE', DATA_DIR . '/logs/request_timing.log');
+}
+
+function nav_request_timing_rotate_if_needed(): void {
+    $maxSize = 10 * 1024 * 1024; // 10MB
+    if (!file_exists(NAV_TIMING_LOG_FILE)) {
+        return;
+    }
+    if (filesize(NAV_TIMING_LOG_FILE) < $maxSize) {
+        return;
+    }
+    $rotated = NAV_TIMING_LOG_FILE . '.' . date('Ymd') . '.gz';
+    $content = file_get_contents(NAV_TIMING_LOG_FILE);
+    if ($content !== false) {
+        file_put_contents($rotated, gzencode($content), LOCK_EX);
+        file_put_contents(NAV_TIMING_LOG_FILE, '', LOCK_EX);
+    }
+    // Keep only last 7 archives
+    foreach (glob(NAV_TIMING_LOG_FILE . '.*.gz') as $f) {
+        if (filemtime($f) < time() - 7 * 86400) {
+            @unlink($f);
+        }
+    }
 }
 
 if (!defined('NAV_REQUEST_T0')) {
@@ -39,6 +65,7 @@ function nav_request_timing_write(string $phase, float $elapsedSec, int $httpCod
     if (!is_dir($dir)) {
         @mkdir($dir, 0755, true);
     }
+    nav_request_timing_rotate_if_needed();
 
     $method = $_SERVER['REQUEST_METHOD'] ?? '?';
     $uri = $_SERVER['REQUEST_URI'] ?? '';

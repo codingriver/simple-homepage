@@ -7,6 +7,7 @@
  * 返回 200 = 已登录，401 = 未登录/Token无效
  */
 require_once __DIR__ . '/../../shared/auth.php';
+require_once __DIR__ . '/../../shared/request_timing.php';
 
 // 从 Cookie 中验证 Token（不从 URL 参数读取，防止伪造）
 $token = $_COOKIE[SESSION_COOKIE_NAME] ?? '';

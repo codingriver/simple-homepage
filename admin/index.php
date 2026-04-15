@@ -28,7 +28,7 @@ $backups = backup_count();
     <a href="backups.php" class="btn btn-secondary quick-action">💾 备份管理</a>
     <a href="/index.php" class="btn btn-secondary quick-action" target="_blank">🌐 查看前台</a>
   </div>
-  <p style="color:var(--tm);font-size:13px;margin-top:12px;margin-bottom:0">登录记录请在「系统设置 → 登录日志」查看（进入该区域时加载）。</p>
+  <p style="color:var(--tm);font-size:13px;margin-top:12px;margin-bottom:0">登录记录与系统日志请在「日志中心」统一查看。</p>
 </div>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

@@ -6,6 +6,7 @@
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
+require_once __DIR__ . '/../shared/request_timing.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
 
 $user = auth_get_current_user();

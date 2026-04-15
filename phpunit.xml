@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+         bootstrap="tests/phpunit/bootstrap.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         testdox="true">
+    <testsuites>
+        <testsuite name="Shared">
+            <directory>tests/phpunit/Shared</directory>
+        </testsuite>
+        <testsuite name="Admin">
+            <directory>tests/phpunit/Admin</directory>
+        </testsuite>
+        <testsuite name="Subsite">
+            <directory>tests/phpunit/Subsite</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>shared</directory>
+            <directory>admin/shared</directory>
+        </include>
+    </source>
+</phpunit>

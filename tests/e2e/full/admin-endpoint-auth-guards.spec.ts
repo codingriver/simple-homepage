@@ -23,10 +23,10 @@ test('admin endpoints consistently reject guest and allow authenticated admin ac
   });
   expect(guestLoginLogs.status()).toBe(403);
 
-  const guestDebug = await page.request.get('http://127.0.0.1:58080/admin/debug.php?ajax=log&type=dns&lines=20', {
+  const guestLogsApi = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=dns&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  expect(guestDebug.status()).toBe(401);
+  expect(guestLogsApi.status()).toBe(403);
 
   const guestTaskLog = await page.request.get('http://127.0.0.1:58080/admin/api/task_log.php?id=missing&page=1');
   expect(guestTaskLog.status()).toBe(403);
@@ -49,11 +49,11 @@ test('admin endpoints consistently reject guest and allow authenticated admin ac
   expect(adminLoginLogs.status()).toBe(200);
   expect(await adminLoginLogs.json()).toMatchObject({ ok: true });
 
-  const adminDebug = await page.request.get('http://127.0.0.1:58080/admin/debug.php?ajax=log&type=dns&lines=20', {
+  const adminLogsApi = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=dns&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  expect(adminDebug.status()).toBe(200);
-  expect(await adminDebug.text()).toBeTruthy();
+  expect(adminLogsApi.status()).toBe(200);
+  expect((await adminLogsApi.json()).ok).toBe(true);
 
   await logout(page);
   await tracker.assertNoClientErrors();
