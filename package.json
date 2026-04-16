@@ -16,7 +16,8 @@
     "test:running": "bash scripts/test-running-status.sh"
   },
   "devDependencies": {
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "1.54.2",
-    "@lhci/cli": "^0.15.1"
+    "typescript": "^5.9.3"
   }
 }

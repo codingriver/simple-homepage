@@ -30,7 +30,7 @@ test('admin can reorder groups and sites via drag-and-drop backend', async ({ pa
   }
 
   // 验证 SortableJS 已加载且存在拖拽手柄
-  const sortableOk = await page.evaluate(() => typeof Sortable !== 'undefined');
+  const sortableOk = await page.evaluate(() => typeof (window as unknown as { Sortable?: unknown }).Sortable !== 'undefined');
   expect(sortableOk).toBe(true);
   await expect(page.locator('tr[data-id] .drag-handle').first()).toBeVisible();
 

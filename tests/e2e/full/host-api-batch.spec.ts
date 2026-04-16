@@ -100,7 +100,7 @@ test('host api batch actions execute across selected hosts', async ({ page }) =>
   // batch_test_hosts
   const testRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_test_hosts', _csrf: csrf, 'host_ids[]': hostIds },
+    form: { action: 'batch_test_hosts', _csrf: csrf, 'host_ids[]': hostIds.join(',') },
   });
   expect(testRes.status()).toBe(200);
   const testBody = await testRes.json();
@@ -111,7 +111,7 @@ test('host api batch actions execute across selected hosts', async ({ page }) =>
   // batch_exec_hosts
   const execRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_exec_hosts', _csrf: csrf, 'host_ids[]': hostIds, command: 'echo batch-exec' },
+    form: { action: 'batch_exec_hosts', _csrf: csrf, 'host_ids[]': hostIds.join(','), command: 'echo batch-exec' },
   });
   expect(execRes.status()).toBe(200);
   const execBody = await execRes.json();
@@ -133,7 +133,7 @@ test('host api batch actions execute across selected hosts', async ({ page }) =>
 
   const distRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_distribute_key', _csrf: csrf, 'host_ids[]': hostIds, key_id: keyId, user: 'root' },
+    form: { action: 'batch_distribute_key', _csrf: csrf, 'host_ids[]': hostIds.join(','), key_id: keyId, user: 'root' },
   });
   expect(distRes.status()).toBe(200);
   const distBody = await distRes.json();

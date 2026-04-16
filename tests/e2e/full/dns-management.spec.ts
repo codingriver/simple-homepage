@@ -178,6 +178,7 @@ test('dns hydrated zone switch and record CRUD lifecycle works end-to-end', asyn
   const hydrated = await gotoHydratedDns(page);
   if (!hydrated) {
     test.skip(true, 'No hydratable DNS account available');
+    return;
   }
   const { selectedAccount, zoneName, zoneId } = hydrated;
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
@@ -270,6 +271,7 @@ test('dns batch delete removes multiple selected records', async ({ page }) => {
   const hydrated = await gotoHydratedDns(page);
   if (!hydrated) {
     test.skip(true, 'No hydratable DNS account available');
+    return;
   }
   const { selectedAccount, zoneId, zoneName } = hydrated;
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
