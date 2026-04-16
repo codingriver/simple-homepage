@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('backup page supports confirm cancel trigger badges and invalid restore failure message', async ({ page }) => {

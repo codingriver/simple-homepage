@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('debug advanced flows cover display_errors toggles and logs api csrf rejection', async ({ page }) => {

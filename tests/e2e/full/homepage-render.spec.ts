@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout, submitVisibleModal } from '../../helpers/auth';
 
 test('homepage renders public groups and reflects admin-only visibility after login', async ({ page }) => {

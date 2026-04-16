@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout, submitVisibleModal } from '../../helpers/auth';
 
 test('homepage advanced interactions cover search reset no-result tab switch and guest visibility differences', async ({ page }) => {

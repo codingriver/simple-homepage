@@ -45,6 +45,7 @@ function groups_handle_post(array &$sites_data): array {
 
         usort($groups, function($a,$b){ return ($a['order']??0)-($b['order']??0); });
         save_sites($sites_data);
+        audit_log('group_save', ['gid' => $id, 'name' => $name]);
         flash_set('success', '分组已保存');
         return ['ok' => true, 'msg' => '分组已保存'];
     }
@@ -55,8 +56,34 @@ function groups_handle_post(array &$sites_data): array {
             array_filter($groups, function($g) use ($id){ return $g['id'] !== $id; })
         );
         save_sites($sites_data);
+        audit_log('group_delete', ['gid' => $id]);
         flash_set('success', '分组及其站点已删除');
         return ['ok' => true, 'msg' => '分组及其站点已删除'];
+    }
+
+    if ($action === 'reorder_groups') {
+        $orders = $_POST['orders'] ?? [];
+        if (!is_array($orders) || empty($orders)) {
+            return ['ok' => false, 'msg' => '缺少排序数据'];
+        }
+        $map = [];
+        foreach ($orders as $item) {
+            $parts = explode(':', $item);
+            if (count($parts) === 2) {
+                $map[$parts[0]] = (int)$parts[1];
+            }
+        }
+        foreach ($groups as &$g) {
+            if (isset($map[$g['id']])) {
+                $g['order'] = $map[$g['id']];
+            }
+        }
+        unset($g);
+        usort($groups, function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+        $sites_data['groups'] = $groups;
+        save_sites($sites_data);
+        audit_log('group_reorder', ['count' => count($orders)]);
+        return ['ok' => true, 'msg' => '排序已保存'];
     }
 
     return ['ok' => false, 'msg' => '未知操作'];
@@ -107,16 +134,18 @@ $groups     = $sites_data['groups'] ?? [];
 
 <div class="card">
   <div class="table-wrap"><table>
-    <tr><th>ID</th><th>名称</th><th>站点数</th><th>排序</th><th>验证</th><th>可见</th><th>操作</th></tr>
+    <thead><tr><th style="width:40px"></th><th>ID</th><th>名称</th><th>站点数</th><th>排序</th><th>验证</th><th>可见</th><th>操作</th></tr></thead>
+    <tbody id="group-tbody">
     <?php if (empty($groups)): ?>
-    <tr><td colspan="7" style="text-align:center;color:var(--tm);padding:24px">暂无分组，点击上方按钮添加</td></tr>
+    <tr><td colspan="8" style="text-align:center;color:var(--tm);padding:24px">暂无分组，点击上方按钮添加</td></tr>
     <?php else: ?>
     <?php foreach ($groups as $g): ?>
-    <tr>
+    <tr data-id="<?= htmlspecialchars($g['id']) ?>">
+      <td class="drag-handle" style="cursor:move;text-align:center;color:var(--tm)">☰</td>
       <td><code style="font-size:12px"><?= htmlspecialchars($g['id']) ?></code></td>
       <td><?= htmlspecialchars($g['icon']??'') ?> <?= htmlspecialchars($g['name']) ?></td>
       <td><span class="badge badge-blue"><?= count($g['sites']??[]) ?></span></td>
-      <td><?= $g['order']??0 ?></td>
+      <td class="order-cell"><?= $g['order']??0 ?></td>
       <td><span class="badge <?= ($g['auth_required']??true)?'badge-purple':'badge-green' ?>"><?= ($g['auth_required']??true)?'需登录':'公开' ?></span></td>
       <td><span class="badge <?= ($g['visible_to']??'all')==='all'?'badge-gray':'badge-yellow' ?>"><?= ($g['visible_to']??'all')==='all'?'所有用户':'仅Admin' ?></span></td>
       <td>
@@ -133,6 +162,7 @@ $groups     = $sites_data['groups'] ?? [];
     </tr>
     <?php endforeach; ?>
     <?php endif; ?>
+    </tbody>
   </table></div>
 </div>
 
@@ -176,6 +206,7 @@ padding:28px;width:100%;max-width:460px">
   </form>
 </div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <script>
 var modal = document.getElementById('modal');
 function openForm(g) {
@@ -288,6 +319,37 @@ function closeEmojiPicker() {
 function outsideEmojiClick(e) {
     if (emojiPickerEl && !emojiPickerEl.contains(e.target)) closeEmojiPicker();
 }
+
+// ── 拖拽排序 ──
+(function(){
+    var tbody = document.getElementById('group-tbody');
+    if (!tbody) return;
+    var sortable = new Sortable(tbody, {
+        handle: '.drag-handle',
+        animation: 150,
+        onEnd: function() {
+            var rows = tbody.querySelectorAll('tr[data-id]');
+            var orders = [];
+            rows.forEach(function(row, idx){
+                orders.push(row.getAttribute('data-id') + ':' + idx);
+            });
+            var form = new FormData();
+            form.append('action', 'reorder_groups');
+            orders.forEach(function(o){ form.append('orders[]', o); });
+            if (window._csrf) form.append('_csrf', window._csrf);
+            fetch('groups.php', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: form
+            }).then(function(r){ return r.json(); }).then(function(d){
+                if (!d.ok) alert(d.msg || '排序保存失败');
+            }).catch(function(){
+                alert('网络错误，排序未保存');
+            });
+        }
+    });
+})();
 </script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

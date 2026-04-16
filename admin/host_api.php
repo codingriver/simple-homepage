@@ -14,7 +14,13 @@ if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'XMLHttpRequest') {
     exit;
 }
 
-$user = auth_require_permission('ssh.view');
+$user = auth_get_current_user();
+if (!$user || !auth_user_has_permission('ssh.view', $user)) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => '无权限'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $action = trim((string)($_REQUEST['action'] ?? ''));
 
 function host_api_send(array $result, int $fallbackStatus = 422): void {
@@ -48,7 +54,9 @@ function host_api_require_any_permission(array $permissions): void {
             return;
         }
     }
-    auth_require_permission((string)($permissions[0] ?? 'ssh.manage'));
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => '无权限'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }
 
 function host_api_request_list(string $key): array {

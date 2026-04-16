@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking } from '../../helpers/auth';
 
 test('homepage redirects guests without public groups and shows pending-only state to admins', async ({ page, browser }) => {

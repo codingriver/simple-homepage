@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 const sitesPath = path.resolve(__dirname, '../../../data/sites.json');
@@ -15,7 +15,7 @@ test('settings health panel and login logs panel load real rows through UI inter
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
     ],
   });
-  const originalSites = await fs.readFile(sitesPath, 'utf8');
+  const originalSites = await fs.readFile(sitesPath, 'utf8').catch(() => '{}');
   const originalAuthLog = await fs.readFile(authLogPath, 'utf8').catch(() => '');
   const hadHealthCache = await fs
     .access(healthCachePath)

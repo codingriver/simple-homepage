@@ -171,6 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         dns_store_ui_selection($cfg, $accountId, '', '');
         save_dns_config($cfg);
         dns_api_invalidate_zones_cache();
+        audit_log('dns_account_save', ['account_id' => $accountId]);
         if ($isAjax) {
             dns_json_response([
                 'ok' => true,
@@ -191,6 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         save_dns_config($cfg);
         dns_api_invalidate_zones_cache();
+        audit_log('dns_account_delete', ['account_id' => $accountId]);
         flash_set('success', 'DNS 账号已删除');
         dns_redirect_to();
     }
@@ -241,6 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         flash_set('success', $message);
+        audit_log('dns_account_verify', ['account_id' => $accountId]);
         dns_redirect_to(['account' => $accountId]);
     }
 
@@ -319,6 +322,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
         }
         flash_set($fail > 0 ? 'warn' : 'success', "导入完成：成功 {$ok} 条，失败 {$fail} 条");
+        audit_log('dns_records_import', ['account_id' => $accountId, 'zone' => $zoneName, 'ok' => $ok, 'fail' => $fail]);
         dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
     }
 
@@ -385,6 +389,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 }
                 flash_set($fc > 0 ? 'warn' : 'success', "批量删除完成：成功 {$sc}，失败 {$fc}");
+                audit_log('dns_record_batch_delete', ['account_id' => $accountId, 'zone' => $zoneName, 'count' => count($recordIds)]);
             } else {
                 if ($isAjax) {
                     dns_json_response(['ok' => false, 'msg' => $result['msg']], 502);
@@ -397,6 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'record_delete') {
             $result = dns_cli_call(['action' => 'record.delete', 'account' => $account, 'zone' => $zone, 'record' => ['id' => trim((string)($_POST['record_id'] ?? ''))]]);
             flash_set($result['ok'] ? 'success' : 'error', $result['ok'] ? '记录已删除' : $result['msg']);
+            audit_log('dns_record_delete', ['account_id' => $accountId, 'zone' => $zoneName, 'record_id' => trim((string)($_POST['record_id'] ?? ''))]);
             dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
         }
 
@@ -428,6 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'record'  => $record,
         ]);
         flash_set($result['ok'] ? 'success' : 'error', $result['ok'] ? ($action === 'record_create' ? '记录已创建' : '记录已更新') : $result['msg']);
+        audit_log($action === 'record_create' ? 'dns_record_create' : 'dns_record_update', ['account_id' => $accountId, 'zone' => $zoneName, 'record_name' => $record['name'], 'type' => $record['type']]);
         dns_redirect_to(['account' => $accountId, 'zone' => $zoneId, 'zone_name' => $zoneName]);
     }
 

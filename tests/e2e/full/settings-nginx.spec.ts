@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
 
 test('admin can download nginx config and save proxy params mode', async ({ page }) => {

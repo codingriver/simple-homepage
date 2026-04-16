@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 
 test('admin can create edit and delete users with role changes', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, clickAdminNav, loginAsDevAdmin } from '../../helpers/auth';
 
 test('admin can navigate through core admin pages and return to homepage', async ({ page }) => {

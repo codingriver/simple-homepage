@@ -305,11 +305,20 @@ if ($bg_image) {
 } else {
     $bg_style = "background-image:radial-gradient(ellipse 70% 50% at 50% -5%,rgba(0,212,170,.08),transparent 65%);";
 }
+$theme = $cfg['theme'] ?? 'dark';
 ?>
-<!DOCTYPE html><html lang="zh-CN"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="<?= htmlspecialchars($theme) ?>">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f1117">
+<link rel="manifest" href="/manifest.webmanifest">
 <title><?= htmlspecialchars($site_name) ?></title>
 <script src="/gesture-guard.js" defer></script>
+<?php if (!empty($cfg['custom_css'] ?? '')): ?>
+<style id="nav-custom-css"><?= $cfg['custom_css'] ?></style>
+<?php endif; ?>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ac2:#a78bfa;
 --tx:#e2e4f0;--tm:#7b7f9e;--r:14px;--fn:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
@@ -508,6 +517,18 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
   .card{min-height:94px}
   .bx{font-size:8px;padding:2px 5px}
 }
+/* ── 命令面板 ── */
+#cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;opacity:0;pointer-events:none;transition:opacity .15s}
+#cmdk-overlay.open{opacity:1;pointer-events:auto}
+#cmdk-panel{position:fixed;top:18%;left:50%;transform:translateX(-50%) scale(.96);width:min(640px,92vw);background:var(--sf);border:1px solid var(--bd);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.5);z-index:999;opacity:0;pointer-events:none;transition:opacity .15s,transform .15s;display:flex;flex-direction:column;max-height:60vh}
+#cmdk-panel.open{opacity:1;pointer-events:auto;transform:translateX(-50%) scale(1)}
+#cmdk-input{width:100%;background:transparent;border:none;border-bottom:1px solid var(--bd);padding:14px 16px;color:var(--tx);font-size:15px;outline:none}
+#cmdk-list{overflow-y:auto;padding:6px}
+.cmdk-item{padding:10px 12px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s}
+.cmdk-item:hover,.cmdk-item.active{background:rgba(108,99,255,.18)}
+.cmdk-item .cmdk-icon{font-size:18px;flex-shrink:0}
+.cmdk-item .cmdk-meta{margin-left:auto;font-size:11px;color:var(--tm)}
+#cmdk-empty{padding:16px;text-align:center;color:var(--tm);font-size:13px}
 </style></head><body>
 <header>
   <div class="topbar-main">
@@ -809,4 +830,51 @@ document.addEventListener('keydown',function(e){
 searchInput.addEventListener('input',applyFilters);
 updateRecentSection();
 applyFilters();
+
+// ── Service Worker 注册 ──
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(function(){});
+}
+
+// ── 命令面板 (Cmd/Ctrl + K) ──
+(function(){
+  var cmdkHtml = '<div id="cmdk-overlay"></div><div id="cmdk-panel"><input id="cmdk-input" type="text" placeholder="搜索站点并跳转…" autocomplete="off"><div id="cmdk-list"></div><div id="cmdk-empty" style="display:none">无匹配站点</div></div>';
+  var div = document.createElement('div'); div.innerHTML = cmdkHtml; document.body.appendChild(div);
+  var overlay = document.getElementById('cmdk-overlay');
+  var panel = document.getElementById('cmdk-panel');
+  var input = document.getElementById('cmdk-input');
+  var list = document.getElementById('cmdk-list');
+  var empty = document.getElementById('cmdk-empty');
+  var allCards = Array.from(document.querySelectorAll('.card[data-site-key]')).map(function(c){
+    return { name: (c.dataset.name||c.querySelector('.cn')?.textContent||'').trim(), href: c.getAttribute('href'), icon: (c.querySelector('.ci')?.textContent||'').trim() };
+  });
+  function openCmdk(){ overlay.classList.add('open'); panel.classList.add('open'); input.value=''; input.focus(); render(''); }
+  function closeCmdk(){ overlay.classList.remove('open'); panel.classList.remove('open'); }
+  function render(q){
+    q = q.toLowerCase().trim();
+    var matched = allCards.filter(function(s){ return !q || s.name.toLowerCase().includes(q); });
+    list.innerHTML = '';
+    empty.style.display = matched.length ? 'none' : 'block';
+    matched.slice(0, 50).forEach(function(s, idx){
+      var el = document.createElement('div'); el.className = 'cmdk-item' + (idx===0?' active':'');
+      el.innerHTML = '<span class="cmdk-icon">' + (s.icon || '🔗') + '</span><span style="flex:1">' + s.name + '</span><span class="cmdk-meta">↵ 跳转</span>';
+      el.addEventListener('click', function(){ window.open(s.href, '_blank'); closeCmdk(); });
+      list.appendChild(el);
+    });
+  }
+  overlay.addEventListener('click', closeCmdk);
+  input.addEventListener('input', function(){ render(input.value); });
+  input.addEventListener('keydown', function(e){
+    var items = list.querySelectorAll('.cmdk-item');
+    var active = list.querySelector('.cmdk-item.active');
+    var idx = active ? Array.prototype.indexOf.call(items, active) : -1;
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) { items[idx]?.classList.remove('active'); items[(idx+1)%items.length].classList.add('active'); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (items.length) { items[idx]?.classList.remove('active'); items[(idx-1+items.length)%items.length].classList.add('active'); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (active) { active.click(); } }
+    else if (e.key === 'Escape') { closeCmdk(); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openCmdk(); }
+  });
+})();
 </script></body></html>

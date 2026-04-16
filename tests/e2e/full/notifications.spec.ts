@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 const notificationsFile = path.resolve(__dirname, '../../../data/notifications.json');
@@ -37,6 +37,8 @@ test('notifications center can save a channel and receive task failure events', 
 
   await page.goto('/admin/scheduled_tasks.php');
   await page.getByRole('button', { name: /新建任务/ }).click();
+  await page.locator('#task-modal').waitFor({ state: 'visible' });
+  await page.waitForTimeout(150);
   await page.locator('#fm-name').fill(taskName);
   await page.locator('#fm-schedule').fill('*/17 * * * *');
   await page.locator('#fm-command').fill('echo notify-start\nexit 2');

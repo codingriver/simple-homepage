@@ -37,6 +37,7 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             @set_time_limit(0);
             backup_create('manual');
+            audit_log('backup_create', ['trigger' => 'manual']);
             flash_set('success', '备份已创建');
             header('Location: backups.php'); exit;
         }
@@ -48,6 +49,7 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             @set_time_limit(0);
             if (backup_restore($file)) {
+                audit_log('backup_restore', ['file' => $file]);
                 flash_set('success', "已恢复备份：{$file}，恢复前的状态已自动备份");
             } else {
                 flash_set('error', '恢复失败，文件不存在或格式无效');
@@ -58,6 +60,7 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'delete') {
             $file = basename($_POST['filename'] ?? '');
             if (backup_delete($file)) {
+                audit_log('backup_delete', ['file' => $file]);
                 flash_set('success', '备份已删除');
             } else {
                 flash_set('error', '删除失败');

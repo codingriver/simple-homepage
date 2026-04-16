@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking } from '../../helpers/auth';
 
 test('setup validates input or stays sealed after installation', async ({ page }) => {

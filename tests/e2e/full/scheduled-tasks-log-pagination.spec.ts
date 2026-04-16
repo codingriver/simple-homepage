@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 const tasksRootPath = path.resolve(__dirname, '../../../data/tasks');

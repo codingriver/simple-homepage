@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
 
 test('groups support icon visibility matrix and modal close patterns', async ({ page }) => {

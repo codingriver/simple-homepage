@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, clickAdminNav, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
 
 test('admin dashboard shows stats and quick actions reflect created data', async ({ page }) => {

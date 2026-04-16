@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
 
 test('homepage supports asset tags favorites pinned filters and recent visits', async ({ page, context }) => {

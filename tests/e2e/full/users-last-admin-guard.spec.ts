@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 
 test('users keep at least one admin when applicable and renamed usernames replace old login identity', async ({ page }) => {

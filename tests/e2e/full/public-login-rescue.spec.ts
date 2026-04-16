@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 
 const usersPath = path.resolve(__dirname, '../../../data/users.json');
 const installedPath = path.resolve(__dirname, '../../../data/.installed');

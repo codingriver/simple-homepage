@@ -29,6 +29,7 @@ define('AUTH_LOG_MAX_LINES', 10);
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 /** 开发模式标记（容器 entrypoint 根据 NAV_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
 define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
+define('SESSIONS_FILE', DATA_DIR . '/sessions.json');
 
 /** Token 默认有效期（小时） */
 define('AUTH_TOKEN_EXPIRE_HOURS_DEFAULT', 8);
@@ -61,6 +62,8 @@ function auth_default_config(): array {
         'card_direction'      => 'col',
         'display_errors'      => '0',
         'proxy_params_mode'   => 'simple',
+        'theme'               => 'dark',
+        'custom_css'          => '',
         'webhook_enabled'     => '0',
         'webhook_type'        => 'custom',
         'webhook_url'         => '',
@@ -627,17 +630,20 @@ function auth_check_setup(bool $is_setup_page = false): void {
  */
 function auth_generate_token(string $username, string $role = 'user', bool $remember_me = false, array $extraClaims = []): string {
     $expire  = $remember_me ? auth_remember_expire() : auth_token_expire();
+    $jti     = bin2hex(random_bytes(16));
     $payload = array_merge([
         'username'    => $username,
         'role'        => $role,
         'iat'         => time(),
         'exp'         => time() + $expire,
         'remember_me' => $remember_me,
-        'jti'         => bin2hex(random_bytes(16)), // 唯一ID，防重放
+        'jti'         => $jti, // 唯一ID，防重放
     ], $extraClaims);
     $data = base64_encode(json_encode($payload));
     $sig  = hash_hmac('sha256', $data, auth_secret_key());
-    return $data . '.' . $sig;
+    $token = $data . '.' . $sig;
+    auth_session_register($jti, $username, $token);
+    return $token;
 }
 
 /**
@@ -656,7 +662,75 @@ function auth_verify_token(string $token) {
     $payload = json_decode(base64_decode($data), true);
     if (!$payload || !isset($payload['exp'])) return false;
     if (time() > $payload['exp']) return false;
+    if (!empty($payload['jti']) && !auth_session_exists((string)$payload['jti'])) {
+        return false;
+    }
     return $payload;
+}
+
+// ── 会话管理 ──
+
+function auth_session_register(string $jti, string $username, string $token): void {
+    $dir = dirname(SESSIONS_FILE);
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    $sessions = [];
+    if (file_exists(SESSIONS_FILE)) {
+        $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+    }
+    $sessions[$jti] = [
+        'username'    => $username,
+        'created_at'  => date('Y-m-d H:i:s'),
+        'ip'          => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? '',
+        'token_prefix'=> substr($token, 0, 16) . '...',
+    ];
+    // 清理过期条目（保留最多 500 条）
+    if (count($sessions) > 500) {
+        $sessions = array_slice($sessions, -500, null, true);
+    }
+    file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function auth_session_exists(string $jti): bool {
+    if (!file_exists(SESSIONS_FILE)) {
+        return true; // 向后兼容：尚未启用会话管理时不拒绝
+    }
+    $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+    return isset($sessions[$jti]);
+}
+
+function auth_session_revoke(string $jti): bool {
+    if (!file_exists(SESSIONS_FILE)) return false;
+    $fp = fopen(SESSIONS_FILE, 'c+');
+    if (!$fp) return false;
+    flock($fp, LOCK_EX);
+    $content = stream_get_contents($fp);
+    $sessions = json_decode($content, true) ?? [];
+    if (!isset($sessions[$jti])) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return false;
+    }
+    unset($sessions[$jti]);
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return true;
+}
+
+function auth_session_list(?string $filterUsername = null): array {
+    if (!file_exists(SESSIONS_FILE)) return [];
+    $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+    $result = [];
+    foreach ($sessions as $jti => $meta) {
+        if ($filterUsername !== null && ($meta['username'] ?? '') !== $filterUsername) {
+            continue;
+        }
+        $result[] = ['jti' => $jti] + $meta;
+    }
+    return array_reverse($result);
 }
 
 /**

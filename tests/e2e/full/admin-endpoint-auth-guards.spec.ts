@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 
 test('admin endpoints consistently reject guest and allow authenticated admin access', async ({ page }) => {

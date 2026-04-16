@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 
 test('session is required for admin pages after logout', async ({ page, context }) => {

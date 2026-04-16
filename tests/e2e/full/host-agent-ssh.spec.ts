@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 import { runDockerCommand, runDockerPhpInline } from '../../helpers/cli';
 
@@ -174,7 +174,8 @@ test('host management page covers ssh keys remote hosts file manager terminal an
       /Pattern attribute value \[a-zA-Z0-9_-\]\{2,32\} is not a valid regular expression/,
     ],
     ignoredFailedRequests: [
-      /POST .*\/admin\/host_api\.php :: net::ERR_ABORTED/,
+      /GET .*\/admin\/host_api\.php.* :: net::ERR_ABORTED/,
+      /POST .*\/admin\/host_api\.php.* :: net::ERR_ABORTED/,
     ],
   });
 
@@ -301,6 +302,7 @@ test('host management page covers ssh keys remote hosts file manager terminal an
   expect(authorizedResult.stdout).toContain('ssh-ed25519');
 
   await page.getByRole('button', { name: /打开终端/ }).click({ force: true });
+  await page.waitForTimeout(800);
   await page.locator('#terminal-input').fill(`echo terminal-${ts}`);
   await page.getByRole('button', { name: '发送' }).click({ force: true });
   await expect(page.locator('#terminal-output')).toContainText(`terminal-${ts}`, { timeout: 15000 });

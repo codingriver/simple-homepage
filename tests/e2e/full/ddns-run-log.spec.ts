@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 async function ddnsTaskIdByName(page: Parameters<typeof loginAsDevAdmin>[0], name: string) {

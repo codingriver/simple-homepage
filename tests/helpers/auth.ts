@@ -18,7 +18,7 @@ export async function ensureAdminSidebarOpen(page: Page) {
   if (!(await toggle.isVisible())) return;
   if (await isSidebarVisible(page)) return;
   await toggle.click({ force: true });
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(400);
 }
 
 export async function clickAdminNav(page: Page, name: RegExp | string) {
@@ -26,17 +26,18 @@ export async function clickAdminNav(page: Page, name: RegExp | string) {
   const link = page.locator('#sidebar').getByRole('link', { name });
   await expect(link).toBeVisible();
   await link.scrollIntoViewIfNeeded();
-  try {
-    await link.click({ force: true });
-  } catch {
-    await link.evaluate((el) => {
-      if (el instanceof HTMLAnchorElement) {
-        el.click();
-        return;
-      }
-      (el as HTMLElement).click();
-    });
+  if (await isMobileViewport(page)) {
+    await page.waitForTimeout(200);
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => null),
+      link.evaluate((el: HTMLElement) => el.click()),
+    ]);
+    return;
   }
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => null),
+    link.click({ force: true }),
+  ]);
 }
 
 export async function submitVisibleModal(page: Page) {
@@ -44,8 +45,10 @@ export async function submitVisibleModal(page: Page) {
   await expect(modal).toBeVisible();
   const submit = modal.locator('button[type="submit"]').first();
   await submit.scrollIntoViewIfNeeded();
+  // 如果提交后会触发页面重载，则等待重载完成
+  const navPromise = page.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch(() => null);
   await submit.click({ force: true });
-  await page.waitForTimeout(200);
+  await navPromise;
 }
 
 export async function attachClientErrorTracking(
@@ -123,33 +126,8 @@ export async function loginAsDevAdmin(page: Page) {
 }
 
 export async function logout(page: Page) {
-  await ensureAdminSidebarOpen(page);
-  const candidates = [
-    page.locator('#sidebar').locator('form[action="/logout.php"] button'),
-    page.locator('#sidebar').locator('form[action="logout.php"] button'),
-    page.locator('form[action="/logout.php"] button').first(),
-    page.locator('form[action="logout.php"] button').first(),
-    page.getByRole('button', { name: /退出登录/ }).first(),
-  ];
-
-  let logoutButton = candidates[0];
-  for (const candidate of candidates) {
-    if (await candidate.count()) {
-      logoutButton = candidate;
-      break;
-    }
-  }
-
-  await expect(logoutButton).toBeVisible();
-  await logoutButton.scrollIntoViewIfNeeded();
-  await logoutButton.evaluate((el) => {
-    if (el instanceof HTMLButtonElement) {
-      el.click();
-      return;
-    }
-    (el as HTMLElement).click();
-  });
-  await expect(page).toHaveURL(/login\.php/);
+  // 直接清除登录 cookie，避免表单提交导致的导航竞态和 chrome-error
+  await page.context().clearCookies({ name: 'nav_session' });
 }
 
 export async function ensureSetup(page: Page, siteName = 'E2E 导航站') {

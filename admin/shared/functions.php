@@ -11,6 +11,7 @@ define('SITES_FILE',   DATA_DIR . '/sites.json');
 define('BACKUPS_DIR',  DATA_DIR . '/backups');
 define('BG_DIR',       DATA_DIR . '/bg');
 define('MAX_BACKUPS',  20); // 最多保留备份数
+define('AUDIT_LOG_FILE', DATA_DIR . '/logs/audit.log');
 
 // ── 站点数据 ──
 
@@ -428,6 +429,9 @@ function debug_read_log(string $type, int $lines = 100): string {
         'request_timing' => DATA_DIR . '/logs/request_timing.log',
         'dns'            => DATA_DIR . '/logs/dns.log',
         'dns_python'     => DATA_DIR . '/logs/dns_python.log',
+        'notifications'  => DATA_DIR . '/logs/notifications.log',
+        'auth'           => DATA_DIR . '/logs/auth.log',
+        'audit'          => DATA_DIR . '/logs/audit.log',
     ];
     $path = $map[$type] ?? '';
     if (!$path)              return '（未知日志类型）';
@@ -473,6 +477,8 @@ function debug_read_log(string $type, int $lines = 100): string {
 define('HEALTH_CACHE_FILE', DATA_DIR . '/health_cache.json');
 define('HEALTH_CACHE_TTL',  300);  // 缓存有效期（秒），5 分钟
 define('HEALTH_TIMEOUT',    5);    // 单站点检测超时（秒）
+define('HEALTH_ALERT_FILE', DATA_DIR . '/health_alerts.json');
+define('API_TOKENS_FILE', DATA_DIR . '/api_tokens.json');
 
 /**
  * 读取健康状态缓存
@@ -677,6 +683,64 @@ function health_get_status(array $site, array $cache): string {
     return $cache[$url]['status'] ?? 'unknown';
 }
 
+/**
+ * 加载已告警的 down 站点记录（url => alerted_at）
+ */
+function health_alert_load(): array {
+    if (!file_exists(HEALTH_ALERT_FILE)) return [];
+    return json_decode(file_get_contents(HEALTH_ALERT_FILE), true) ?? [];
+}
+
+/**
+ * 保存已告警的 down 站点记录
+ */
+function health_alert_save(array $data): void {
+    file_put_contents(HEALTH_ALERT_FILE,
+        json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── API Token 管理
+// ══════════════════════════════════════════════════════════════
+
+function api_tokens_load(): array {
+    if (!file_exists(API_TOKENS_FILE)) return [];
+    return json_decode(file_get_contents(API_TOKENS_FILE), true) ?? [];
+}
+
+function api_tokens_save(array $tokens): void {
+    $dir = dirname(API_TOKENS_FILE);
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    file_put_contents(API_TOKENS_FILE, json_encode($tokens, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function api_token_generate(string $name): string {
+    $token = 'np_' . bin2hex(random_bytes(32));
+    $tokens = api_tokens_load();
+    $tokens[$token] = [
+        'name' => $name,
+        'created_at' => date('Y-m-d H:i:s'),
+    ];
+    api_tokens_save($tokens);
+    return $token;
+}
+
+function api_token_verify(string $token): bool {
+    if ($token === '') return false;
+    $tokens = api_tokens_load();
+    return isset($tokens[$token]);
+}
+
+function api_token_mask(string $token): string {
+    if (strlen($token) <= 12) return $token;
+    return substr($token, 0, 8) . '...' . substr($token, -4);
+}
+
+function api_token_get_name(string $token): string {
+    $tokens = api_tokens_load();
+    return $tokens[$token]['name'] ?? '';
+}
+
 // ══════════════════════════════════════════════════════════════
 // ── Webhook 通知
 // ══════════════════════════════════════════════════════════════
@@ -764,7 +828,7 @@ function webhook_send(string $event, string $username, string $ip, string $note 
     if (($cfg['webhook_enabled'] ?? '0') !== '1') return;
 
     // 检查事件是否在订阅列表内
-    $events = array_filter(array_map('trim', explode(',', $cfg['webhook_events'] ?? 'FAIL,IP_LOCKED')));
+    $events = array_filter(array_map('trim', explode(',', $cfg['webhook_events'] ?? 'FAIL,IP_LOCKED,HEALTH_DOWN')));
     if (!in_array($event, $events, true)) return;
 
     $url  = trim($cfg['webhook_url'] ?? '');
@@ -774,17 +838,18 @@ function webhook_send(string $event, string $username, string $ip, string $note 
     $site_name = $cfg['site_name'] ?? '导航中心';
     $time_str  = date('Y-m-d H:i:s');
     $emoji_map = [
-        'SUCCESS'   => '✅',
-        'FAIL'      => '❌',
-        'IP_LOCKED' => '🔒',
-        'LOGOUT'    => '🚪',
-        'SETUP'     => '🎉',
+        'SUCCESS'      => '✅',
+        'FAIL'         => '❌',
+        'IP_LOCKED'    => '🔒',
+        'LOGOUT'       => '🚪',
+        'SETUP'        => '🎉',
+        'HEALTH_DOWN'  => '💔',
     ];
     $emoji = $emoji_map[$event] ?? '📢';
-    $text  = "{$emoji} [{$site_name}] 登录事件\n"
+    $text  = "{$emoji} [{$site_name}] " . ($event === 'HEALTH_DOWN' ? '健康告警' : '登录事件') . "\n"
            . "事件：{$event}\n"
-           . "用户：{$username}\n"
-           . "IP：{$ip}\n"
+           . ($event === 'HEALTH_DOWN' ? '' : "用户：{$username}\n")
+           . ($event === 'HEALTH_DOWN' ? '' : "IP：{$ip}\n")
            . "时间：{$time_str}"
            . ($note ? "\n备注：{$note}" : '');
 
@@ -814,6 +879,18 @@ function webhook_send(string $event, string $username, string $ip, string $note 
     }
 
     webhook_http_post_json($url, $payload, 3);
+}
+
+/**
+ * 发送健康告警 Webhook 通知
+ * @param string $siteName 站点名称
+ * @param string $url      检测 URL
+ * @param int    $code     HTTP 状态码
+ * @param int    $ms       响应耗时
+ */
+function webhook_send_health_alert(string $siteName, string $url, int $code, int $ms): void {
+    $note = "站点：{$siteName}\nURL：{$url}\n状态码：" . ($code ?: '-') . "\n耗时：" . ($ms ?: '-') . "ms";
+    webhook_send('HEALTH_DOWN', 'health-check', '127.0.0.1', $note);
 }
 
 /**
@@ -1718,4 +1795,23 @@ function auth_reload_config(): void {
     // auth_get_config 使用 static $cfg，无法直接清除
     // 通过写入一个特殊 flag，让下次调用重新读文件
     // 实际在同一请求内无需刷新，下次请求自动读新值
+}
+
+/**
+ * 写入操作审计日志（JSON Lines）
+ */
+function audit_log(string $action, array $context = []): void {
+    $dir = dirname(AUDIT_LOG_FILE);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    $user = auth_get_current_user();
+    $line = json_encode([
+        'time'    => date('Y-m-d H:i:s'),
+        'user'    => $user['username'] ?? 'guest',
+        'ip'      => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'action'  => $action,
+        'context' => $context,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    file_put_contents(AUDIT_LOG_FILE, $line . "\n", FILE_APPEND | LOCK_EX);
 }

@@ -29,7 +29,9 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       if(!isset($users[$un]['created_at']))$users[$un]['created_at']=date('Y-m-d H:i:s');
       $users[$un]['role']=$role;
       $users[$un]['permissions']=auth_role_permissions_map()[$role] ?? [];
-      auth_write_users($users);flash_set('success',"用户 '{$un}' 已保存");
+      auth_write_users($users);
+      audit_log('user_save', ['username' => $un, 'role' => $role, 'orig' => $orig]);
+      flash_set('success',"用户 '{$un}' 已保存");
       header('Location: users.php');exit;
     }
   }
@@ -38,7 +40,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $adminCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === 'admin'));
     if($du===$current_admin['username'])$err='不能删除当前登录的自己';
     elseif((($users[$du]['role'] ?? 'user')==='admin') && $adminCount<=1)$err='至少保留一个管理员账户';
-    else{unset($users[$du]);auth_write_users($users);flash_set('success','已删除');header('Location: users.php');exit;}
+    else{unset($users[$du]);auth_write_users($users);audit_log('user_delete',['username'=>$du]);flash_set('success','已删除');header('Location: users.php');exit;}
   }
 }
 
@@ -89,6 +91,7 @@ $flash_msg=flash_get();
   <td><?=htmlspecialchars($u['updated_at']??'-')?></td>
   <td style="white-space:nowrap">
     <a href="users.php?action=edit&uname=<?=urlencode($un)?>" class="btn btn-sm btn-secondary">编辑</a>
+    <a href="sessions.php?username=<?=urlencode($un)?>" class="btn btn-sm btn-secondary">查看会话</a>
     <?php if($un!==$current_admin['username']):?>
     <form method="POST" style="display:inline" onsubmit="return confirm('确认删除用户？')"><?=csrf_field()?>
       <input type="hidden" name="act" value="delete">

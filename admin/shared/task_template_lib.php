@@ -41,7 +41,7 @@ function task_template_default_data(): array {
                 'icon' => '💾',
                 'category' => '备份',
                 'description' => '把 data 目录打包到备份目录。',
-                'command_template' => "STAMP=$(date '+%Y%m%d_%H%M%S')\nARCHIVE=\"/var/www/nav/data/backups/{{archive_prefix}}_${STAMP}.tar.gz\"\ntar -czf \"$ARCHIVE\" /var/www/nav/data\necho \"backup saved: $ARCHIVE\"\n",
+                'command_template' => "STAMP=\$(date '+%Y%m%d_%H%M%S')\nARCHIVE=\"/var/www/nav/data/backups/{{archive_prefix}}_\${STAMP}.tar.gz\"\ntar -czf \"\$ARCHIVE\" /var/www/nav/data\necho \"backup saved: \$ARCHIVE\"\n",
                 'default_schedule' => '30 3 * * *',
                 'variables' => [
                     ['key' => 'archive_prefix', 'label' => '备份前缀', 'type' => 'text', 'required' => true, 'placeholder' => 'nav_data'],

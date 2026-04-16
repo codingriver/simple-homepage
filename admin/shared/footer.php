@@ -16,4 +16,5 @@ if (window.innerWidth < 769) {
     });
 }
 </script>
+<script>window._csrf = <?= json_encode(csrf_token()) ?>;</script>
 </body></html>

@@ -65,12 +65,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $users_empty = empty(auth_load_users());
 $cfg         = auth_get_config();
 $site_name   = $cfg['site_name'] ?? '导航中心';
+$theme       = $cfg['theme'] ?? 'dark';
 ?>
-<!DOCTYPE html><html lang="zh-CN"><head>
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="<?= htmlspecialchars($theme) ?>">
+<head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录 — <?= htmlspecialchars($site_name) ?></title>
 <link rel="stylesheet" href="login.css">
 <script src="/gesture-guard.js" defer></script>
+<?php if (!empty($cfg['custom_css'] ?? '')): ?>
+<style id="nav-custom-css"><?= $cfg['custom_css'] ?></style>
+<?php endif; ?>
 </head><body>
 <div class="card">
   <div class="logo"><div class="icon">🧭</div>

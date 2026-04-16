@@ -121,6 +121,7 @@ function sites_handle_post(array &$sites_data): array {
         }
 
         save_sites($sites_data);
+        audit_log('site_save', ['gid' => $gid, 'sid' => $sid, 'name' => $name]);
         flash_set('success', '站点已保存');
         return ['ok' => true, 'msg' => '站点已保存'];
     }
@@ -136,8 +137,37 @@ function sites_handle_post(array &$sites_data): array {
         }
         unset($g);
         save_sites($sites_data);
+        audit_log('site_delete', ['gid' => $gid, 'sid' => $sid]);
         flash_set('success', '站点已删除');
         return ['ok' => true, 'msg' => '站点已删除'];
+    }
+
+    if ($action === 'reorder') {
+        $gid = $_POST['gid'] ?? '';
+        $orders = array_filter((array)($_POST['orders'] ?? []));
+        $orderMap = [];
+        foreach ($orders as $item) {
+            $parts = explode(':', $item);
+            if (count($parts) === 2) {
+                $orderMap[$parts[0]] = (int)$parts[1];
+            }
+        }
+        foreach ($sites_data['groups'] as &$g) {
+            if ($g['id'] !== $gid) continue;
+            foreach ($g['sites'] as &$s) {
+                if (isset($orderMap[$s['id']])) {
+                    $s['order'] = $orderMap[$s['id']];
+                }
+            }
+            unset($s);
+            usort($g['sites'], function($a,$b){ return ($a['order']??0)-($b['order']??0); });
+            break;
+        }
+        unset($g);
+        save_sites($sites_data);
+        audit_log('sites_reorder', ['gid' => $gid, 'count' => count($orders)]);
+        flash_set('success', '排序已保存');
+        return ['ok' => true, 'msg' => '排序已保存'];
     }
 
     return ['ok' => false, 'msg' => '未知操作'];
@@ -208,6 +238,20 @@ $groups_json = json_encode(
   <button class="btn btn-primary" onclick="openForm(null,null)">＋ 添加站点</button>
 </div>
 
+<!-- Bookmarklet -->
+<div class="card" style="padding:14px 16px;margin-bottom:14px">
+  <div style="font-size:13px;font-weight:700;margin-bottom:8px">🔖 浏览器 Bookmarklet</div>
+  <div style="font-size:12px;color:var(--tm);margin-bottom:10px">
+    将下方链接拖拽到浏览器书签栏，浏览任意网页时点击即可快速添加到导航站。
+  </div>
+  <a id="bookmarkletLink" href="javascript:void(0);"
+     style="display:inline-block;background:var(--bg);border:1px dashed var(--bd);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--ac);text-decoration:none">
+    ➕ 添加到导航站
+  </a>
+  <input type="text" id="bookmarkletCode" readonly
+         style="margin-top:8px;width:100%;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--tm);font-family:monospace">
+</div>
+
 <?php foreach ($groups as $grp): ?>
 <div class="card">
   <div class="card-title"><?= htmlspecialchars($grp['icon']??'') ?> <?= htmlspecialchars($grp['name']) ?>
@@ -216,8 +260,9 @@ $groups_json = json_encode(
   <?php if (empty($grp['sites'])): ?>
     <p style="color:var(--tm);font-size:13px">该分组暂无站点</p>
   <?php else: ?>
-  <div class="table-wrap"><table>
-    <tr><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>资产信息</th><th>状态</th><th>排序</th><th>操作</th></tr>
+  <div class="table-wrap"><table class="sites-table" data-gid="<?= htmlspecialchars($grp['id']) ?>">
+    <thead><tr><th style="width:40px"></th><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>资产信息</th><th>状态</th><th>排序</th><th>操作</th></tr></thead>
+    <tbody>
     <?php foreach ($grp['sites'] as $s):
       $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
       $h_entry = $health_cache[$h_url] ?? null;
@@ -233,7 +278,8 @@ $groups_json = json_encode(
               ? '<span style="color:#f87171" title="离线">● 离线</span>'
               : '<span style="color:var(--tm)">— </span>');
     ?>
-    <tr>
+    <tr data-sid="<?= htmlspecialchars($s['id']) ?>">
+      <td style="cursor:move;text-align:center;color:var(--tm)">☰</td>
       <td><code style="font-size:12px"><?= htmlspecialchars($s['id']) ?></code></td>
       <td><?= htmlspecialchars($s['icon']??'') ?> <?= htmlspecialchars($s['name']) ?></td>
       <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars($s['type']??'external') ?></span></td>
@@ -273,6 +319,7 @@ $groups_json = json_encode(
       </td>
     </tr>
     <?php endforeach; ?>
+    </tbody>
   </table></div>
   <?php endif; ?>
 </div>
@@ -427,6 +474,38 @@ function openForm(s, gid) {
 }
 function closeModal() { modal.style.display = 'none'; closeEmojiPicker(); }
 
+// ── Bookmarklet ──
+(function(){
+    var base = window.location.origin;
+    var code = "javascript:(function(){var t=document.title,u=location.href;window.open(base+'/admin/sites.php?bookmarklet=1&title='+encodeURIComponent(t)+'&url='+encodeURIComponent(u),'_blank');})();".replace(/base/g, "'"+base+"'");
+    var link = document.getElementById('bookmarkletLink');
+    var input = document.getElementById('bookmarkletCode');
+    if (link) link.href = code;
+    if (input) input.value = code;
+})();
+
+// ── URL 参数自动打开弹窗（Bookmarklet 回调）──
+(function(){
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('bookmarklet') === '1') {
+        var title = params.get('title') || '';
+        var url   = params.get('url')   || '';
+        var sid   = 'bm-' + Date.now();
+        openForm({
+            id: sid,
+            name: title,
+            url: url,
+            type: 'external',
+            icon: '🔖',
+            order: 0
+        }, null);
+        // 清理 URL 参数
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }
+})();
+
 // 防止鼠标滑动误关闭弹窗：只有点击背景层（非内容区）才关闭
 (function(){
     var _mdBg=false;
@@ -520,5 +599,41 @@ function closeEmojiPicker() {
 function outsideEmojiClick(e) {
     if (emojiPickerEl && !emojiPickerEl.contains(e.target)) closeEmojiPicker();
 }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script>
+(function(){
+    document.querySelectorAll('.sites-table tbody').forEach(function(tbody){
+        var table = tbody.closest('.sites-table');
+        var gid = table ? table.getAttribute('data-gid') : '';
+        if (!gid) return;
+        new Sortable(tbody, {
+            handle: 'td:first-child',
+            animation: 150,
+            onEnd: function() {
+                var rows = tbody.querySelectorAll('tr[data-sid]');
+                var orders = [];
+                rows.forEach(function(row, idx){
+                    orders.push(row.getAttribute('data-sid') + ':' + idx);
+                });
+                var form = new FormData();
+                form.append('action', 'reorder');
+                form.append('gid', gid);
+                orders.forEach(function(o){ form.append('orders[]', o); });
+                if (window._csrf) form.append('_csrf', window._csrf);
+                fetch('sites.php', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: form
+                }).then(function(r){ return r.json(); }).then(function(d){
+                    if (!d.ok) alert(d.msg || '排序保存失败');
+                }).catch(function(){
+                    alert('网络错误，排序未保存');
+                });
+            }
+        });
+    });
+})();
 </script>
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

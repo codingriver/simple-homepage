@@ -13,7 +13,13 @@ if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'XMLHttpRequest') {
     exit;
 }
 
-$user = auth_require_permission('ssh.view');
+$user = auth_get_current_user();
+if (!$user || !auth_user_has_permission('ssh.view', $user)) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => '无权限'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $action = trim((string)($_REQUEST['action'] ?? ''));
 
 function docker_api_send(array $result): void {
@@ -32,7 +38,9 @@ function docker_api_require_manage(array $user): void {
     if (auth_user_has_permission('ssh.manage', $user) || auth_user_has_permission('ssh.service.manage', $user)) {
         return;
     }
-    auth_require_permission('ssh.manage');
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => '无权限'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }
 
 if ($action === 'summary') {

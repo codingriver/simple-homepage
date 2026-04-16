@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, ensureSetup } from '../../helpers/auth';
 
 test('first install flow works when setup is available', async ({ page }) => {

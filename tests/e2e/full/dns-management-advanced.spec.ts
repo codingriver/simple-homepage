@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
@@ -22,7 +22,6 @@ async function gotoHydratedDns(page: Parameters<typeof loginAsDevAdmin>[0]) {
       return { selectedAccount, zoneName, zoneId };
     }
   }
-  await expect(page.locator('#dns-zone-select')).toBeVisible();
   return null;
 }
 

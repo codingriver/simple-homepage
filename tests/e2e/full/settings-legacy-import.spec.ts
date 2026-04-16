@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('settings import supports legacy groups-only payload and restores group list', async ({ page }, testInfo) => {

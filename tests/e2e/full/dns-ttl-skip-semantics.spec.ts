@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking } from '../../helpers/auth';
 
 test('public dns api preserves skip semantics and normalizes ttl floor', async ({ page }) => {

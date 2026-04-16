@@ -78,10 +78,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($apply['dns_config'])) {
                     $parts[] = 'DNS 账户已同步';
                 }
+                audit_log('settings_import', ['format' => 'full', 'groups' => $gc]);
                 flash_set('success', '导入成功（完整格式）：' . implode('，', $parts) . '；旧配置已自动备份');
             } elseif (isset($obj['groups']) && is_array($obj['groups'])) {
                 // 旧 sites-only 格式
                 file_put_contents(SITES_FILE, json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+                audit_log('settings_import', ['format' => 'legacy', 'groups' => count($obj['groups'])]);
                 flash_set('success', '导入成功（站点格式），共 ' . count($obj['groups']) . ' 个分组，旧配置已自动备份');
             } else {
                 flash_set('error', '文件结构无效：无法识别的配置格式，请使用导出配置或备份文件');
@@ -137,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             @set_time_limit(0);
             backup_create('manual');
+            audit_log('backup_create', ['trigger' => 'manual']);
             flash_set('success', '备份已创建');
             header('Location: settings.php'); exit;
         }
@@ -149,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             @set_time_limit(0);
             backup_create('auto_clear_scheduled_tasks');
             $result = scheduled_tasks_clear_manual_tasks();
+            audit_log('clear_scheduled_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
             flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条普通计划任务，DDNS 系统调度器已自动保留/重建');
             header('Location: settings.php'); exit;
         }
@@ -161,12 +165,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             @set_time_limit(0);
             backup_create('auto_clear_ddns_tasks');
             $result = ddns_clear_all_tasks();
+            audit_log('clear_ddns_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
             flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条 DDNS 任务，并同步清理日志与系统调度器');
             header('Location: settings.php'); exit;
         }
 
         if ($action === 'host_agent_install') {
             $result = host_agent_install();
+            audit_log('host_agent_install', ['ok' => $result['ok']]);
             flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 安装失败'));
             header('Location: settings.php#host-agent'); exit;
         }
@@ -184,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($do_reload) {
                 nginx_mark_applied();
             }
-
+            audit_log('nginx_apply', ['reload' => $do_reload, 'ok' => $result['ok']]);
             flash_set('success', $result['msg']);
             $redirect = ($action === 'nginx_apply_and_reload') ? 'settings.php' : 'settings.php#nginx';
             header('Location: ' . $redirect); exit;
@@ -195,6 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg = load_config();
             $cfg['proxy_params_mode'] = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
             save_config($cfg);
+            audit_log('save_proxy_params_mode', ['mode' => $cfg['proxy_params_mode']]);
             // 统计 proxy 站点数量，>0 时提示立即 reload
             $proxy_cnt_check = 0;
             foreach (load_sites()['groups'] ?? [] as $_g)
@@ -208,6 +215,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: settings.php#nginx'); exit;
         }
 
+        // ── 生成 API Token ──
+        if ($action === 'generate_api_token') {
+            $name = trim($_POST['token_name'] ?? '');
+            if ($name === '') {
+                flash_set('error', 'Token 名称不能为空');
+                header('Location: settings.php#api-tokens'); exit;
+            }
+            $token = api_token_generate($name);
+            audit_log('generate_api_token', ['name' => $name]);
+            // 使用 session 临时存储新 token（仅显示一次）
+            if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+            $_SESSION['_api_token_new'] = $token;
+            flash_set('success', 'API Token 已生成');
+            header('Location: settings.php#api-tokens'); exit;
+        }
+
+        // ── 删除 API Token ──
+        if ($action === 'delete_api_token') {
+            $tk = $_POST['token'] ?? '';
+            $tokens = api_tokens_load();
+            if (isset($tokens[$tk])) {
+                $name = $tokens[$tk]['name'] ?? '';
+                unset($tokens[$tk]);
+                api_tokens_save($tokens);
+                audit_log('delete_api_token', ['name' => $name]);
+                flash_set('success', 'API Token 已删除');
+            } else {
+                flash_set('error', 'Token 不存在');
+            }
+            header('Location: settings.php#api-tokens'); exit;
+        }
+
+        // ── 保存自动健康检测设置 ──
+        if ($action === 'save_health_auto') {
+            $cfg = load_config();
+            $cfg['health_auto_enabled'] = ($_POST['health_auto_enabled'] ?? '0') === '1' ? '1' : '0';
+            $cfg['health_auto_interval'] = max(1, min(1440, (int)($_POST['health_auto_interval'] ?? 5)));
+            save_config($cfg);
+            audit_log('save_health_auto', ['enabled' => $cfg['health_auto_enabled'], 'interval' => $cfg['health_auto_interval']]);
+            flash_set('success', '自动健康检测配置已保存');
+            header('Location: settings.php#health'); exit;
+        }
+
         // ── 保存 Webhook 设置 ──
         if ($action === 'save_webhook') {
             $cfg = load_config();
@@ -217,10 +267,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg['webhook_url']     = trim($_POST['webhook_url']     ?? '');
             $cfg['webhook_tg_chat'] = trim($_POST['webhook_tg_chat'] ?? '');
             $events_raw = $_POST['webhook_events'] ?? [];
-            $allowed_events = ['SUCCESS','FAIL','IP_LOCKED','LOGOUT','SETUP'];
+            $allowed_events = ['SUCCESS','FAIL','IP_LOCKED','LOGOUT','SETUP','HEALTH_DOWN'];
             $events = array_values(array_intersect((array)$events_raw, $allowed_events));
             $cfg['webhook_events']  = implode(',', $events ?: ['FAIL','IP_LOCKED']);
             save_config($cfg);
+            audit_log('save_webhook', ['type' => $cfg['webhook_type']]);
             flash_set('success', 'Webhook 设置已保存');
             header('Location: settings.php#webhook'); exit;
         }
@@ -228,6 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // ── 测试 Webhook ──
         if ($action === 'test_webhook') {
             $result = webhook_test();
+            audit_log('test_webhook', ['ok' => $result['ok']]);
             flash_set($result['ok'] ? 'success' : 'error', $result['msg']);
             header('Location: settings.php#webhook'); exit;
         }
@@ -287,6 +339,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash_set('error', '背景色格式无效'); header('Location: settings.php'); exit;
             }
             $cfg['bg_color'] = $bg_color;
+            $cfg['theme'] = in_array($_POST['theme'] ?? 'dark', ['dark','light','auto']) ? ($_POST['theme'] ?? 'dark') : 'dark';
+            $cfg['custom_css'] = trim((string)($_POST['custom_css'] ?? ''));
             if (!empty($_FILES['bg_image']['tmp_name'])) {
                 $file = $_FILES['bg_image'];
                 if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -331,6 +385,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $cfg['bg_image'] = '';
             }
             save_config($cfg);
+            audit_log('save_settings', ['site_name' => $cfg['site_name']]);
             flash_set('success', '设置已保存');
             header('Location: settings.php'); exit;
         }
@@ -395,6 +450,19 @@ $cfg = auth_get_config();
       </div>
       <div class="form-group"><label>自定义背景色（十六进制）</label>
         <input type="text" name="bg_color" value="<?= htmlspecialchars($cfg['bg_color']??'') ?>" placeholder="#1a1d27"></div>
+      <div class="form-group">
+        <label>主题模式</label>
+        <select name="theme" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">
+          <option value="dark" <?= ($cfg['theme']??'dark')==='dark'?'selected':'' ?>>🌙 深色模式</option>
+          <option value="light" <?= ($cfg['theme']??'dark')==='light'?'selected':'' ?>>☀️ 浅色模式</option>
+          <option value="auto" <?= ($cfg['theme']??'dark')==='auto'?'selected':'' ?>>🖥️ 跟随系统</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>自定义 CSS（注入首页 &lt;head&gt;）</label>
+        <textarea name="custom_css" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:13px;outline:none;font-family:monospace" placeholder="/* 例如：body { font-family: 'LXGW WenKai', sans-serif; } */"><?= htmlspecialchars($cfg['custom_css']??'') ?></textarea>
+        <div class="form-hint" style="margin-top:6px">支持任意 CSS，会以内联 &lt;style&gt; 方式注入到导航首页。错误语法可能导致页面样式异常，请谨慎使用。</div>
+      </div>
       <!-- ══ 卡片外观设置（合并容器）══ -->
       <div class="form-group" style="grid-column:1/-1">
         <label style="font-weight:700;font-size:13px;color:var(--ac2);margin-bottom:10px;display:block">🃏 卡片外观设置</label>
@@ -829,7 +897,7 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
         <div style="display:flex;gap:16px;flex-wrap:wrap">
           <?php
           $wevents = array_filter(array_map('trim', explode(',', $cfg['webhook_events']??'FAIL,IP_LOCKED')));
-          $event_labels = ['SUCCESS'=>'✅ 登录成功','FAIL'=>'❌ 登录失败','IP_LOCKED'=>'🔒 IP被锁定','LOGOUT'=>'🚪 退出登录','SETUP'=>'🎉 初始安装'];
+          $event_labels = ['SUCCESS'=>'✅ 登录成功','FAIL'=>'❌ 登录失败','IP_LOCKED'=>'🔒 IP被锁定','LOGOUT'=>'🚪 退出登录','SETUP'=>'🎉 初始安装','HEALTH_DOWN'=>'💔 健康告警'];
           foreach ($event_labels as $ev => $el): ?>
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
             <input type="checkbox" name="webhook_events[]" value="<?=$ev?>" <?= in_array($ev,$wevents)?'checked':'' ?>
@@ -857,11 +925,99 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   </form>
 </div>
 
+<!-- API Token 管理 -->
+<div class="card" id="api-tokens">
+  <div class="card-title">🔑 API Token 管理</div>
+  <?php $apiTokens = api_tokens_load(); ?>
+  <?php if (!empty($apiTokens)): ?>
+  <div style="margin-bottom:14px">
+    <table class="data-table" style="width:100%">
+      <thead><tr><th>名称</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody>
+      <?php foreach ($apiTokens as $tk => $meta): ?>
+      <tr>
+        <td><?= htmlspecialchars($meta['name'] ?? '') ?></td>
+        <td><code style="font-size:12px"><?= htmlspecialchars(api_token_mask($tk)) ?></code></td>
+        <td style="font-size:12px;color:var(--tm)"><?= htmlspecialchars($meta['created_at'] ?? '') ?></td>
+        <td>
+          <form method="POST" style="display:inline" onsubmit="return confirm('确认删除该 Token？')">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="delete_api_token">
+            <input type="hidden" name="token" value="<?= htmlspecialchars($tk) ?>">
+            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+          </form>
+        </td>
+      </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php else: ?>
+  <p style="color:var(--tm);font-size:13px;margin-bottom:14px">暂无 API Token，点击下方按钮生成。</p>
+  <?php endif; ?>
+
+  <form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="generate_api_token">
+    <input type="text" name="token_name" placeholder="Token 名称（如：HomeAssistant）" required
+           style="flex:1;min-width:200px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;color:var(--tx);font-size:14px">
+    <button type="submit" class="btn btn-primary">生成 Token</button>
+  </form>
+
+  <?php if (!empty($_SESSION['_api_token_new'])): ?>
+  <div class="alert alert-success" style="margin-top:14px">
+    <div style="font-weight:700;margin-bottom:6px">✅ Token 生成成功，请立即复制保存（仅显示一次）</div>
+    <code id="newApiToken" style="display:block;background:var(--bg);padding:8px 10px;border-radius:6px;font-size:12px;word-break:break-all"><?= htmlspecialchars($_SESSION['_api_token_new']) ?></code>
+    <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="copyApiToken()">复制</button>
+  </div>
+  <?php unset($_SESSION['_api_token_new']); ?>
+  <?php endif; ?>
+
+  <div class="form-hint" style="margin-top:10px">
+    使用方式：<code>GET /api/sites.php?token=&lt;TOKEN&gt;</code> 或 Header <code>Authorization: Bearer &lt;TOKEN&gt;</code>
+  </div>
+</div>
+<script>
+function copyApiToken() {
+    var el = document.getElementById('newApiToken');
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent).then(function(){
+        showToast('已复制到剪贴板', 'success');
+    }).catch(function(){
+        showToast('复制失败', 'error');
+    });
+}
+</script>
+
 <!-- 站点健康检测 -->
 <div class="card" id="health">
   <div class="card-title">💚 站点健康检测
     <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">检测所有站点可用性</span>
   </div>
+
+  <!-- 自动检测配置 -->
+  <form method="POST" style="margin-bottom:16px">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="save_health_auto">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" name="health_auto_enabled" value="1" <?= ($cfg['health_auto_enabled'] ?? '0') === '1' ? 'checked' : '' ?>
+               style="width:16px;height:16px;accent-color:var(--ac)">
+        <span style="font-size:13px">启用自动健康检测</span>
+      </label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:13px;color:var(--tx)">检测间隔</span>
+        <input type="number" name="health_auto_interval" value="<?= htmlspecialchars((string)($cfg['health_auto_interval'] ?? 5)) ?>"
+               min="1" max="1440" style="width:70px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;color:var(--tx);font-size:13px">
+        <span style="font-size:13px;color:var(--tm)">分钟</span>
+      </div>
+      <button type="submit" class="btn btn-sm btn-secondary">保存自动检测配置</button>
+    </div>
+    <div class="form-hint" style="margin-top:8px">
+      建议通过计划任务调用 <code>php cli/health_check_cron.php</code> 执行自动检测；检测到站点异常时会通过 Webhook 发送告警（需在 Webhook 设置中订阅「健康告警」）。
+    </div>
+  </form>
+
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
     <button class="btn btn-primary" onclick="runHealthCheck()">🔍 立即检测所有站点</button>
     <button class="btn btn-secondary" onclick="loadHealthStatus()">🔄 刷新缓存状态</button>

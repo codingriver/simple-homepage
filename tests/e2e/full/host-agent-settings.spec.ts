@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { expect, test } from '@playwright/test';
+import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { runDockerCommand, runDockerPhpInline } from '../../helpers/cli';
 

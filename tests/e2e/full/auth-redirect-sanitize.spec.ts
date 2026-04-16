@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking } from '../../helpers/auth';
 
 test('login redirect sanitizes external absolute urls down to safe local path', async ({ page }) => {

@@ -14,7 +14,13 @@ if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'XMLHttpRequest') {
     exit;
 }
 
-$user = auth_require_permission('ssh.files');
+$user = auth_get_current_user();
+if (!$user || !auth_user_has_permission('ssh.files', $user)) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => '无权限'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $action = trim((string)($_REQUEST['action'] ?? ''));
 
 function file_api_send(array $result): void {

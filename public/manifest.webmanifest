@@ -1,0 +1,11 @@
+{
+  "name": "Simple Homepage",
+  "short_name": "导航",
+  "start_url": "/index.php",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "icons": [
+    { "src": "/favicon.ico", "sizes": "48x48", "type": "image/x-icon" }
+  ]
+}

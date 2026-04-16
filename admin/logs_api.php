@@ -25,6 +25,7 @@ $logSources = [
     'dns_python'     => ['path' => DATA_DIR . '/logs/dns_python.log', 'category' => 'app', 'label' => 'DNS Python 日志',   'clearable' => true],
     'notifications'  => ['path' => DATA_DIR . '/logs/notifications.log', 'category' => 'app', 'label' => '通知日志',         'clearable' => true],
     'auth'           => ['path' => DATA_DIR . '/logs/auth.log',       'category' => 'app', 'label' => '登录认证日志',      'clearable' => true],
+    'audit'          => ['path' => DATA_DIR . '/logs/audit.log',      'category' => 'app', 'label' => '操作审计日志',      'clearable' => true],
 ];
 
 function log_count_lines(string $path): int {

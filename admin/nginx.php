@@ -67,11 +67,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
       }
       nginx_mark_applied();
+      audit_log('nginx_save_reload', ['target' => $ptarget]);
       flash_set('success', '保存并 Reload 成功');
       header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
       exit;
     }
 
+    audit_log('nginx_save', ['target' => $ptarget]);
     flash_set('success', '配置已保存：' . ($targets[$ptarget]['label'] ?? $ptarget));
     header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
     exit;

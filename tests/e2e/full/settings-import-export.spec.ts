@@ -1,5 +1,5 @@
 import path from 'path';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('admin can export config and validate import guardrails', async ({ page }) => {
