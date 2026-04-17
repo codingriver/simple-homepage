@@ -1073,3 +1073,35 @@ function host_agent_install(): array {
         'msg' => 'host-agent 容器已创建，但健康检查未通过：' . $probe_error,
     ];
 }
+
+function host_agent_stop(): array {
+    $status = host_agent_status_summary();
+    if (!$status['docker_accessible']) {
+        return ['ok' => false, 'msg' => $status['message'] . ' ' . $status['docker_mount_hint']];
+    }
+    if (!$status['installed']) {
+        return ['ok' => false, 'msg' => 'host-agent 尚未安装，无需停止。'];
+    }
+    $container_name = (string)$status['container_name'];
+    $stop = host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/stop?t=30');
+    if ($stop['ok'] || $stop['status'] === 304) {
+        return ['ok' => true, 'msg' => 'host-agent 已停止。'];
+    }
+    return ['ok' => false, 'msg' => '停止 host-agent 失败：' . ($stop['error'] ?: $stop['body'])];
+}
+
+function host_agent_restart(): array {
+    $status = host_agent_status_summary();
+    if (!$status['docker_accessible']) {
+        return ['ok' => false, 'msg' => $status['message'] . ' ' . $status['docker_mount_hint']];
+    }
+    if (!$status['installed']) {
+        return ['ok' => false, 'msg' => 'host-agent 尚未安装，无法重启。请先执行一键安装。'];
+    }
+    $container_name = (string)$status['container_name'];
+    $restart = host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/restart?t=30');
+    if ($restart['ok']) {
+        return ['ok' => true, 'msg' => 'host-agent 已重启。'];
+    }
+    return ['ok' => false, 'msg' => '重启 host-agent 失败：' . ($restart['error'] ?: $restart['body'])];
+}
