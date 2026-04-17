@@ -315,6 +315,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $cfg['ssh_terminal_persist'] = ($_POST['ssh_terminal_persist'] ?? '1') === '1' ? '1' : '0';
             $cfg['ssh_terminal_idle_minutes'] = max(5, min(10080, (int)($_POST['ssh_terminal_idle_minutes'] ?? 120)));
+            $taskTimeoutRaw = trim($_POST['task_execution_timeout'] ?? '');
+            $cfg['task_execution_timeout'] = ($taskTimeoutRaw === '') ? 7200 : max(0, (int)$taskTimeoutRaw);
             // ── 卡片尺寸（支持自定义）──
             $card_size_raw = $_POST['card_size'] ?? '140';
             if ($card_size_raw === 'custom' || !empty($_POST['card_size_custom'])) {
@@ -426,6 +428,9 @@ $cfg = auth_get_config();
       <div class="form-group"><label>SSH Web 终端空闲保留时长（分钟）</label>
         <input type="number" name="ssh_terminal_idle_minutes" value="<?= (int)($cfg['ssh_terminal_idle_minutes']??120) ?>" min="5" max="10080">
         <div class="form-hint" style="margin-top:6px">超过该时长且无人继续查看或输入时，会自动清理终端会话。</div></div>
+      <div class="form-group"><label>计划任务执行超时（秒）</label>
+        <input type="number" name="task_execution_timeout" value="<?= (int)($cfg['task_execution_timeout']??7200) ?>" min="0">
+        <div class="form-hint" style="margin-top:6px"><code>0</code> 表示不限制时长。超过此时长的任务将被强制终止（先 SIGTERM，10 秒后未退出则 SIGKILL），防止死循环占用系统资源。默认 <code>7200</code> 秒（2 小时）。</div></div>
       <div class="form-group">
         <label>Cookie Secure 模式</label>
         <select name="cookie_secure" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">

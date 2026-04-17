@@ -8,6 +8,9 @@ define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
 define('DDNS_DISPATCHER_TASK_PREFIX', 'sys_ddns_dispatcher_');
 define('TASK_DISPATCH_LOG_FILE', DATA_DIR . '/logs/task_dispatch.log');
+define('SCHEDULED_TASKS_LOCK_FILE', DATA_DIR . '/.scheduled_tasks.lock');
+define('TASK_EXECUTION_TIMEOUT', 7200);
+define('TASK_EXECUTION_KILL_AFTER', 10);
 
 define('PHP_BIN_CANDIDATES', [
     '/usr/local/bin/php',
@@ -438,6 +441,91 @@ function task_read_file_segment(string $path, int $offset): string {
     return str_replace("\r\n", "\n", str_replace("\r", "\n", $chunk));
 }
 
+function scheduled_tasks_lock_exclusive(): ?resource {
+    $dir = dirname(SCHEDULED_TASKS_LOCK_FILE);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $handle = @fopen(SCHEDULED_TASKS_LOCK_FILE, 'c');
+    if (!is_resource($handle)) {
+        return null;
+    }
+    if (!@flock($handle, LOCK_EX)) {
+        @fclose($handle);
+        return null;
+    }
+    return $handle;
+}
+
+function scheduled_tasks_unlock(?resource $handle): void {
+    if (!is_resource($handle)) {
+        return;
+    }
+    @flock($handle, LOCK_UN);
+    @fclose($handle);
+}
+
+function task_proc_send_signal(int $pid, int $signal): bool {
+    if ($pid <= 0) {
+        return false;
+    }
+    if (function_exists('posix_kill')) {
+        return @posix_kill($pid, $signal);
+    }
+    $out = [];
+    $code = 0;
+    @exec('kill -' . (int)$signal . ' ' . (int)$pid . ' >/dev/null 2>&1', $out, $code);
+    return $code === 0;
+}
+
+function task_lock_write_pid($handle, int $pid): void {
+    if (!is_resource($handle)) {
+        return;
+    }
+    @rewind($handle);
+    @ftruncate($handle, 0);
+    @fwrite($handle, (string)$pid);
+    @fflush($handle);
+}
+
+function task_lock_read_pid(string $path): ?int {
+    if (!file_exists($path)) {
+        return null;
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        return null;
+    }
+    $pid = (int)trim($raw);
+    return $pid > 0 ? $pid : null;
+}
+
+function task_pid_exists(?int $pid): bool {
+    if ($pid === null || $pid <= 0) {
+        return false;
+    }
+    if (function_exists('posix_kill')) {
+        return @posix_kill($pid, 0);
+    }
+    $out = [];
+    $code = 0;
+    @exec('kill -0 ' . (int)$pid . ' >/dev/null 2>&1', $out, $code);
+    return $code === 0;
+}
+function task_execution_timeout(): int {
+    $cfg = load_config();
+    $val = $cfg['task_execution_timeout'] ?? TASK_EXECUTION_TIMEOUT;
+    if ($val === '' || $val === null) {
+        return TASK_EXECUTION_TIMEOUT;
+    }
+    $n = (int)$val;
+    if ($n < 0) {
+        return TASK_EXECUTION_TIMEOUT;
+    }
+    return $n;
+}
+
+
 function task_try_acquire_execution_lock(string $id): array {
     task_ensure_log_dir();
     $path = task_lock_file($id);
@@ -448,6 +536,15 @@ function task_try_acquire_execution_lock(string $id): array {
                 @fclose($handle);
                 return ['ok' => false, 'msg' => '任务已在运行中', 'handle' => null];
             }
+            $pid = task_lock_read_pid($path);
+            if ($pid !== null && !task_pid_exists($pid) && $attempt === 0) {
+                @flock($handle, LOCK_UN);
+                @fclose($handle);
+                task_try_cleanup_stale_lock($id);
+                clearstatcache(true, $path);
+                continue;
+            }
+            task_lock_write_pid($handle, (int)getmypid());
             return ['ok' => true, 'msg' => 'ok', 'handle' => $handle];
         }
         if ($attempt === 0 && file_exists($path)) {
@@ -596,6 +693,7 @@ function cron_store_run_result(string $id, int $code, string $output): void {
     if ($id === '') {
         return;
     }
+    $lock = scheduled_tasks_lock_exclusive();
     $data = load_scheduled_tasks();
     foreach ($data['tasks'] ?? [] as $idx => $task) {
         if (($task['id'] ?? '') !== $id) {
@@ -610,9 +708,11 @@ function cron_store_run_result(string $id, int $code, string $output): void {
         $data['tasks'][$idx]['last_run'] = date('Y-m-d H:i:s');
         $data['tasks'][$idx]['last_code'] = $code;
         $data['tasks'][$idx]['last_output'] = mb_substr($output, 0, 8000);
-        save_scheduled_tasks($data);
+        save_scheduled_tasks($data, $lock);
+        scheduled_tasks_unlock($lock);
         return;
     }
+    scheduled_tasks_unlock($lock);
 }
 
 function task_spawn_background_command(string $command, ?string $cwd = null, array $env = []): array {
@@ -755,7 +855,6 @@ function scheduled_tasks_clear_manual_tasks(): array {
 }
 
 function scheduled_task_upsert(array $input): array {
-    $data = load_scheduled_tasks();
     $id = trim((string)($input['id'] ?? ''));
     $name = trim((string)($input['name'] ?? ''));
     $schedule = trim((string)($input['schedule'] ?? ''));
@@ -777,6 +876,9 @@ function scheduled_task_upsert(array $input): array {
     if (!cron_validate_schedule($schedule)) {
         return ['ok' => false, 'msg' => 'Cron 表达式无效（需至少 5 个时间字段）'];
     }
+
+    $lock = scheduled_tasks_lock_exclusive();
+    $data = load_scheduled_tasks();
 
     $taskRow = null;
     $found = false;
@@ -826,7 +928,8 @@ function scheduled_task_upsert(array $input): array {
         return ['ok' => false, 'msg' => (string)($scriptSync['msg'] ?? '任务脚本写入失败')];
     }
 
-    save_scheduled_tasks($data);
+    save_scheduled_tasks($data, $lock);
+    scheduled_tasks_unlock($lock);
     $regen = cron_regenerate();
     if (!($regen['ok'] ?? false)) {
         return ['ok' => false, 'msg' => (string)($regen['msg'] ?? 'crontab 更新失败')];
@@ -888,7 +991,7 @@ function task_sort_for_display(array $tasks): array {
     return array_values(array_map(static fn(array $row) => $row['task'], $indexed));
 }
 
-function save_scheduled_tasks(array $data): void {
+function save_scheduled_tasks(array $data, ?resource $externalLock = null): void {
     if (!isset($data['tasks']) || !is_array($data['tasks'])) {
         $data['tasks'] = [];
     }
@@ -900,14 +1003,26 @@ function save_scheduled_tasks(array $data): void {
     if (!is_string($json)) {
         $json = "{\"tasks\":[]}\n";
     }
+    $ownLock = false;
+    $lock = $externalLock;
+    if (!is_resource($lock)) {
+        $lock = scheduled_tasks_lock_exclusive();
+        $ownLock = true;
+    }
     $tmp = @tempnam($dir, 'scheduled_tasks_');
     if ($tmp !== false) {
         if (@file_put_contents($tmp, $json, LOCK_EX) !== false && @rename($tmp, SCHEDULED_TASKS_FILE)) {
+            if ($ownLock) {
+                scheduled_tasks_unlock($lock);
+            }
             return;
         }
         @unlink($tmp);
     }
     file_put_contents(SCHEDULED_TASKS_FILE, $json, LOCK_EX);
+    if ($ownLock) {
+        scheduled_tasks_unlock($lock);
+    }
 }
 
 function cron_is_system_task(array $task): bool {
@@ -1267,7 +1382,13 @@ function cron_execute_task(string $id): array {
     $proc = proc_open($cmdline, $desc, $pipes, $workdir, $env);
     $code   = -1;
     $status_exit_code = null;
+    $timedOut = false;
     if (is_resource($proc)) {
+        $startAt = time();
+        $sigtermAt = null;
+        $timeoutLimit = task_execution_timeout();
+        $killAfter = defined('TASK_EXECUTION_KILL_AFTER') ? (int)TASK_EXECUTION_KILL_AFTER : 10;
+        $timeoutHint = '如需调整，请前往「系统设置」修改"计划任务执行超时"。';
         while (true) {
             $status = proc_get_status($proc);
             if (!($status['running'] ?? false)) {
@@ -1277,10 +1398,41 @@ function cron_execute_task(string $id): array {
                 }
                 break;
             }
+            $elapsed = time() - $startAt;
+            if ($timeoutLimit > 0 && $elapsed >= $timeoutLimit) {
+                if ($sigtermAt === null) {
+                    $pid = (int)($status['pid'] ?? 0);
+                    if ($pid > 0) {
+                        task_proc_send_signal($pid, 15);
+                    }
+                    $sigtermAt = time();
+                    @file_put_contents($log_file, "\n[" . date('Y-m-d H:i:s') . "] [TIMEOUT] 任务运行超过 {$timeoutLimit} 秒，已发送 SIGTERM。{$timeoutHint}\n", FILE_APPEND | LOCK_EX);
+                } elseif ((time() - $sigtermAt) >= $killAfter) {
+                    $pid = (int)($status['pid'] ?? 0);
+                    if ($pid > 0) {
+                        task_proc_send_signal($pid, 9);
+                    }
+                    $timedOut = true;
+                    @file_put_contents($log_file, "\n[" . date('Y-m-d H:i:s') . "] [TIMEOUT] 任务未在 {$killAfter} 秒内退出，已强制 SIGKILL。{$timeoutHint}\n", FILE_APPEND | LOCK_EX);
+                    for ($i = 0; $i < 50; $i++) {
+                        $status = proc_get_status($proc);
+                        if (!($status['running'] ?? false)) {
+                            $status_exit_code = 124;
+                            break 2;
+                        }
+                        usleep(100000);
+                    }
+                    $status_exit_code = 124;
+                    break;
+                }
+            }
             usleep(200000);
         }
         $close_code = proc_close($proc);
         $code = ($close_code === -1 && $status_exit_code !== null) ? $status_exit_code : $close_code;
+        if ($timedOut && $code !== 124) {
+            $code = 124;
+        }
     } else {
         @file_put_contents($log_file, "[无法启动 bash 进程]\n", FILE_APPEND | LOCK_EX);
     }

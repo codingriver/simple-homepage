@@ -151,7 +151,13 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 - 在 `admin/` 等使用 `auth_request` 的 location 中，PHP 子 location 必须加 `auth_request off;`，由 PHP 自行鉴权。
 
-更多细节参见 `docs/PHP开发注意事项.md`。
+### 9. 计划任务健壮性
+
+- 任务执行必须设置**硬超时**（默认 3600s），防止用户脚本死循环挂起 PHP 进程
+- 任务结果写入 `scheduled_tasks.json` 时必须使用 **`flock(LOCK_EX)`** 保护，防止并发结果覆盖
+- 任务执行锁文件必须记录 PID，并支持**僵尸锁自动清理**（OOM/SIGKILL 场景）
+
+更多细节参见 `docs/技术架构与实现原理.md` 和 `docs/PHP开发注意事项.md`。
 
 ## 测试策略
 
