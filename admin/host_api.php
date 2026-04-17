@@ -59,6 +59,15 @@ function host_api_require_any_permission(array $permissions): void {
     exit;
 }
 
+function host_api_maybe_async(string $taskAction, array $taskPayload, string $auditAction, array $auditData): void {
+    if (($_POST['async'] ?? '') !== '1') {
+        return;
+    }
+    $result = host_agent_task_submit($taskAction, $taskPayload);
+    ssh_manager_audit($auditAction, array_merge($auditData, ['async' => true, 'ok' => (bool)($result['ok'] ?? false)]));
+    host_api_send($result);
+}
+
 function host_api_request_list(string $key): array {
     $raw = $_POST[$key] ?? $_GET[$key] ?? [];
     if (is_array($raw)) {
@@ -1253,6 +1262,204 @@ if ($action === 'terminal_close') {
     auth_require_permission('ssh.terminal');
     csrf_check();
     $result = host_agent_terminal_close(trim((string)($_POST['id'] ?? '')));
+    host_api_send($result);
+}
+
+// Package Manager APIs
+if ($action === 'package_manager') {
+    auth_require_permission('ssh.view');
+    $result = host_agent_package_manager();
+    host_api_send($result);
+}
+
+if ($action === 'package_search') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    $result = host_agent_package_search(trim((string)($_POST['keyword'] ?? '')), (int)($_POST['limit'] ?? 50));
+    ssh_manager_audit('package_search', ['keyword' => (string)($_POST['keyword'] ?? ''), 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'package_info') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    $result = host_agent_package_info(trim((string)($_POST['pkg'] ?? '')));
+    host_api_send($result);
+}
+
+if ($action === 'package_install') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    csrf_check();
+    $pkg = trim((string)($_POST['pkg'] ?? ''));
+    host_api_maybe_async('package_install', ['pkg' => $pkg], 'package_install', ['pkg' => $pkg]);
+    $result = host_agent_package_install($pkg);
+    ssh_manager_audit('package_install', ['pkg' => $pkg, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'package_remove') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    csrf_check();
+    $pkg = trim((string)($_POST['pkg'] ?? ''));
+    $purge = !empty($_POST['purge']);
+    host_api_maybe_async('package_remove', ['pkg' => $pkg, 'purge' => $purge], 'package_remove', ['pkg' => $pkg, 'purge' => $purge]);
+    $result = host_agent_package_remove($pkg, $purge);
+    ssh_manager_audit('package_remove', ['pkg' => $pkg, 'purge' => $purge, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'package_update') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    csrf_check();
+    $pkg = trim((string)($_POST['pkg'] ?? ''));
+    $result = host_agent_package_update($pkg);
+    ssh_manager_audit('package_update', ['pkg' => $pkg, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'package_upgrade_all') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    csrf_check();
+    host_api_maybe_async('package_upgrade_all', [], 'package_upgrade_all', []);
+    $result = host_agent_package_upgrade_all();
+    ssh_manager_audit('package_upgrade_all', ['ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'package_list') {
+    host_api_require_any_permission(['ssh.package.manage', 'ssh.manage']);
+    $result = host_agent_package_list((int)($_POST['limit'] ?? 500));
+    host_api_send($result);
+}
+
+// Configuration Manager APIs
+if ($action === 'config_definitions') {
+    auth_require_permission('ssh.view');
+    $result = host_agent_config_definitions();
+    host_api_send($result);
+}
+
+if ($action === 'config_read') {
+    host_api_require_any_permission(['ssh.config.manage', 'ssh.manage']);
+    $result = host_agent_config_read(trim((string)($_POST['config_id'] ?? '')));
+    host_api_send($result);
+}
+
+if ($action === 'config_apply') {
+    host_api_require_any_permission(['ssh.config.manage', 'ssh.manage']);
+    csrf_check();
+    $configId = trim((string)($_POST['config_id'] ?? ''));
+    $content = (string)($_POST['content'] ?? '');
+    $validateOnly = !empty($_POST['validate_only']);
+    host_api_maybe_async('config_apply', ['config_id' => $configId, 'content' => $content, 'validate_only' => $validateOnly], 'config_apply', ['config_id' => $configId]);
+    $result = host_agent_config_apply($configId, $content, $validateOnly);
+    ssh_manager_audit('config_apply', ['config_id' => $configId, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'config_validate') {
+    host_api_require_any_permission(['ssh.config.manage', 'ssh.manage']);
+    csrf_check();
+    $configId = trim((string)($_POST['config_id'] ?? ''));
+    $result = host_agent_config_validate($configId, (string)($_POST['content'] ?? ''));
+    host_api_send($result);
+}
+
+if ($action === 'config_history') {
+    host_api_require_any_permission(['ssh.config.manage', 'ssh.manage']);
+    $configId = trim((string)($_POST['config_id'] ?? ''));
+    $result = host_agent_config_history($configId, (int)($_POST['limit'] ?? 10));
+    host_api_send($result);
+}
+
+if ($action === 'config_restore') {
+    host_api_require_any_permission(['ssh.config.manage', 'ssh.manage']);
+    csrf_check();
+    $configId = trim((string)($_POST['config_id'] ?? ''));
+    $backupPath = trim((string)($_POST['backup_path'] ?? ''));
+    host_api_maybe_async('config_restore', ['config_id' => $configId, 'backup_path' => $backupPath], 'config_restore', ['config_id' => $configId, 'backup_path' => $backupPath]);
+    $result = host_agent_config_restore($configId, $backupPath);
+    ssh_manager_audit('config_restore', ['config_id' => $configId, 'backup_path' => $backupPath, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+// Declarative Manifest APIs
+if ($action === 'manifest_apply') {
+    host_api_require_any_permission(['ssh.manage']);
+    csrf_check();
+    $manifest = json_decode((string)($_POST['manifest_json'] ?? ''), true);
+    if (!is_array($manifest)) {
+        host_api_send(['ok' => false, 'msg' => 'Manifest JSON 无效']);
+    }
+    host_api_maybe_async('manifest_apply', ['manifest' => $manifest], 'manifest_apply', []);
+    $result = host_agent_manifest_apply($manifest);
+    ssh_manager_audit('manifest_apply', ['ok' => (bool)($result['ok'] ?? false), 'changed' => (bool)($result['changed'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'manifest_dry_run') {
+    host_api_require_any_permission(['ssh.manage']);
+    csrf_check();
+    $manifest = json_decode((string)($_POST['manifest_json'] ?? ''), true);
+    if (!is_array($manifest)) {
+        host_api_send(['ok' => false, 'msg' => 'Manifest JSON 无效']);
+    }
+    host_api_maybe_async('manifest_dry_run', ['manifest' => $manifest], 'manifest_dry_run', []);
+    $result = host_agent_manifest_dry_run($manifest);
+    host_api_send($result);
+}
+
+if ($action === 'manifest_validate') {
+    host_api_require_any_permission(['ssh.manage']);
+    csrf_check();
+    $manifest = json_decode((string)($_POST['manifest_json'] ?? ''), true);
+    if (!is_array($manifest)) {
+        host_api_send(['ok' => false, 'msg' => 'Manifest JSON 无效']);
+    }
+    $result = host_agent_manifest_validate($manifest);
+    host_api_send($result);
+}
+
+// Async Task APIs
+if ($action === 'task_submit') {
+    host_api_require_any_permission(['ssh.manage']);
+    csrf_check();
+    $taskAction = trim((string)($_POST['task_action'] ?? ''));
+    $taskPayload = json_decode((string)($_POST['task_payload'] ?? '{}'), true);
+    if (!is_array($taskPayload)) {
+        $taskPayload = [];
+    }
+    if ($taskAction === '') {
+        host_api_send(['ok' => false, 'msg' => '缺少 task_action']);
+    }
+    $result = host_agent_task_submit($taskAction, $taskPayload);
+    ssh_manager_audit('task_submit', ['task_action' => $taskAction, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'task_status') {
+    host_api_require_any_permission(['ssh.view', 'ssh.manage']);
+    $taskId = trim((string)($_GET['task_id'] ?? $_POST['task_id'] ?? ''));
+    if ($taskId === '') {
+        host_api_send(['ok' => false, 'msg' => '缺少 task_id']);
+    }
+    $result = host_agent_task_status($taskId);
+    host_api_send($result);
+}
+
+if ($action === 'task_cancel') {
+    host_api_require_any_permission(['ssh.manage']);
+    csrf_check();
+    $taskId = trim((string)($_POST['task_id'] ?? ''));
+    if ($taskId === '') {
+        host_api_send(['ok' => false, 'msg' => '缺少 task_id']);
+    }
+    $result = host_agent_task_cancel($taskId);
+    ssh_manager_audit('task_cancel', ['task_id' => $taskId, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'task_list') {
+    host_api_require_any_permission(['ssh.view', 'ssh.manage']);
+    $result = host_agent_task_list();
     host_api_send($result);
 }
 

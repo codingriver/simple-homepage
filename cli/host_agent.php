@@ -204,6 +204,11 @@ function host_agent_proc_run(array $command, ?string $stdin = null, array $env =
 }
 
 function host_agent_host_shell(string $script, ?string $stdin = null): array {
+    $mode = (string)(getenv('HOST_AGENT_MODE') ?: 'host');
+    if ($mode === 'simulate') {
+        // simulate 模式下不进入宿主机 namespace，直接在容器内执行
+        return host_agent_proc_run(['sh', '-lc', $script], $stdin);
+    }
     return host_agent_proc_run(
         ['/usr/bin/nsenter', '-t', '1', '-m', '-u', '-i', '-n', '-p', 'sh', '-lc', $script],
         $stdin
@@ -993,6 +998,1031 @@ function host_agent_generic_service_uninstall(string $root, string $mode, string
         'output' => trim($result['stdout'] . "\n" . $result['stderr']),
         'status' => host_agent_generic_service_status($root, $mode, $service),
     ];
+}
+
+// ============================================================
+// 通用包管理器抽象层 (Phase 1: Package Manager Abstraction)
+// ============================================================
+
+function host_agent_cache_key(string ...$parts): string {
+    return 'host_agent_cache:' . implode(':', $parts);
+}
+
+function host_agent_cache_get(string $key): ?array {
+    $cache = &$GLOBALS['HOST_AGENT_CACHE'];
+    if (!is_array($cache) || !isset($cache[$key])) {
+        return null;
+    }
+    $entry = $cache[$key];
+    if (!is_array($entry) || ($entry['expires'] ?? 0) < time()) {
+        unset($cache[$key]);
+        return null;
+    }
+    return $entry['value'] ?? null;
+}
+
+function host_agent_cache_set(string $key, array $value, int $ttl = 60): void {
+    $cache = &$GLOBALS['HOST_AGENT_CACHE'];
+    if (!is_array($cache)) {
+        $cache = [];
+    }
+    $cache[$key] = ['expires' => time() + $ttl, 'value' => $value];
+}
+
+function host_agent_cache_delete(string $pattern): void {
+    $cache = &$GLOBALS['HOST_AGENT_CACHE'];
+    if (!is_array($cache)) {
+        return;
+    }
+    foreach ($cache as $key => $entry) {
+        if (strpos($key, $pattern) !== false) {
+            unset($cache[$key]);
+        }
+    }
+}
+
+function host_agent_detect_package_manager(): string {
+    $cached = host_agent_cache_get('pkg_manager');
+    if ($cached !== null && isset($cached['manager'])) {
+        return $cached['manager'];
+    }
+
+    $detectors = [
+        'brew' => 'command -v brew',
+        'port' => 'command -v port',
+        'apt'  => 'command -v apt-get',
+        'dnf'  => 'command -v dnf',
+        'yum'  => 'command -v yum',
+        'apk'  => 'command -v apk',
+        'pacman' => 'command -v pacman',
+        'zypper' => 'command -v zypper',
+        'emerge' => 'command -v emerge',
+    ];
+    $script = '';
+    foreach ($detectors as $name => $cmd) {
+        $script .= "if {$cmd} >/dev/null 2>&1; then echo {$name}; exit 0; fi; ";
+    }
+    $script .= 'echo unknown';
+    $result = host_agent_host_shell($script);
+    $detected = trim((string)($result['stdout'] ?? ''));
+    $manager = $detected !== '' ? $detected : 'unknown';
+    host_agent_cache_set('pkg_manager', ['manager' => $manager], 300);
+    return $manager;
+}
+
+function host_agent_detect_service_manager(): string {
+    $script = 'if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then echo systemd; '
+        . 'elif command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then echo openrc; '
+        . 'elif command -v sv >/dev/null 2>&1 && [ -d /var/service ] || [ -d /etc/service ]; then echo runit; '
+        . 'elif command -v service >/dev/null 2>&1; then echo sysvinit; '
+        . 'elif command -v launchctl >/dev/null 2>&1; then echo launchd; '
+        . 'else echo unknown; fi';
+    $result = host_agent_host_shell($script);
+    $detected = trim((string)($result['stdout'] ?? ''));
+    return $detected !== '' ? $detected : 'unknown';
+}
+
+function host_agent_package_manager_commands(string $manager): array {
+    $commands = [
+        'apt' => [
+            'install'        => 'DEBIAN_FRONTEND=noninteractive apt-get install -y {pkg}',
+            'remove'         => 'DEBIAN_FRONTEND=noninteractive apt-get remove -y {pkg}',
+            'purge'          => 'DEBIAN_FRONTEND=noninteractive apt-get purge -y {pkg}',
+            'autoremove'     => 'DEBIAN_FRONTEND=noninteractive apt-get autoremove -y',
+            'update'         => 'DEBIAN_FRONTEND=noninteractive apt-get update',
+            'upgrade'        => 'DEBIAN_FRONTEND=noninteractive apt-get upgrade -y',
+            'list_installed' => "dpkg-query -W -f='${Package}\\t${Version}\\n'",
+            'search'         => 'apt-cache search {keyword}',
+            'info'           => 'apt-cache show {pkg}',
+            'is_installed'   => 'dpkg-query -W -f=\'${Status}\' {pkg} 2>/dev/null | grep -q "install ok installed"',
+        ],
+        'dnf' => [
+            'install'        => 'dnf install -y {pkg}',
+            'remove'         => 'dnf remove -y {pkg}',
+            'autoremove'     => 'dnf autoremove -y',
+            'update'         => 'dnf check-update',
+            'upgrade'        => 'dnf upgrade -y',
+            'list_installed' => "dnf list installed --qf '%{name}\\t%{version}\\n'",
+            'search'         => 'dnf search {keyword}',
+            'info'           => 'dnf info {pkg}',
+            'is_installed'   => 'rpm -q {pkg} >/dev/null 2>&1',
+        ],
+        'yum' => [
+            'install'        => 'yum install -y {pkg}',
+            'remove'         => 'yum remove -y {pkg}',
+            'autoremove'     => 'yum autoremove -y',
+            'update'         => 'yum check-update',
+            'upgrade'        => 'yum update -y',
+            'list_installed' => "yum list installed --qf '%{name}\\t%{version}\\n'",
+            'search'         => 'yum search {keyword}',
+            'info'           => 'yum info {pkg}',
+            'is_installed'   => 'rpm -q {pkg} >/dev/null 2>&1',
+        ],
+        'apk' => [
+            'install'        => 'apk add --no-cache {pkg}',
+            'remove'         => 'apk del {pkg}',
+            'autoremove'     => 'apk del --purge $(apk info --depends {pkg} 2>/dev/null | grep -v ^$ | sed "s/^/  /" | xargs) 2>/dev/null || true',
+            'update'         => 'apk update',
+            'upgrade'        => 'apk upgrade',
+            'list_installed' => "apk info -v | sed 's/\(.*\)-\([0-9]\)/\\1\\t\\2/'",
+            'search'         => 'apk search {keyword}',
+            'info'           => 'apk info -a {pkg}',
+            'is_installed'   => 'apk info -e {pkg} >/dev/null 2>&1',
+        ],
+        'pacman' => [
+            'install'        => 'pacman -S --noconfirm {pkg}',
+            'remove'         => 'pacman -R --noconfirm {pkg}',
+            'autoremove'     => 'pacman -Rs --noconfirm $(pacman -Qdtq) 2>/dev/null || true',
+            'update'         => 'pacman -Sy',
+            'upgrade'        => 'pacman -Syu --noconfirm',
+            'list_installed' => "pacman -Q | awk '{print $1\"\\t\"$2}'",
+            'search'         => 'pacman -Ss {keyword}',
+            'info'           => 'pacman -Si {pkg}',
+            'is_installed'   => 'pacman -Q {pkg} >/dev/null 2>&1',
+        ],
+        'zypper' => [
+            'install'        => 'zypper --non-interactive install {pkg}',
+            'remove'         => 'zypper --non-interactive remove {pkg}',
+            'autoremove'     => 'zypper --non-interactive remove --clean-deps $(zypper packages --unneeded | tail -n +3 | cut -d\| -f3 | tr -d " " | sort -u | grep -v "^Name$") 2>/dev/null || true',
+            'update'         => 'zypper refresh',
+            'upgrade'        => 'zypper --non-interactive update',
+            'list_installed' => "zypper search --installed-only --details | awk 'NR>2 {print $3\"\\t\"$5}'",
+            'search'         => 'zypper search {keyword}',
+            'info'           => 'zypper info {pkg}',
+            'is_installed'   => 'rpm -q {pkg} >/dev/null 2>&1',
+        ],
+        'emerge' => [
+            'install'        => 'emerge -q {pkg}',
+            'remove'         => 'emerge --depclean {pkg}',
+            'autoremove'     => 'emerge --depclean',
+            'update'         => 'emerge --sync',
+            'upgrade'        => 'emerge -uDNq @world',
+            'list_installed' => "qlist -Iv | awk '{print $1\"\\t\"$2}'",
+            'search'         => 'emerge -s {keyword}',
+            'info'           => 'equery meta {pkg}',
+            'is_installed'   => 'qlist -I {pkg} >/dev/null 2>&1',
+        ],
+        'brew' => [
+            'install'        => 'brew install {pkg}',
+            'remove'         => 'brew uninstall {pkg}',
+            'autoremove'     => 'brew autoremove',
+            'update'         => 'brew update',
+            'upgrade'        => 'brew upgrade {pkg}',
+            'list_installed' => "brew list --versions | awk '{print $1\"\\t\"$2}'",
+            'search'         => 'brew search {keyword}',
+            'info'           => 'brew info {pkg}',
+            'is_installed'   => 'brew list {pkg} >/dev/null 2>&1',
+        ],
+        'port' => [
+            'install'        => 'sudo port install {pkg}',
+            'remove'         => 'sudo port uninstall {pkg}',
+            'autoremove'     => 'sudo port reclaim',
+            'update'         => 'sudo port selfupdate',
+            'upgrade'        => 'sudo port upgrade outdated',
+            'list_installed' => "port installed | awk 'NR>1 {print $1\"\\t\"$2}'",
+            'search'         => 'port search {keyword}',
+            'info'           => 'port info {pkg}',
+            'is_installed'   => 'port installed {pkg} | grep -q "active"',
+        ],
+    ];
+    return $commands[$manager] ?? [];
+}
+
+function host_agent_service_manager_commands(string $manager): array {
+    $commands = [
+        'systemd' => [
+            'start'   => 'systemctl start {service}.service',
+            'stop'    => 'systemctl stop {service}.service',
+            'restart' => 'systemctl restart {service}.service',
+            'reload'  => 'systemctl reload {service}.service',
+            'enable'  => 'systemctl enable {service}.service',
+            'disable' => 'systemctl disable {service}.service',
+            'status'  => 'systemctl is-active {service}.service',
+            'is_enabled' => 'systemctl is-enabled {service}.service',
+        ],
+        'openrc' => [
+            'start'   => 'rc-service {service} start',
+            'stop'    => 'rc-service {service} stop',
+            'restart' => 'rc-service {service} restart',
+            'reload'  => 'rc-service {service} reload',
+            'enable'  => 'rc-update add {service} default',
+            'disable' => 'rc-update del {service} default',
+            'status'  => 'rc-service {service} status',
+            'is_enabled' => 'rc-update show | grep -q "^{service}"',
+        ],
+        'runit' => [
+            'start'   => 'sv up {service}',
+            'stop'    => 'sv down {service}',
+            'restart' => 'sv restart {service}',
+            'reload'  => 'sv hup {service}',
+            'enable'  => 'ln -s /etc/sv/{service} /var/service/ 2>/dev/null || ln -s /etc/sv/{service} /etc/service/ 2>/dev/null || true',
+            'disable' => 'rm /var/service/{service} 2>/dev/null || rm /etc/service/{service} 2>/dev/null || true',
+            'status'  => 'sv status {service}',
+            'is_enabled' => '[ -L /var/service/{service} ] || [ -L /etc/service/{service} ]',
+        ],
+        'sysvinit' => [
+            'start'   => 'service {service} start',
+            'stop'    => 'service {service} stop',
+            'restart' => 'service {service} restart',
+            'reload'  => 'service {service} reload',
+            'enable'  => 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d {service} defaults; elif command -v chkconfig >/dev/null 2>&1; then chkconfig {service} on; else exit 1; fi',
+            'disable' => 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d {service} disable; elif command -v chkconfig >/dev/null 2>&1; then chkconfig {service} off; else exit 1; fi',
+            'status'  => 'service {service} status',
+            'is_enabled' => 'true', // sysvinit 没有统一方式检测
+        ],
+        'launchd' => [
+            'start'   => 'launchctl start {service}',
+            'stop'    => 'launchctl stop {service}',
+            'restart' => 'launchctl stop {service} 2>/dev/null; sleep 1; launchctl start {service}',
+            'reload'  => 'launchctl stop {service} 2>/dev/null; sleep 1; launchctl start {service}',
+            'enable'  => 'launchctl load -w /Library/LaunchDaemons/{service}.plist 2>/dev/null || launchctl load -w /Library/LaunchAgents/{service}.plist 2>/dev/null || true',
+            'disable' => 'launchctl unload -w /Library/LaunchDaemons/{service}.plist 2>/dev/null || launchctl unload -w /Library/LaunchAgents/{service}.plist 2>/dev/null || true',
+            'status'  => 'launchctl list | grep -q "^{service}"',
+            'is_enabled' => 'launchctl list | grep -q "^{service}"',
+        ],
+    ];
+    return $commands[$manager] ?? [];
+}
+
+function host_agent_package_alias_map(): array {
+    return [
+        'nginx' => ['apt' => 'nginx', 'dnf' => 'nginx', 'yum' => 'nginx', 'apk' => 'nginx', 'pacman' => 'nginx', 'zypper' => 'nginx', 'brew' => 'nginx'],
+        'apache' => ['apt' => 'apache2', 'dnf' => 'httpd', 'yum' => 'httpd', 'apk' => 'apache2', 'pacman' => 'apache', 'zypper' => 'apache2', 'brew' => 'httpd'],
+        'mysql' => ['apt' => 'mysql-server', 'dnf' => 'mysql-server', 'yum' => 'mysql-server', 'apk' => 'mysql', 'pacman' => 'mariadb', 'zypper' => 'mysql', 'brew' => 'mysql'],
+        'mariadb' => ['apt' => 'mariadb-server', 'dnf' => 'mariadb-server', 'yum' => 'mariadb-server', 'apk' => 'mariadb', 'pacman' => 'mariadb', 'zypper' => 'mariadb', 'brew' => 'mariadb'],
+        'postgresql' => ['apt' => 'postgresql', 'dnf' => 'postgresql-server', 'yum' => 'postgresql-server', 'apk' => 'postgresql', 'pacman' => 'postgresql', 'zypper' => 'postgresql', 'brew' => 'postgresql'],
+        'redis' => ['apt' => 'redis-server', 'dnf' => 'redis', 'yum' => 'redis', 'apk' => 'redis', 'pacman' => 'redis', 'zypper' => 'redis', 'brew' => 'redis'],
+        'memcached' => ['apt' => 'memcached', 'dnf' => 'memcached', 'yum' => 'memcached', 'apk' => 'memcached', 'pacman' => 'memcached', 'zypper' => 'memcached', 'brew' => 'memcached'],
+        'mongodb' => ['apt' => 'mongodb-org', 'dnf' => 'mongodb-org', 'yum' => 'mongodb-org', 'apk' => 'mongodb', 'pacman' => 'mongodb', 'zypper' => 'mongodb', 'brew' => 'mongodb-community'],
+        'nodejs' => ['apt' => 'nodejs', 'dnf' => 'nodejs', 'yum' => 'nodejs', 'apk' => 'nodejs', 'pacman' => 'nodejs', 'zypper' => 'nodejs', 'brew' => 'node'],
+        'npm' => ['apt' => 'npm', 'dnf' => 'npm', 'yum' => 'npm', 'apk' => 'npm', 'pacman' => 'npm', 'zypper' => 'npm', 'brew' => 'npm'],
+        'python3' => ['apt' => 'python3', 'dnf' => 'python3', 'yum' => 'python3', 'apk' => 'python3', 'pacman' => 'python', 'zypper' => 'python3', 'brew' => 'python@3.11'],
+        'php' => ['apt' => 'php', 'dnf' => 'php', 'yum' => 'php', 'apk' => 'php82', 'pacman' => 'php', 'zypper' => 'php', 'brew' => 'php'],
+        'php-fpm' => ['apt' => 'php-fpm', 'dnf' => 'php-fpm', 'yum' => 'php-fpm', 'apk' => 'php82-fpm', 'pacman' => 'php-fpm', 'zypper' => 'php-fpm', 'brew' => 'php'],
+        'docker' => ['apt' => 'docker.io', 'dnf' => 'docker', 'yum' => 'docker', 'apk' => 'docker', 'pacman' => 'docker', 'zypper' => 'docker', 'brew' => 'docker'],
+        'git' => ['apt' => 'git', 'dnf' => 'git', 'yum' => 'git', 'apk' => 'git', 'pacman' => 'git', 'zypper' => 'git', 'brew' => 'git'],
+        'vim' => ['apt' => 'vim', 'dnf' => 'vim', 'yum' => 'vim', 'apk' => 'vim', 'pacman' => 'vim', 'zypper' => 'vim', 'brew' => 'vim'],
+        'htop' => ['apt' => 'htop', 'dnf' => 'htop', 'yum' => 'htop', 'apk' => 'htop', 'pacman' => 'htop', 'zypper' => 'htop', 'brew' => 'htop'],
+        'curl' => ['apt' => 'curl', 'dnf' => 'curl', 'yum' => 'curl', 'apk' => 'curl', 'pacman' => 'curl', 'zypper' => 'curl', 'brew' => 'curl'],
+        'wget' => ['apt' => 'wget', 'dnf' => 'wget', 'yum' => 'wget', 'apk' => 'wget', 'pacman' => 'wget', 'zypper' => 'wget', 'brew' => 'wget'],
+        'openssh-server' => ['apt' => 'openssh-server', 'dnf' => 'openssh-server', 'yum' => 'openssh-server', 'apk' => 'openssh-server', 'pacman' => 'openssh', 'zypper' => 'openssh', 'brew' => null],
+        'sudo' => ['apt' => 'sudo', 'dnf' => 'sudo', 'yum' => 'sudo', 'apk' => 'sudo', 'pacman' => 'sudo', 'zypper' => 'sudo', 'brew' => null],
+        'ufw' => ['apt' => 'ufw', 'dnf' => 'firewalld', 'yum' => 'firewalld', 'apk' => 'ufw', 'pacman' => 'ufw', 'zypper' => 'firewalld', 'brew' => null],
+        'fail2ban' => ['apt' => 'fail2ban', 'dnf' => 'fail2ban', 'yum' => 'fail2ban', 'apk' => 'fail2ban', 'pacman' => 'fail2ban', 'zypper' => 'fail2ban', 'brew' => null],
+        'samba' => ['apt' => 'samba', 'dnf' => 'samba', 'yum' => 'samba', 'apk' => 'samba', 'pacman' => 'samba', 'zypper' => 'samba', 'brew' => 'samba'],
+        'nfs' => ['apt' => 'nfs-kernel-server', 'dnf' => 'nfs-utils', 'yum' => 'nfs-utils', 'apk' => 'nfs-utils', 'pacman' => 'nfs-utils', 'zypper' => 'nfs-client', 'brew' => null],
+        'rsync' => ['apt' => 'rsync', 'dnf' => 'rsync', 'yum' => 'rsync', 'apk' => 'rsync', 'pacman' => 'rsync', 'zypper' => 'rsync', 'brew' => 'rsync'],
+    ];
+}
+
+function host_agent_resolve_package_name(string $alias, string $manager): ?string {
+    $map = host_agent_package_alias_map();
+    $alias = strtolower(trim($alias));
+    if (isset($map[$alias][$manager])) {
+        return $map[$alias][$manager];
+    }
+    return $alias; // 没有映射时直接使用原名
+}
+
+function host_agent_package_is_installed(string $manager, string $pkg): bool {
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['is_installed'])) {
+        return false;
+    }
+    $cmd = str_replace('{pkg}', escapeshellarg($pkg), $cmds['is_installed']);
+    $result = host_agent_host_shell($cmd . ' 2>/dev/null; echo "_EXIT_:$?"');
+    $stdout = (string)($result['stdout'] ?? '');
+    if (preg_match('/_EXIT_:(\d+)/', $stdout, $m)) {
+        return (int)$m[1] === 0;
+    }
+    return $result['ok'] && $result['code'] === 0;
+}
+
+function host_agent_package_install(string $manager, string $pkg): array {
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['install'])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持安装操作'];
+    }
+    if (host_agent_package_is_installed($manager, $pkg)) {
+        return ['ok' => true, 'msg' => $pkg . ' 已安装'];
+    }
+    $cmd = str_replace('{pkg}', escapeshellarg($pkg), $cmds['install']);
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    if ($ok) {
+        host_agent_cache_delete(host_agent_cache_key('pkg_list', $manager));
+    }
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? ($pkg . ' 安装成功') : ($pkg . ' 安装失败'),
+        'output' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'code' => $result['code'],
+    ];
+}
+
+function host_agent_package_remove(string $manager, string $pkg, bool $purge = false): array {
+    $cmds = host_agent_package_manager_commands($manager);
+    $action = ($purge && !empty($cmds['purge'])) ? 'purge' : 'remove';
+    if (empty($cmds[$action])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持卸载操作'];
+    }
+    $cmd = str_replace('{pkg}', escapeshellarg($pkg), $cmds[$action]);
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    if ($ok) {
+        host_agent_cache_delete(host_agent_cache_key('pkg_list', $manager));
+    }
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? ($pkg . ' 卸载成功') : ($pkg . ' 卸载失败'),
+        'output' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'code' => $result['code'],
+    ];
+}
+
+function host_agent_package_update(string $manager, string $pkg): array {
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['upgrade'])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持更新操作'];
+    }
+    $cmd = str_replace('{pkg}', escapeshellarg($pkg), $cmds['upgrade']);
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    if ($ok) {
+        host_agent_cache_delete(host_agent_cache_key('pkg_list', $manager));
+    }
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? ($pkg . ' 更新成功') : ($pkg . ' 更新失败或无更新'),
+        'output' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'code' => $result['code'],
+    ];
+}
+
+function host_agent_package_upgrade_all(string $manager): array {
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['upgrade'])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持全系统升级'];
+    }
+    $result = host_agent_host_shell($cmds['upgrade'] . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    if ($ok) {
+        host_agent_cache_delete(host_agent_cache_key('pkg_list', $manager));
+    }
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? '系统升级完成' : '系统升级失败',
+        'output' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'code' => $result['code'],
+    ];
+}
+
+function host_agent_package_search(string $manager, string $keyword, int $limit = 50): array {
+    $cacheKey = host_agent_cache_key('pkg_search', $manager, md5($keyword . ':' . $limit));
+    $cached = host_agent_cache_get($cacheKey);
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['search'])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持搜索'];
+    }
+    $cmd = str_replace('{keyword}', escapeshellarg($keyword), $cmds['search']);
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    if (!$result['ok'] || $result['code'] !== 0) {
+        return ['ok' => false, 'msg' => '搜索失败', 'output' => trim($result['stdout'] . "\n" . $result['stderr'])];
+    }
+    $lines = preg_split('/\r?\n/', trim($result['stdout'])) ?: [];
+    $packages = [];
+    foreach (array_slice($lines, 0, $limit) as $line) {
+        $line = trim($line);
+        if ($line === '') continue;
+        if ($manager === 'apt') {
+            if (preg_match('/^(\S+)\s*-\s*(.+)$/', $line, $m)) {
+                $packages[] = ['name' => trim($m[1]), 'description' => trim($m[2]), 'version' => ''];
+            }
+        } elseif ($manager === 'dnf' || $manager === 'yum') {
+            if (preg_match('/^(\S+)\.(\S+)\s*:\s*(.+)$/', $line, $m)) {
+                $packages[] = ['name' => trim($m[1]), 'description' => trim($m[3]), 'version' => ''];
+            }
+        } elseif ($manager === 'apk') {
+            if (preg_match('/^(\S+)-(\S+)\s*-\s*(.+)$/', $line, $m)) {
+                $packages[] = ['name' => trim($m[1]), 'description' => trim($m[3]), 'version' => trim($m[2])];
+            } else {
+                $packages[] = ['name' => $line, 'description' => '', 'version' => ''];
+            }
+        } elseif ($manager === 'pacman') {
+            if (preg_match('/^(\S+)\/(\S+)\s+(.+)$/', $line, $m)) {
+                $packages[] = ['name' => trim($m[2]), 'description' => trim($m[3]), 'version' => ''];
+            }
+        } elseif ($manager === 'zypper') {
+            if (preg_match('/^(\S+)\s+\|\s+(\S+)\s+\|\s+(\S+)/', $line, $m)) {
+                $packages[] = ['name' => trim($m[2]), 'description' => '', 'version' => trim($m[3])];
+            }
+        } elseif ($manager === 'brew') {
+            if (preg_match('/^(\S+)\s*\(([^)]+)\)\s*(.*)$/', $line, $m)) {
+                $packages[] = ['name' => trim($m[1]), 'description' => trim($m[3]), 'version' => trim($m[2])];
+            } else {
+                $packages[] = ['name' => $line, 'description' => '', 'version' => ''];
+            }
+        } else {
+            $packages[] = ['name' => $line, 'description' => '', 'version' => ''];
+        }
+    }
+    $result = ['ok' => true, 'packages' => $packages, 'manager' => $manager];
+    host_agent_cache_set($cacheKey, $result, 30);
+    return $result;
+}
+
+function host_agent_package_list(string $manager, int $limit = 500): array {
+    $cacheKey = host_agent_cache_key('pkg_list', $manager);
+    $cached = host_agent_cache_get($cacheKey);
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $cmds = host_agent_package_manager_commands($manager);
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['list_installed'])) {
+        return ['ok' => false, 'msg' => '包管理器 ' . $manager . ' 不支持列出已安装包'];
+    }
+    $result = host_agent_host_shell($cmds['list_installed'] . ' 2>&1');
+    if (!$result['ok'] || $result['code'] !== 0) {
+        return ['ok' => false, 'msg' => '获取已安装包列表失败', 'output' => trim($result['stdout'] . "\n" . $result['stderr'])];
+    }
+    $lines = preg_split('/\r?\n/', trim($result['stdout'])) ?: [];
+    $packages = [];
+    foreach (array_slice($lines, 0, $limit) as $line) {
+        $line = trim($line);
+        if ($line === '') continue;
+        $parts = preg_split('/\s+/', $line, 2);
+        $packages[] = [
+            'name' => $parts[0] ?? $line,
+            'version' => $parts[1] ?? '',
+        ];
+    }
+    $result = ['ok' => true, 'packages' => $packages, 'manager' => $manager, 'total' => count($lines)];
+    host_agent_cache_set($cacheKey, $result, 60);
+    return $result;
+}
+
+function host_agent_package_info(string $manager, string $pkg): array {
+    $cmds = host_agent_package_manager_commands($manager);
+    if (empty($cmds['info'])) {
+        return [
+            'ok' => false,
+            'msg' => '包管理器 ' . $manager . ' 不支持查看包信息',
+            'info' => '',
+            'installed' => false,
+            'manager' => $manager,
+        ];
+    }
+    $cmd = str_replace('{pkg}', escapeshellarg($pkg), $cmds['info']);
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    return [
+        'ok' => $result['ok'] && $result['code'] === 0,
+        'info' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'installed' => host_agent_package_is_installed($manager, $pkg),
+        'manager' => $manager,
+    ];
+}
+
+// ============================================================
+// Configuration Manager (Phase 2)
+// ============================================================
+
+function host_agent_config_definitions(): array {
+    return [
+        'nginx' => [
+            'label' => 'Nginx',
+            'icon' => '🌐',
+            'paths' => [
+                'apt' => '/etc/nginx/nginx.conf',
+                'dnf' => '/etc/nginx/nginx.conf',
+                'yum' => '/etc/nginx/nginx.conf',
+                'apk' => '/etc/nginx/nginx.conf',
+                'pacman' => '/etc/nginx/nginx.conf',
+                'zypper' => '/etc/nginx/nginx.conf',
+                'brew' => '/opt/homebrew/etc/nginx/nginx.conf',
+            ],
+            'format' => 'nginx',
+            'validate_cmd' => 'nginx -t',
+            'reload_cmd' => 'nginx -s reload',
+            'sections' => ['main', 'events', 'http', 'server', 'location'],
+        ],
+        'php-fpm' => [
+            'label' => 'PHP-FPM',
+            'icon' => '🐘',
+            'paths' => [
+                'apt' => '/etc/php/8.2/fpm/php.ini',
+                'dnf' => '/etc/php.ini',
+                'yum' => '/etc/php.ini',
+                'apk' => '/etc/php82/php.ini',
+                'pacman' => '/etc/php/php.ini',
+                'zypper' => '/etc/php8/php.ini',
+                'brew' => '/opt/homebrew/etc/php/8.2/php.ini',
+            ],
+            'format' => 'ini',
+            'validate_cmd' => '',
+            'reload_cmd' => '',
+            'sections' => [],
+        ],
+        'redis' => [
+            'label' => 'Redis',
+            'icon' => '🔴',
+            'paths' => [
+                'apt' => '/etc/redis/redis.conf',
+                'dnf' => '/etc/redis.conf',
+                'yum' => '/etc/redis.conf',
+                'apk' => '/etc/redis.conf',
+                'pacman' => '/etc/redis/redis.conf',
+                'zypper' => '/etc/redis/redis.conf',
+                'brew' => '/opt/homebrew/etc/redis.conf',
+            ],
+            'format' => 'redis_conf',
+            'validate_cmd' => '',
+            'reload_cmd' => '',
+            'sections' => [],
+        ],
+        'ssh' => [
+            'label' => 'SSH',
+            'icon' => '🔐',
+            'paths' => [
+                'default' => '/etc/ssh/sshd_config',
+            ],
+            'format' => 'ssh_config',
+            'validate_cmd' => '',
+            'reload_cmd' => '',
+            'sections' => [],
+        ],
+        'mysql' => [
+            'label' => 'MySQL',
+            'icon' => '🐬',
+            'paths' => [
+                'apt' => '/etc/mysql/my.cnf',
+                'dnf' => '/etc/my.cnf',
+                'yum' => '/etc/my.cnf',
+                'apk' => '/etc/my.cnf',
+                'pacman' => '/etc/mysql/my.cnf',
+                'zypper' => '/etc/my.cnf',
+                'brew' => '/opt/homebrew/etc/my.cnf',
+            ],
+            'format' => 'ini',
+            'validate_cmd' => '',
+            'reload_cmd' => '',
+            'sections' => ['mysqld', 'client', 'mysql'],
+        ],
+        'postgresql' => [
+            'label' => 'PostgreSQL',
+            'icon' => '🐘',
+            'paths' => [
+                'apt' => '/etc/postgresql/16/main/postgresql.conf',
+                'dnf' => '/var/lib/pgsql/data/postgresql.conf',
+                'yum' => '/var/lib/pgsql/data/postgresql.conf',
+                'apk' => '/etc/postgresql/postgresql.conf',
+                'pacman' => '/var/lib/postgres/data/postgresql.conf',
+                'zypper' => '/var/lib/pgsql/data/postgresql.conf',
+                'brew' => '/opt/homebrew/var/postgresql/postgresql.conf',
+            ],
+            'format' => 'postgresql_conf',
+            'validate_cmd' => '',
+            'reload_cmd' => '',
+            'sections' => [],
+        ],
+    ];
+}
+
+function host_agent_config_get_path(string $configId, string $manager): ?string {
+    $defs = host_agent_config_definitions();
+    $def = $defs[$configId] ?? null;
+    if (!$def) return null;
+    $paths = (array)($def['paths'] ?? []);
+    return $paths[$manager] ?? $paths['default'] ?? null;
+}
+
+function host_agent_config_read(string $configId, string $manager): array {
+    $path = host_agent_config_get_path($configId, $manager);
+    if ($path === null) {
+        return ['ok' => false, 'msg' => '配置 ' . $configId . ' 在当前系统无可用路径'];
+    }
+    $content = host_agent_host_shell('cat ' . escapeshellarg($path) . ' 2>/dev/null || true');
+    return [
+        'ok' => true,
+        'config_id' => $configId,
+        'path' => $path,
+        'content' => trim((string)($content['stdout'] ?? '')),
+        'exists' => $content['ok'] && $content['code'] === 0,
+        'format' => (string)((host_agent_config_definitions()[$configId] ?? [])['format'] ?? 'text'),
+    ];
+}
+
+function host_agent_config_backup_path(string $path): string {
+    return $path . '.backup.' . date('Ymd_His');
+}
+
+function host_agent_config_apply(string $configId, string $manager, string $content, bool $validateOnly = false): array {
+    $defs = host_agent_config_definitions();
+    $def = $defs[$configId] ?? null;
+    if (!$def) {
+        return ['ok' => false, 'msg' => '未知配置项：' . $configId];
+    }
+
+    $path = host_agent_config_get_path($configId, $manager);
+    if ($path === null) {
+        return ['ok' => false, 'msg' => '配置 ' . $configId . ' 在当前系统无可用路径'];
+    }
+
+    if (strlen($content) > 2 * 1024 * 1024) {
+        return ['ok' => false, 'msg' => '配置内容超过 2MB 限制'];
+    }
+
+    // 1. 读取旧内容
+    $oldResult = host_agent_host_shell('cat ' . escapeshellarg($path) . ' 2>/dev/null || true');
+    $oldContent = (string)($oldResult['stdout'] ?? '');
+
+    // 2. 备份
+    $backupPath = host_agent_config_backup_path($path);
+    host_agent_host_shell('cp ' . escapeshellarg($path) . ' ' . escapeshellarg($backupPath) . ' 2>/dev/null || true');
+
+    // 3. 写入新内容
+    $putResult = host_agent_host_shell('cat > ' . escapeshellarg($path), $content);
+    if (!$putResult['ok']) {
+        // 回滚
+        host_agent_host_shell('cp ' . escapeshellarg($backupPath) . ' ' . escapeshellarg($path) . ' 2>/dev/null || true');
+        return ['ok' => false, 'msg' => '写入配置文件失败，已回滚', 'path' => $path];
+    }
+
+    // 4. 校验
+    $validateCmd = trim((string)($def['validate_cmd'] ?? ''));
+    if ($validateCmd !== '') {
+        $validateResult = host_agent_host_shell($validateCmd . ' 2>&1');
+        if (!$validateResult['ok'] || $validateResult['code'] !== 0) {
+            // 回滚
+            host_agent_host_shell('cp ' . escapeshellarg($backupPath) . ' ' . escapeshellarg($path) . ' 2>/dev/null || true');
+            return [
+                'ok' => false,
+                'msg' => '配置校验失败，已自动回滚',
+                'path' => $path,
+                'validate_output' => trim($validateResult['stdout'] . "\n" . $validateResult['stderr']),
+                'backup_path' => $backupPath,
+            ];
+        }
+    }
+
+    if ($validateOnly) {
+        // 仅校验，回滚到原内容
+        host_agent_host_shell('cp ' . escapeshellarg($backupPath) . ' ' . escapeshellarg($path) . ' 2>/dev/null || true');
+        return [
+            'ok' => true,
+            'msg' => '配置校验通过',
+            'path' => $path,
+            'validate_output' => $validateCmd !== '' ? trim((string)($validateResult['stdout'] ?? '')) : '',
+        ];
+    }
+
+    // 5. 重载服务
+    $reloadCmd = trim((string)($def['reload_cmd'] ?? ''));
+    $reloadOutput = '';
+    if ($reloadCmd !== '') {
+        $reloadResult = host_agent_host_shell($reloadCmd . ' 2>&1');
+        $reloadOutput = trim($reloadResult['stdout'] . "\n" . $reloadResult['stderr']);
+    }
+
+    return [
+        'ok' => true,
+        'msg' => '配置已应用' . ($reloadCmd !== '' ? '并尝试重载服务' : ''),
+        'path' => $path,
+        'backup_path' => $backupPath,
+        'reload_output' => $reloadOutput,
+    ];
+}
+
+function host_agent_config_history(string $configId, string $manager, int $limit = 10): array {
+    $path = host_agent_config_get_path($configId, $manager);
+    if ($path === null) {
+        return ['ok' => false, 'msg' => '配置路径未知'];
+    }
+    $dir = dirname($path);
+    $basename = basename($path);
+    $result = host_agent_host_shell('ls -1t ' . escapeshellarg($dir) . '/' . escapeshellarg($basename) . '.backup.* 2>/dev/null | head -n ' . (int)$limit);
+    $files = [];
+    if ($result['ok']) {
+        foreach (preg_split('/\r?\n/', trim($result['stdout'])) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '') continue;
+            if (preg_match('/\.backup\.(\d{8}_\d{6})$/', $line, $m)) {
+                $ts = $m[1];
+                $time = substr($ts, 0, 4) . '-' . substr($ts, 4, 2) . '-' . substr($ts, 6, 2) . ' ' . substr($ts, 9, 2) . ':' . substr($ts, 11, 2) . ':' . substr($ts, 13, 2);
+                $files[] = ['path' => $line, 'time' => $time, 'timestamp' => $ts];
+            }
+        }
+    }
+    return ['ok' => true, 'backups' => $files, 'config_id' => $configId];
+}
+
+function host_agent_config_restore(string $configId, string $manager, string $backupPath): array {
+    $defs = host_agent_config_definitions();
+    $def = $defs[$configId] ?? null;
+    if (!$def) {
+        return ['ok' => false, 'msg' => '未知配置项'];
+    }
+
+    $path = host_agent_config_get_path($configId, $manager);
+    if ($path === null) {
+        return ['ok' => false, 'msg' => '配置路径未知'];
+    }
+
+    // 安全检查：备份文件必须是以 .backup. 结尾的、在同一目录下的文件
+    $dir = dirname($path);
+    $realBackup = realpath($backupPath);
+    if ($realBackup === false || strpos($realBackup, $dir) !== 0 || !str_ends_with($realBackup, '.backup.')) {
+        return ['ok' => false, 'msg' => '非法备份路径'];
+    }
+
+    // 备份当前
+    $currentBackup = host_agent_config_backup_path($path);
+    host_agent_host_shell('cp ' . escapeshellarg($path) . ' ' . escapeshellarg($currentBackup) . ' 2>/dev/null || true');
+
+    // 恢复
+    $cp = host_agent_host_shell('cp ' . escapeshellarg($backupPath) . ' ' . escapeshellarg($path));
+    if (!$cp['ok']) {
+        return ['ok' => false, 'msg' => '恢复失败'];
+    }
+
+    // 重载服务
+    $reloadCmd = trim((string)($def['reload_cmd'] ?? ''));
+    $reloadOutput = '';
+    if ($reloadCmd !== '') {
+        $reloadResult = host_agent_host_shell($reloadCmd . ' 2>&1');
+        $reloadOutput = trim($reloadResult['stdout'] . "\n" . $reloadResult['stderr']);
+    }
+
+    return [
+        'ok' => true,
+        'msg' => '配置已恢复' . ($reloadCmd !== '' ? '并尝试重载服务' : ''),
+        'path' => $path,
+        'backup_path' => $currentBackup,
+        'restored_from' => $backupPath,
+        'reload_output' => $reloadOutput,
+    ];
+}
+
+function host_agent_config_definitions_response(): array {
+    $defs = host_agent_config_definitions();
+    $result = [];
+    foreach ($defs as $id => $def) {
+        $result[] = [
+            'id' => $id,
+            'label' => $def['label'] ?? $id,
+            'icon' => $def['icon'] ?? '📄',
+            'format' => $def['format'] ?? 'text',
+            'sections' => $def['sections'] ?? [],
+        ];
+    }
+    return ['ok' => true, 'definitions' => $result];
+}
+
+// ============================================================
+// Declarative Manifest Engine (Phase 3)
+// ============================================================
+
+function host_agent_manifest_validate_schema(array $manifest): array {
+    $errors = [];
+
+    // packages
+    if (isset($manifest['packages']) && is_array($manifest['packages'])) {
+        foreach ($manifest['packages'] as $name => $spec) {
+            if (!is_array($spec)) {
+                $errors[] = 'packages.' . $name . ' 必须是对象';
+                continue;
+            }
+            $state = $spec['state'] ?? '';
+            if (!in_array($state, ['installed', 'absent'], true)) {
+                $errors[] = 'packages.' . $name . '.state 必须是 "installed" 或 "absent"';
+            }
+        }
+    }
+
+    // services
+    if (isset($manifest['services']) && is_array($manifest['services'])) {
+        foreach ($manifest['services'] as $name => $spec) {
+            if (!is_array($spec)) {
+                $errors[] = 'services.' . $name . ' 必须是对象';
+                continue;
+            }
+            $state = $spec['state'] ?? '';
+            if ($state !== '' && !in_array($state, ['running', 'stopped'], true)) {
+                $errors[] = 'services.' . $name . '.state 必须是 "running" 或 "stopped"';
+            }
+            if (isset($spec['enabled']) && !is_bool($spec['enabled'])) {
+                $errors[] = 'services.' . $name . '.enabled 必须是布尔值';
+            }
+        }
+    }
+
+    // configs
+    if (isset($manifest['configs']) && is_array($manifest['configs'])) {
+        $validConfigIds = array_keys(host_agent_config_definitions());
+        foreach ($manifest['configs'] as $id => $spec) {
+            if (!in_array($id, $validConfigIds, true)) {
+                $errors[] = 'configs.' . $id . ' 不是有效的配置项';
+            }
+        }
+    }
+
+    // users
+    if (isset($manifest['users']) && is_array($manifest['users'])) {
+        foreach ($manifest['users'] as $name => $spec) {
+            if (!is_array($spec)) {
+                $errors[] = 'users.' . $name . ' 必须是对象';
+                continue;
+            }
+            $state = $spec['state'] ?? '';
+            if (!in_array($state, ['present', 'absent'], true)) {
+                $errors[] = 'users.' . $name . '.state 必须是 "present" 或 "absent"';
+            }
+        }
+    }
+
+    return $errors;
+}
+
+function host_agent_manifest_apply(array $manifest, bool $dryRun = false): array {
+    $manager = host_agent_detect_package_manager();
+    $svcManager = host_agent_detect_service_manager();
+    $changes = [];
+    $errors = [];
+
+    // 1. 校验 schema
+    $schemaErrors = host_agent_manifest_validate_schema($manifest);
+    if (!empty($schemaErrors)) {
+        return ['ok' => false, 'msg' => 'Manifest 校验失败', 'errors' => $schemaErrors];
+    }
+
+    // 2. 包状态对齐
+    if (isset($manifest['packages']) && is_array($manifest['packages'])) {
+        foreach ($manifest['packages'] as $pkg => $spec) {
+            $desired = ($spec['state'] ?? '') === 'installed';
+            $resolved = host_agent_resolve_package_name($pkg, $manager);
+            if ($resolved === null) {
+                $errors[] = 'packages.' . $pkg . ': 该包在 ' . $manager . ' 上无映射';
+                continue;
+            }
+            $isInstalled = host_agent_package_is_installed($manager, $resolved);
+            if ($isInstalled !== $desired) {
+                if ($dryRun) {
+                    $changes[] = ['type' => 'package', 'name' => $pkg, 'action' => $desired ? 'install' : 'remove', 'dry_run' => true];
+                } else {
+                    if ($desired) {
+                        $result = host_agent_package_install($manager, $resolved);
+                        $changes[] = ['type' => 'package', 'name' => $pkg, 'action' => 'install', 'ok' => $result['ok'], 'msg' => $result['msg'] ?? ''];
+                    } else {
+                        $result = host_agent_package_remove($manager, $resolved);
+                        $changes[] = ['type' => 'package', 'name' => $pkg, 'action' => 'remove', 'ok' => $result['ok'], 'msg' => $result['msg'] ?? ''];
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 服务状态对齐
+    if (isset($manifest['services']) && is_array($manifest['services'])) {
+        foreach ($manifest['services'] as $svc => $spec) {
+            $desiredRunning = ($spec['state'] ?? '') === 'running' ? true : (($spec['state'] ?? '') === 'stopped' ? false : null);
+            $desiredEnabled = $spec['enabled'] ?? null;
+
+            // 检测服务当前状态
+            $status = host_agent_detect_named_host_service($svc);
+            if (empty($status['service_name'])) {
+                // 尝试通用服务检测
+                $status = host_agent_generic_service_status('/hostfs', 'host', $svc);
+                if (!$status['ok'] || empty($status['service_name'])) {
+                    $errors[] = 'services.' . $svc . ': 未检测到服务';
+                    continue;
+                }
+                $currentRunning = $status['running'] ?? false;
+                $currentEnabled = $status['enabled'] ?? null;
+                $serviceName = $status['service_name'];
+            } else {
+                $currentRunning = $status['running'] ?? false;
+                $currentEnabled = $status['enabled'] ?? null;
+                $serviceName = $status['service_name'];
+            }
+
+            if ($desiredRunning !== null && $currentRunning !== $desiredRunning) {
+                $action = $desiredRunning ? 'start' : 'stop';
+                if ($dryRun) {
+                    $changes[] = ['type' => 'service', 'name' => $svc, 'action' => $action, 'dry_run' => true];
+                } else {
+                    // 使用通用服务操作
+                    $result = host_agent_generic_service_action('/hostfs', 'host', $svc, $action);
+                    $changes[] = ['type' => 'service', 'name' => $svc, 'action' => $action, 'ok' => $result['ok'], 'msg' => $result['msg'] ?? ''];
+                }
+            }
+
+            if ($desiredEnabled !== null && $currentEnabled !== $desiredEnabled && $desiredEnabled !== null) {
+                $action = $desiredEnabled ? 'enable' : 'disable';
+                if ($dryRun) {
+                    $changes[] = ['type' => 'service', 'name' => $svc, 'action' => $action, 'dry_run' => true];
+                } else {
+                    $result = host_agent_generic_service_action('/hostfs', 'host', $svc, $action);
+                    $changes[] = ['type' => 'service', 'name' => $svc, 'action' => $action, 'ok' => $result['ok'], 'msg' => $result['msg'] ?? ''];
+                }
+            }
+        }
+    }
+
+    // 4. 配置状态对齐
+    if (isset($manifest['configs']) && is_array($manifest['configs'])) {
+        foreach ($manifest['configs'] as $configId => $spec) {
+            $readResult = host_agent_config_read($configId, $manager);
+            if (!$readResult['ok']) {
+                $errors[] = 'configs.' . $configId . ': 读取失败 - ' . ($readResult['msg'] ?? '');
+                continue;
+            }
+            $currentContent = $readResult['content'] ?? '';
+
+            // 如果 spec 是字符串，直接作为完整配置内容
+            // 如果 spec 是对象，逐键对比并生成新配置
+            if (is_string($spec)) {
+                $desiredContent = $spec;
+            } elseif (is_array($spec)) {
+                // 简单的键值对替换（仅支持 INI-like 和 key-value 格式）
+                $desiredContent = host_agent_manifest_apply_config_changes($currentContent, $configId, $spec);
+            } else {
+                $errors[] = 'configs.' . $configId . ': 不支持的数据类型';
+                continue;
+            }
+
+            if ($currentContent !== $desiredContent) {
+                if ($dryRun) {
+                    $changes[] = ['type' => 'config', 'name' => $configId, 'action' => 'apply', 'dry_run' => true];
+                } else {
+                    $result = host_agent_config_apply($configId, $manager, $desiredContent);
+                    $changes[] = ['type' => 'config', 'name' => $configId, 'action' => 'apply', 'ok' => $result['ok'], 'msg' => $result['msg'] ?? '', 'backup_path' => $result['backup_path'] ?? ''];
+                }
+            }
+        }
+    }
+
+    return [
+        'ok' => empty($errors),
+        'msg' => empty($errors) ? ($dryRun ? '预演完成' : '应用完成') : '部分操作失败',
+        'dry_run' => $dryRun,
+        'changes' => $changes,
+        'errors' => $errors,
+        'changed' => !empty($changes),
+    ];
+}
+
+function host_agent_manifest_apply_config_changes(string $currentContent, string $configId, array $changes): string {
+    $defs = host_agent_config_definitions();
+    $format = (string)($defs[$configId]['format'] ?? 'text');
+
+    $lines = preg_split('/\r?\n/', $currentContent) ?: [];
+
+    foreach ($changes as $key => $value) {
+        if (!is_string($value) && !is_int($value) && !is_bool($value)) {
+            continue;
+        }
+        $valueStr = is_bool($value) ? ($value ? 'yes' : 'no') : (string)$value;
+        $found = false;
+
+        foreach ($lines as $i => $line) {
+            $trimmed = trim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+                continue;
+            }
+
+            if ($format === 'ini' || $format === 'ssh_config' || $format === 'redis_conf' || $format === 'postgresql_conf') {
+                // key = value 格式
+                if (preg_match('/^' . preg_quote($key, '/') . '\s*[=:]\s*/i', $trimmed)) {
+                    $lines[$i] = $key . ' = ' . $valueStr;
+                    $found = true;
+                    break;
+                }
+            } elseif ($format === 'nginx') {
+                // nginx key value; 格式
+                if (preg_match('/^\s*' . preg_quote($key, '/') . '\s+/i', $trimmed)) {
+                    $indent = '';
+                    if (preg_match('/^(\s*)/', $line, $m)) {
+                        $indent = $m[1];
+                    }
+                    $lines[$i] = $indent . $key . ' ' . $valueStr . ';';
+                    $found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$found) {
+            // 添加到文件末尾
+            $lines[] = $key . ' = ' . $valueStr;
+        }
+    }
+
+    return implode("\n", $lines) . "\n";
 }
 
 function host_agent_sftp_policies_from_config(string $content): array {
@@ -4280,6 +5310,317 @@ function host_agent_ssh_target_apply(array $target, string $root, string $mode, 
     return $save;
 }
 
+// ============================================================
+// Async Task Queue
+// ============================================================
+
+function host_agent_task_generate_id(): string {
+    return 'task_' . bin2hex(random_bytes(8));
+}
+
+function host_agent_task_state_path(string $taskId): string {
+    return '/tmp/host-agent-task-' . $taskId . '.json';
+}
+
+function host_agent_task_log_path(string $taskId): string {
+    return '/tmp/host-agent-task-' . $taskId . '.log';
+}
+
+function host_agent_task_cleanup(): void {
+    $queue = &$GLOBALS['TASK_QUEUE'];
+    if (!is_array($queue)) {
+        $queue = [];
+        return;
+    }
+    $now = time();
+    $ttl = 3600; // 1 小时
+    foreach ($queue as $id => $task) {
+        if (!is_array($task)) {
+            unset($queue[$id]);
+            continue;
+        }
+        $completedAt = (int)($task['completed_at'] ?? 0);
+        if ($completedAt > 0 && ($now - $completedAt) > $ttl) {
+            unset($queue[$id]);
+            @unlink(host_agent_task_state_path($id));
+            @unlink(host_agent_task_log_path($id));
+        }
+    }
+}
+
+function host_agent_task_submit(string $action, array $payload): array {
+    if (!function_exists('pcntl_fork')) {
+        // pcntl 不可用，降级为同步执行
+        $taskId = host_agent_task_generate_id();
+        $result = host_agent_execute_action($action, $payload);
+        $stateFile = host_agent_task_state_path($taskId);
+        file_put_contents($stateFile, json_encode([
+            'status' => empty($result['ok']) ? 'failed' : 'completed',
+            'completed_at' => time(),
+            'result' => $result,
+        ], JSON_UNESCAPED_UNICODE));
+        return [
+            'ok' => true,
+            'task_id' => $taskId,
+            'status' => 'completed',
+            'sync' => true,
+            'result' => $result,
+        ];
+    }
+
+    $queue = &$GLOBALS['TASK_QUEUE'];
+    if (!is_array($queue)) {
+        $queue = [];
+    }
+    host_agent_task_cleanup();
+
+    $taskId = host_agent_task_generate_id();
+    $queue[$taskId] = [
+        'id' => $taskId,
+        'status' => 'pending',
+        'action' => $action,
+        'payload' => $payload,
+        'result' => null,
+        'output' => '',
+        'started_at' => null,
+        'completed_at' => null,
+        'pid' => null,
+    ];
+
+    $pid = pcntl_fork();
+    if ($pid === -1) {
+        // fork 失败，降级为同步执行
+        $result = host_agent_execute_action($action, $payload);
+        $queue[$taskId]['status'] = 'completed';
+        $queue[$taskId]['result'] = $result;
+        $queue[$taskId]['completed_at'] = time();
+        return [
+            'ok' => true,
+            'task_id' => $taskId,
+            'status' => 'completed',
+            'sync' => true,
+            'result' => $result,
+        ];
+    }
+
+    if ($pid === 0) {
+        // 子进程
+        $logFile = host_agent_task_log_path($taskId);
+        $stateFile = host_agent_task_state_path($taskId);
+        $startTime = time();
+
+        // 记录开始状态
+        file_put_contents($stateFile, json_encode([
+            'status' => 'running',
+            'started_at' => $startTime,
+        ], JSON_UNESCAPED_UNICODE));
+
+        // 执行操作，捕获输出
+        ob_start();
+        $result = host_agent_execute_action($action, $payload);
+        $output = ob_get_clean();
+
+        // 写入日志和结果
+        file_put_contents($logFile, $output);
+        file_put_contents($stateFile, json_encode([
+            'status' => empty($result['ok']) ? 'failed' : 'completed',
+            'started_at' => $startTime,
+            'completed_at' => time(),
+            'result' => $result,
+        ], JSON_UNESCAPED_UNICODE));
+        exit(0);
+    }
+
+    // 父进程
+    $queue[$taskId]['status'] = 'running';
+    $queue[$taskId]['pid'] = $pid;
+    $queue[$taskId]['started_at'] = time();
+
+    return [
+        'ok' => true,
+        'task_id' => $taskId,
+        'status' => 'running',
+    ];
+}
+
+function host_agent_task_status(string $taskId): array {
+    $queue = &$GLOBALS['TASK_QUEUE'];
+    if (!is_array($queue) || !isset($queue[$taskId])) {
+        // 尝试从文件读取（可能进程已退出，内存数据已丢失）
+        $stateFile = host_agent_task_state_path($taskId);
+        if (file_exists($stateFile)) {
+            $state = json_decode(file_get_contents($stateFile), true);
+            if (is_array($state)) {
+                $logFile = host_agent_task_log_path($taskId);
+                $output = file_exists($logFile) ? file_get_contents($logFile) : '';
+                $result = $state['result'] ?? null;
+                return [
+                    'ok' => true,
+                    'task_id' => $taskId,
+                    'status' => $state['status'] ?? 'unknown',
+                    'started_at' => $state['started_at'] ?? null,
+                    'completed_at' => $state['completed_at'] ?? null,
+                    'output' => $output,
+                    'result' => $result,
+                ];
+            }
+        }
+        return ['ok' => false, 'msg' => '任务不存在'];
+    }
+
+    $task = $queue[$taskId];
+    $stateFile = host_agent_task_state_path($taskId);
+    $logFile = host_agent_task_log_path($taskId);
+
+    // 如果任务在运行中，检查子进程是否已退出
+    if ($task['status'] === 'running' && !empty($task['pid'])) {
+        $status = 0;
+        $waited = pcntl_waitpid($task['pid'], $status, WNOHANG);
+        if ($waited === $task['pid'] || $waited === -1) {
+            // 子进程已退出
+            $task['status'] = 'completed';
+            $task['completed_at'] = time();
+            if (file_exists($stateFile)) {
+                $state = json_decode(file_get_contents($stateFile), true);
+                if (is_array($state)) {
+                    $task['status'] = $state['status'] ?? 'completed';
+                    $task['result'] = $state['result'] ?? null;
+                }
+            }
+            $queue[$taskId] = $task;
+        }
+    }
+
+    $output = file_exists($logFile) ? file_get_contents($logFile) : '';
+    $result = $task['result'];
+    if ($result === null && file_exists($stateFile)) {
+        $state = json_decode(file_get_contents($stateFile), true);
+        if (is_array($state) && isset($state['result'])) {
+            $result = $state['result'];
+        }
+    }
+
+    return [
+        'ok' => true,
+        'task_id' => $taskId,
+        'status' => $task['status'],
+        'action' => $task['action'] ?? '',
+        'started_at' => $task['started_at'] ?? null,
+        'completed_at' => $task['completed_at'] ?? null,
+        'output' => $output,
+        'result' => $result,
+    ];
+}
+
+function host_agent_task_cancel(string $taskId): array {
+    $queue = &$GLOBALS['TASK_QUEUE'];
+    if (!is_array($queue) || !isset($queue[$taskId])) {
+        return ['ok' => false, 'msg' => '任务不存在'];
+    }
+
+    $task = $queue[$taskId];
+    if ($task['status'] !== 'running' || empty($task['pid'])) {
+        return ['ok' => false, 'msg' => '任务未在运行中'];
+    }
+
+    posix_kill($task['pid'], SIGTERM);
+    usleep(200000); // 200ms 等待优雅退出
+    $status = 0;
+    $waited = pcntl_waitpid($task['pid'], $status, WNOHANG);
+    if ($waited === 0) {
+        posix_kill($task['pid'], SIGKILL);
+        pcntl_waitpid($task['pid'], $status);
+    }
+
+    $queue[$taskId]['status'] = 'cancelled';
+    $queue[$taskId]['completed_at'] = time();
+
+    $stateFile = host_agent_task_state_path($taskId);
+    file_put_contents($stateFile, json_encode([
+        'status' => 'cancelled',
+        'completed_at' => time(),
+    ], JSON_UNESCAPED_UNICODE));
+
+    return ['ok' => true, 'msg' => '任务已取消'];
+}
+
+function host_agent_task_list(): array {
+    $queue = &$GLOBALS['TASK_QUEUE'];
+    if (!is_array($queue)) {
+        return ['ok' => true, 'tasks' => []];
+    }
+    $tasks = [];
+    foreach ($queue as $id => $task) {
+        if (!is_array($task)) continue;
+        $tasks[] = [
+            'id' => $id,
+            'status' => $task['status'] ?? 'unknown',
+            'action' => $task['action'] ?? '',
+            'started_at' => $task['started_at'] ?? null,
+            'completed_at' => $task['completed_at'] ?? null,
+        ];
+    }
+    // 按开始时间倒序
+    usort($tasks, static function (array $a, array $b): int {
+        return ($b['started_at'] ?? 0) <=> ($a['started_at'] ?? 0);
+    });
+    return ['ok' => true, 'tasks' => $tasks];
+}
+
+function host_agent_execute_action(string $action, array $payload): array {
+    $manager = host_agent_detect_package_manager();
+    $svcManager = host_agent_detect_service_manager();
+
+    switch ($action) {
+        case 'package_install':
+            $pkg = trim((string)($payload['pkg'] ?? ''));
+            if ($pkg === '') return ['ok' => false, 'msg' => '缺少 pkg 参数'];
+            $resolved = host_agent_resolve_package_name($pkg, $manager);
+            if ($resolved === null) return ['ok' => false, 'msg' => '包名无法解析'];
+            return host_agent_package_install($manager, $resolved);
+
+        case 'package_remove':
+            $pkg = trim((string)($payload['pkg'] ?? ''));
+            $purge = !empty($payload['purge']);
+            if ($pkg === '') return ['ok' => false, 'msg' => '缺少 pkg 参数'];
+            $resolved = host_agent_resolve_package_name($pkg, $manager);
+            if ($resolved === null) return ['ok' => false, 'msg' => '包名无法解析'];
+            return host_agent_package_remove($manager, $resolved, $purge);
+
+        case 'package_update':
+            $pkg = trim((string)($payload['pkg'] ?? ''));
+            if ($pkg === '') return ['ok' => false, 'msg' => '缺少 pkg 参数'];
+            $resolved = host_agent_resolve_package_name($pkg, $manager);
+            if ($resolved === null) return ['ok' => false, 'msg' => '包名无法解析'];
+            return host_agent_package_update($manager, $resolved);
+
+        case 'package_upgrade_all':
+            return host_agent_package_upgrade_all($manager);
+
+        case 'config_apply':
+            $configId = trim((string)($payload['config_id'] ?? ''));
+            $content = (string)($payload['content'] ?? '');
+            $validateOnly = !empty($payload['validate_only']);
+            return host_agent_config_apply($configId, $manager, $content, $validateOnly);
+
+        case 'config_restore':
+            $configId = trim((string)($payload['config_id'] ?? ''));
+            $backupPath = trim((string)($payload['backup_path'] ?? ''));
+            return host_agent_config_restore($configId, $manager, $backupPath);
+
+        case 'manifest_apply':
+            $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
+            return host_agent_manifest_apply($manifest, false);
+
+        case 'manifest_dry_run':
+            $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
+            return host_agent_manifest_apply($manifest, true);
+
+        default:
+            return ['ok' => false, 'msg' => '未知 action: ' . $action];
+    }
+}
+
 function host_agent_handle_request(string $request, string $token, string $root, string $mode): string {
     $parts = preg_split("/\r\n\r\n/", $request, 2);
     $header_lines = preg_split("/\r\n/", (string)($parts[0] ?? '')) ?: [];
@@ -5110,6 +6451,199 @@ function host_agent_handle_request(string $request, string $token, string $root,
         $payload = host_agent_json_decode($body);
         $result = host_agent_terminal_close((string)($payload['id'] ?? ''));
         return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    // Package Manager Routes
+    if ($method === 'GET' && $path === '/package/manager') {
+        $manager = host_agent_detect_package_manager();
+        $svcManager = host_agent_detect_service_manager();
+        return host_agent_json_response([
+            'ok' => true,
+            'manager' => $manager,
+            'service_manager' => $svcManager,
+        ]);
+    }
+
+    if ($method === 'POST' && $path === '/package/search') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_package_search(
+            $manager,
+            trim((string)($payload['keyword'] ?? '')),
+            (int)($payload['limit'] ?? 50)
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/info') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $pkg = trim((string)($payload['pkg'] ?? ''));
+        $result = host_agent_package_info($manager, $pkg);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/install') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $pkg = trim((string)($payload['pkg'] ?? ''));
+        $resolved = host_agent_resolve_package_name($pkg, $manager);
+        $result = host_agent_package_install($manager, $resolved);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/remove') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $pkg = trim((string)($payload['pkg'] ?? ''));
+        $purge = !empty($payload['purge']);
+        $resolved = host_agent_resolve_package_name($pkg, $manager);
+        $result = host_agent_package_remove($manager, $resolved, $purge);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/update') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $pkg = trim((string)($payload['pkg'] ?? ''));
+        $resolved = host_agent_resolve_package_name($pkg, $manager);
+        $result = host_agent_package_update($manager, $resolved);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/upgrade-all') {
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_package_upgrade_all($manager);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/package/list') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_package_list($manager, (int)($payload['limit'] ?? 500));
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    // Configuration Manager Routes
+    if ($method === 'GET' && $path === '/config/definitions') {
+        return host_agent_json_response(host_agent_config_definitions_response());
+    }
+
+    if ($method === 'POST' && $path === '/config/read') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_config_read(
+            trim((string)($payload['config_id'] ?? '')),
+            $manager
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/config/apply') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_config_apply(
+            trim((string)($payload['config_id'] ?? '')),
+            $manager,
+            (string)($payload['content'] ?? ''),
+            !empty($payload['validate_only'])
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/config/validate') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_config_apply(
+            trim((string)($payload['config_id'] ?? '')),
+            $manager,
+            (string)($payload['content'] ?? ''),
+            true
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/config/history') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_config_history(
+            trim((string)($payload['config_id'] ?? '')),
+            $manager,
+            (int)($payload['limit'] ?? 10)
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/config/restore') {
+        $payload = host_agent_json_decode($body);
+        $manager = host_agent_detect_package_manager();
+        $result = host_agent_config_restore(
+            trim((string)($payload['config_id'] ?? '')),
+            $manager,
+            trim((string)($payload['backup_path'] ?? ''))
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    // Async Task Routes
+    if ($method === 'POST' && $path === '/task/submit') {
+        $payload = host_agent_json_decode($body);
+        $action = trim((string)($payload['action'] ?? ''));
+        if ($action === '') {
+            return host_agent_json_response(['ok' => false, 'msg' => '缺少 action 参数'], 422);
+        }
+        $result = host_agent_task_submit($action, (array)($payload['payload'] ?? []));
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'GET' && $path === '/task/status') {
+        $taskId = trim((string)($query['id'] ?? ''));
+        if ($taskId === '') {
+            return host_agent_json_response(['ok' => false, 'msg' => '缺少 id 参数'], 422);
+        }
+        $result = host_agent_task_status($taskId);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 404);
+    }
+
+    if ($method === 'POST' && $path === '/task/cancel') {
+        $payload = host_agent_json_decode($body);
+        $taskId = trim((string)($payload['id'] ?? ''));
+        if ($taskId === '') {
+            return host_agent_json_response(['ok' => false, 'msg' => '缺少 id 参数'], 422);
+        }
+        $result = host_agent_task_cancel($taskId);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'GET' && $path === '/task/list') {
+        $result = host_agent_task_list();
+        return host_agent_json_response($result, 200);
+    }
+
+    // Declarative Manifest Routes
+    if ($method === 'POST' && $path === '/manifest/apply') {
+        $payload = host_agent_json_decode($body);
+        $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
+        $result = host_agent_manifest_apply($manifest, false);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/manifest/dry-run') {
+        $payload = host_agent_json_decode($body);
+        $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
+        $result = host_agent_manifest_apply($manifest, true);
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/manifest/validate') {
+        $payload = host_agent_json_decode($body);
+        $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
+        $errors = host_agent_manifest_validate_schema($manifest);
+        return host_agent_json_response([
+            'ok' => empty($errors),
+            'msg' => empty($errors) ? 'Manifest 格式有效' : 'Manifest 格式校验失败',
+            'errors' => $errors,
+        ], empty($errors) ? 200 : 422);
     }
 
     if ($method !== 'GET' && $method !== 'POST') {

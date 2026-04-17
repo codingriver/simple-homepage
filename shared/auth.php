@@ -852,6 +852,7 @@ function auth_role_permissions_map(): array {
             'ssh.terminal',
             'ssh.audit',
             'ssh.audit.export',
+            'ssh.package.manage',
         ],
         'host_viewer' => [
             'ssh.view',

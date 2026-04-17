@@ -1105,3 +1105,119 @@ function host_agent_restart(): array {
     }
     return ['ok' => false, 'msg' => '重启 host-agent 失败：' . ($restart['error'] ?: $restart['body'])];
 }
+
+// ============================================================
+// Package Manager SDK (Phase 1)
+// ============================================================
+
+function host_agent_package_manager(): array {
+    return host_agent_api_request('GET', '/package/manager');
+}
+
+function host_agent_package_search(string $keyword, int $limit = 50): array {
+    return host_agent_api_request('POST', '/package/search', ['keyword' => $keyword, 'limit' => $limit]);
+}
+
+function host_agent_package_info(string $pkg): array {
+    return host_agent_api_request('POST', '/package/info', ['pkg' => $pkg]);
+}
+
+function host_agent_package_install(string $pkg): array {
+    return host_agent_api_request('POST', '/package/install', ['pkg' => $pkg]);
+}
+
+function host_agent_package_remove(string $pkg, bool $purge = false): array {
+    return host_agent_api_request('POST', '/package/remove', ['pkg' => $pkg, 'purge' => $purge]);
+}
+
+function host_agent_package_update(string $pkg): array {
+    return host_agent_api_request('POST', '/package/update', ['pkg' => $pkg]);
+}
+
+function host_agent_package_upgrade_all(): array {
+    return host_agent_api_request('POST', '/package/upgrade-all');
+}
+
+function host_agent_package_list(int $limit = 500): array {
+    return host_agent_api_request('POST', '/package/list', ['limit' => $limit]);
+}
+
+// ============================================================
+// Configuration Manager SDK (Phase 2)
+// ============================================================
+
+function host_agent_config_definitions(): array {
+    return host_agent_api_request('GET', '/config/definitions');
+}
+
+function host_agent_config_read(string $configId): array {
+    return host_agent_api_request('POST', '/config/read', ['config_id' => $configId]);
+}
+
+function host_agent_config_apply(string $configId, string $content, bool $validateOnly = false): array {
+    return host_agent_api_request('POST', '/config/apply', [
+        'config_id' => $configId,
+        'content' => $content,
+        'validate_only' => $validateOnly,
+    ]);
+}
+
+function host_agent_config_validate(string $configId, string $content): array {
+    return host_agent_api_request('POST', '/config/validate', [
+        'config_id' => $configId,
+        'content' => $content,
+    ]);
+}
+
+function host_agent_config_history(string $configId, int $limit = 10): array {
+    return host_agent_api_request('POST', '/config/history', [
+        'config_id' => $configId,
+        'limit' => $limit,
+    ]);
+}
+
+function host_agent_config_restore(string $configId, string $backupPath): array {
+    return host_agent_api_request('POST', '/config/restore', [
+        'config_id' => $configId,
+        'backup_path' => $backupPath,
+    ]);
+}
+
+// ============================================================
+// Declarative Manifest SDK (Phase 3)
+// ============================================================
+
+function host_agent_manifest_apply(array $manifest): array {
+    return host_agent_api_request('POST', '/manifest/apply', ['manifest' => $manifest]);
+}
+
+function host_agent_manifest_dry_run(array $manifest): array {
+    return host_agent_api_request('POST', '/manifest/dry-run', ['manifest' => $manifest]);
+}
+
+function host_agent_manifest_validate(array $manifest): array {
+    return host_agent_api_request('POST', '/manifest/validate', ['manifest' => $manifest]);
+}
+
+// ============================================================
+// Async Task Queue SDK
+// ============================================================
+
+function host_agent_task_submit(string $action, array $payload): array {
+    return host_agent_api_request('POST', '/task/submit', [
+        'action' => $action,
+        'payload' => $payload,
+    ]);
+}
+
+function host_agent_task_status(string $taskId): array {
+    return host_agent_api_request('GET', '/task/status?id=' . rawurlencode($taskId));
+}
+
+function host_agent_task_cancel(string $taskId): array {
+    return host_agent_api_request('POST', '/task/cancel', ['id' => $taskId]);
+}
+
+function host_agent_task_list(): array {
+    return host_agent_api_request('GET', '/task/list');
+}

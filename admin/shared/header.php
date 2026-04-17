@@ -49,6 +49,10 @@ $nav_items = [
     ['file' => 'hosts.php',    'icon' => '🖥', 'label' => '主机管理'],
     ['file' => 'host_runtime.php', 'icon' => '🧰', 'label' => '宿主机运维'],
     ['file' => 'docker_hosts.php', 'icon' => '🐳', 'label' => 'Docker 管理'],
+    ['file' => 'packages.php', 'icon' => '📦', 'label' => '软件包管理'],
+    ['file' => 'configs.php',  'icon' => '⚙️', 'label' => '配置管理'],
+    ['file' => 'manifests.php', 'icon' => '📋', 'label' => '声明式管理'],
+    ['file' => 'tasks.php',    'icon' => '⏱', 'label' => '异步任务'],
     ['file' => 'files.php',    'icon' => '🗂', 'label' => '文件系统'],
     ['file' => 'webdav.php',   'icon' => '🧷', 'label' => 'WebDAV'],
     ['file' => 'task_templates.php', 'icon' => '🧱', 'label' => '任务模板'],
@@ -73,6 +77,18 @@ $nav_items = array_values(array_filter($nav_items, static function(array $item):
         return auth_user_has_permission('ssh.view');
     }
     if (($item['file'] ?? '') === 'docker_hosts.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'packages.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'configs.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'manifests.php') {
+        return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'tasks.php') {
         return auth_user_has_permission('ssh.view');
     }
     if (($item['file'] ?? '') === 'files.php') {

@@ -68,3 +68,73 @@ test('settings page can install host-agent in simulate mode and shows remove-mou
 
   await tracker.assertNoClientErrors();
 });
+
+test('settings page can stop and restart host-agent', async ({ page }) => {
+  test.setTimeout(120000);
+  const tracker = await attachClientErrorTracking(page, {
+    ignoredMessages: [
+      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
+      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+    ],
+  });
+
+  // Pre-install host-agent via CLI so the UI starts from "running" state
+  const installResult = runDockerPhpInline(
+    [
+      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+      '$result = host_agent_install();',
+      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+    ].join(' ')
+  );
+  expect(installResult.code).toBe(0);
+  expect(JSON.parse(installResult.stdout).ok).toBe(true);
+
+  await loginAsDevAdmin(page);
+  await page.goto('/admin/settings.php#host-agent');
+
+  // Wait for running state
+  await expect(page.locator('#host-agent-status-text')).toContainText('已运行并健康', { timeout: 20000 });
+  await expect.poll(async () => await page.locator('#host-agent-stop-btn').isEnabled(), { timeout: 20000 }).toBe(true);
+  await expect(page.locator('#host-agent-install-btn')).toBeDisabled();
+  await expect(page.locator('#host-agent-restart-btn')).toBeEnabled();
+
+  // Stop
+  page.on('dialog', async dialog => {
+    expect(dialog.message()).toContain('确认停止 host-agent');
+    await dialog.accept();
+  });
+  await page.locator('#host-agent-stop-btn').click();
+  await page.waitForLoadState('networkidle');
+
+  // Refresh and verify stopped
+  await page.goto('/admin/settings.php#host-agent');
+  await expect(page.locator('#host-agent-status-text')).toContainText('已安装未运行', { timeout: 20000 });
+  await expect(page.locator('#host-agent-stop-btn')).toBeDisabled();
+  await expect(page.locator('#host-agent-install-btn')).toBeEnabled();
+  await expect(page.locator('#host-agent-restart-btn')).toBeEnabled();
+
+  const inspectAfterStop = runDockerCommand(['inspect', '-f', '{{.State.Running}}', hostAgentContainer]);
+  expect(inspectAfterStop.code).toBe(0);
+  expect(inspectAfterStop.stdout.trim()).toBe('false');
+
+  // Restart
+  page.on('dialog', async dialog => {
+    expect(dialog.message()).toContain('确认重启 host-agent');
+    await dialog.accept();
+  });
+  await page.locator('#host-agent-restart-btn').click();
+  await page.waitForLoadState('networkidle');
+
+  // Refresh and verify running again
+  await page.goto('/admin/settings.php#host-agent');
+  await expect(page.locator('#host-agent-status-text')).toContainText('已运行并健康', { timeout: 20000 });
+  await expect(page.locator('#host-agent-stop-btn')).toBeEnabled();
+  await expect(page.locator('#host-agent-install-btn')).toBeDisabled();
+  await expect(page.locator('#host-agent-restart-btn')).toBeEnabled();
+
+  const inspectAfterRestart = runDockerCommand(['inspect', '-f', '{{.State.Running}}', hostAgentContainer]);
+  expect(inspectAfterRestart.code).toBe(0);
+  expect(inspectAfterRestart.stdout.trim()).toBe('true');
+
+  await tracker.assertNoClientErrors();
+});

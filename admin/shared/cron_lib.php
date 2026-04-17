@@ -3,6 +3,9 @@
  * 计划任务：数据文件、crontab 安装、CLI 执行入口
  */
 require_once __DIR__ . '/../../shared/auth.php';
+if (!function_exists('load_config')) {
+    require_once __DIR__ . '/functions.php';
+}
 
 define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
@@ -441,7 +444,7 @@ function task_read_file_segment(string $path, int $offset): string {
     return str_replace("\r\n", "\n", str_replace("\r", "\n", $chunk));
 }
 
-function scheduled_tasks_lock_exclusive(): ?resource {
+function scheduled_tasks_lock_exclusive() {
     $dir = dirname(SCHEDULED_TASKS_LOCK_FILE);
     if (!is_dir($dir)) {
         @mkdir($dir, 0755, true);
@@ -457,7 +460,7 @@ function scheduled_tasks_lock_exclusive(): ?resource {
     return $handle;
 }
 
-function scheduled_tasks_unlock(?resource $handle): void {
+function scheduled_tasks_unlock($handle): void {
     if (!is_resource($handle)) {
         return;
     }
@@ -991,7 +994,7 @@ function task_sort_for_display(array $tasks): array {
     return array_values(array_map(static fn(array $row) => $row['task'], $indexed));
 }
 
-function save_scheduled_tasks(array $data, ?resource $externalLock = null): void {
+function save_scheduled_tasks(array $data, $externalLock = null): void {
     if (!isset($data['tasks']) || !is_array($data['tasks'])) {
         $data['tasks'] = [];
     }
