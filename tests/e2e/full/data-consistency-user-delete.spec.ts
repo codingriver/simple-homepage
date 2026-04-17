@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { expect, test } from '../../helpers/fixtures';
-import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { attachClientErrorTracking, loginAsDevAdmin, logout } from '../../helpers/auth';
 import { runDockerPhpInline } from '../../helpers/cli';
 
 const usersFile = path.resolve(__dirname, '../../../data/users.json');
@@ -41,12 +41,13 @@ test('deleting a user invalidates their active sessions', async ({ page }) => {
   expect(userTokens.length).toBeGreaterThan(0);
 
   // delete user via admin
+  await logout(page);
   await loginAsDevAdmin(page);
   await page.goto('/admin/users.php');
 
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
   const deleteRes = await page.request.post('http://127.0.0.1:58080/admin/users.php', {
-    form: { action: 'delete', username, _csrf: csrf },
+    form: { act: 'delete', del_user: username, _csrf: csrf },
   });
   expect(deleteRes.status()).toBe(200);
 

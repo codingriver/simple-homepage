@@ -52,10 +52,46 @@ function groups_handle_post(array &$sites_data): array {
 
     if ($action === 'delete') {
         $id = $_POST['gid'] ?? '';
+        $sites_to_clean = [];
+        foreach ($groups as $g) {
+            if ($g['id'] === $id) {
+                foreach ($g['sites'] as $s) {
+                    $sites_to_clean[] = [
+                        'sid' => $s['id'] ?? '',
+                        'proxy_target' => $s['proxy_target'] ?? null,
+                    ];
+                }
+                break;
+            }
+        }
         $sites_data['groups'] = array_values(
             array_filter($groups, function($g) use ($id){ return $g['id'] !== $id; })
         );
         save_sites($sites_data);
+        $health_targets = [];
+        foreach ($sites_to_clean as $site) {
+            $sid = $site['sid'];
+            if ($sid !== '') {
+                @unlink(DATA_DIR . '/nginx/' . $sid . '.conf');
+                @unlink(DATA_DIR . '/favicon_cache/' . $sid . '.png');
+            }
+            if ($site['proxy_target'] !== null) {
+                $health_targets[] = $site['proxy_target'];
+            }
+        }
+        if ($health_targets !== [] && file_exists(HEALTH_CACHE_FILE)) {
+            $health_cache = json_decode(file_get_contents(HEALTH_CACHE_FILE), true) ?: [];
+            $changed = false;
+            foreach ($health_targets as $target) {
+                if (isset($health_cache[$target])) {
+                    unset($health_cache[$target]);
+                    $changed = true;
+                }
+            }
+            if ($changed) {
+                file_put_contents(HEALTH_CACHE_FILE, json_encode($health_cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+            }
+        }
         audit_log('group_delete', ['gid' => $id]);
         flash_set('success', '分组及其站点已删除');
         return ['ok' => true, 'msg' => '分组及其站点已删除'];

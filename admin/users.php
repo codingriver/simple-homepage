@@ -40,7 +40,27 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $adminCount = count(array_filter($users, fn($u) => ($u['role'] ?? 'user') === 'admin'));
     if($du===$current_admin['username'])$err='不能删除当前登录的自己';
     elseif((($users[$du]['role'] ?? 'user')==='admin') && $adminCount<=1)$err='至少保留一个管理员账户';
-    else{unset($users[$du]);auth_write_users($users);audit_log('user_delete',['username'=>$du]);flash_set('success','已删除');header('Location: users.php');exit;}
+    else{
+      unset($users[$du]);
+      auth_write_users($users);
+      if (file_exists(SESSIONS_FILE)) {
+        $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+        $changed = false;
+        foreach ($sessions as $jti => $meta) {
+          if (($meta['username'] ?? '') === $du) {
+            unset($sessions[$jti]);
+            $changed = true;
+          }
+        }
+        if ($changed) {
+          file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        }
+      }
+      audit_log('user_delete',['username'=>$du]);
+      flash_set('success','已删除');
+      header('Location: users.php');
+      exit;
+    }
   }
 }
 

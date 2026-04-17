@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { createHash } from 'crypto';
 import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { runDockerPhpInline } from '../../helpers/cli';
@@ -11,34 +12,44 @@ test('deleting a ddns task cleans up orphan sys_ddns_dispatcher scheduled tasks'
   const tracker = await attachClientErrorTracking(page);
   const ts = Date.now();
   const taskId = `ddns-cleanup-${ts}`;
-  const dispatcherId = `sys_ddns_dispatcher_${ts}`;
 
   // seed DDNS task
+  const cronExpr = `*/${(ts % 59) + 1} * * * *`;
   const ddnsData = {
-    tasks: {
-      [taskId]: {
+    version: 1,
+    tasks: [
+      {
         id: taskId,
+        name: `Cleanup ${ts}`,
         provider: 'aliyun',
-        domain: `cleanup-${ts}.example.com`,
-        rr: 'www',
-        cron: `*/${(ts % 59) + 1} * * * *`,
+        target: {
+          domain: `cleanup-${ts}.example.com`,
+          rr: 'www',
+        },
+        source: {
+          type: 'local_ipv4',
+        },
+        schedule: {
+          cron: cronExpr,
+        },
         enabled: true,
         created_at: new Date().toISOString(),
       },
-    },
+    ],
   };
   await fs.writeFile(ddnsTasksFile, JSON.stringify(ddnsData, null, 2), 'utf8');
 
-  // seed scheduled task dispatcher
+  // seed scheduled task dispatcher with backend-computed ID
+  const expectedDispatcherId = 'sys_ddns_dispatcher_' + createHash('sha1').update(cronExpr).digest('hex').slice(0, 12);
   const scheduledData = {
     tasks: {
-      [dispatcherId]: {
-        id: dispatcherId,
+      [expectedDispatcherId]: {
+        id: expectedDispatcherId,
         name: `DDNS Dispatcher ${ts}`,
-        cron: `*/${(ts % 59) + 1} * * * *`,
+        schedule: cronExpr,
         command: 'php /var/www/nav/cli/ddns_sync.php',
         enabled: true,
-        type: 'system',
+        is_system: true,
         created_at: new Date().toISOString(),
       },
     },
@@ -64,7 +75,7 @@ test('deleting a ddns task cleans up orphan sys_ddns_dispatcher scheduled tasks'
 
   // verify orphan dispatcher removed
   const scheduledAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8').catch(() => '{}'));
-  expect(scheduledAfter.tasks?.[dispatcherId]).toBeUndefined();
+  expect(scheduledAfter.tasks?.[expectedDispatcherId]).toBeUndefined();
 
   await tracker.assertNoClientErrors();
 });

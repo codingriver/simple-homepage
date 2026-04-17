@@ -14,7 +14,7 @@ test('deleting a site cleans up nginx config favicon and health cache', async ({
   const ts = Date.now();
   const gid = `cleanup-g-${ts}`;
   const sid = `cleanup-s-${ts}`;
-  const siteUrl = `https://cleanup-${ts}.example.com`;
+  const siteUrl = `https://example.com?cleanup=${ts}`;
   const proxyTarget = `http://192.168.1.${(ts % 250) + 1}:8080`;
 
   // seed site data
@@ -63,9 +63,10 @@ test('deleting a site cleans up nginx config favicon and health cache', async ({
   await fs.writeFile(healthCacheFile, JSON.stringify(healthCache, null, 2), 'utf8');
 
   await loginAsDevAdmin(page);
+  await page.goto('/admin/sites.php');
 
   // delete the site via API
-  const csrf = await page.evaluate(() => (window as any)._csrf || '');
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
   const deleteRes = await page.request.post('http://127.0.0.1:58080/admin/sites.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
     form: { action: 'delete', gid, sid, _csrf: csrf },
@@ -94,7 +95,7 @@ test('deleting a group cleans up child sites nginx configs and caches', async ({
   const ts = Date.now();
   const gid = `cleanup-g2-${ts}`;
   const sid = `cleanup-s2-${ts}`;
-  const siteUrl = `https://cleanup2-${ts}.example.com`;
+  const siteUrl = `https://example.com?cleanup2=${ts}`;
   const proxyTarget = `http://192.168.2.${(ts % 250) + 1}:8080`;
 
   // seed site data
@@ -147,7 +148,7 @@ test('deleting a group cleans up child sites nginx configs and caches', async ({
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
   const deleteRes = await page.request.post('http://127.0.0.1:58080/admin/groups.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'delete', id: gid, _csrf: csrf },
+    form: { action: 'delete', gid, _csrf: csrf },
   });
   expect(deleteRes.status()).toBe(200);
   const deleteBody = await deleteRes.json();

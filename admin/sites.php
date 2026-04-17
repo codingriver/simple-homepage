@@ -129,6 +129,17 @@ function sites_handle_post(array &$sites_data): array {
     if ($action === 'delete') {
         $gid = $_POST['gid'] ?? '';
         $sid = $_POST['sid'] ?? '';
+        $proxy_target = null;
+        foreach ($sites_data['groups'] as $g) {
+            if ($g['id'] === $gid) {
+                foreach ($g['sites'] as $s) {
+                    if ($s['id'] === $sid) {
+                        $proxy_target = $s['proxy_target'] ?? null;
+                        break 2;
+                    }
+                }
+            }
+        }
         foreach ($sites_data['groups'] as &$g) {
             if ($g['id'] === $gid) {
                 $g['sites'] = array_values(array_filter($g['sites'], function($s) use ($sid){ return $s['id'] !== $sid; }));
@@ -137,6 +148,15 @@ function sites_handle_post(array &$sites_data): array {
         }
         unset($g);
         save_sites($sites_data);
+        @unlink(DATA_DIR . '/nginx/' . $sid . '.conf');
+        @unlink(DATA_DIR . '/favicon_cache/' . $sid . '.png');
+        if ($proxy_target !== null && file_exists(HEALTH_CACHE_FILE)) {
+            $health_cache = json_decode(file_get_contents(HEALTH_CACHE_FILE), true) ?: [];
+            if (isset($health_cache[$proxy_target])) {
+                unset($health_cache[$proxy_target]);
+                file_put_contents(HEALTH_CACHE_FILE, json_encode($health_cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+            }
+        }
         audit_log('site_delete', ['gid' => $gid, 'sid' => $sid]);
         flash_set('success', '站点已删除');
         return ['ok' => true, 'msg' => '站点已删除'];

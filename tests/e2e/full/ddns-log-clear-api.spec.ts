@@ -9,19 +9,28 @@ test('ddns ajax log_clear action clears task log directly', async ({ page }) => 
   const tracker = await attachClientErrorTracking(page);
   const ts = Date.now();
   const taskId = `ddns-log-clear-${ts}`;
-  const logPath = path.resolve(__dirname, `../../../data/logs/ddns/${taskId}.log`);
+  const logPath = path.resolve(__dirname, `../../../data/logs/ddns_${taskId}.log`);
 
   const payload = {
-    tasks: {
-      [taskId]: {
+    version: 1,
+    tasks: [
+      {
         id: taskId,
         name: `DDNS Log Clear ${ts}`,
-        domain: `logclear-${ts}.606077.xyz`,
-        source_type: 'local_ipv4',
+        target: {
+          domain: `logclear-${ts}.606077.xyz`,
+          rr: 'www',
+        },
+        source: {
+          type: 'local_ipv4',
+        },
+        schedule: {
+          cron: '*/5 * * * *',
+        },
         enabled: true,
         created_at: new Date().toISOString(),
       },
-    },
+    ],
   };
   await fs.writeFile(ddnsFile, JSON.stringify(payload, null, 2), 'utf8');
   await fs.mkdir(path.dirname(logPath), { recursive: true });

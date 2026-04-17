@@ -69,6 +69,7 @@ if ($action === 'save') {
     if (!$result['ok']) {
         ddns_ajax_response(['ok' => false, 'msg' => $result['msg'] ?? '保存失败'], 400);
     }
+    cron_regenerate();
     ddns_ajax_response([
         'ok' => true,
         'msg' => '任务已保存',
@@ -84,6 +85,7 @@ if ($action === 'delete') {
     if ($id === '' || !ddns_delete_task($id)) {
         ddns_ajax_response(['ok' => false, 'msg' => '任务不存在'], 404);
     }
+    cron_regenerate();
     ddns_ajax_response(['ok' => true, 'msg' => '任务已删除']);
 }
 
