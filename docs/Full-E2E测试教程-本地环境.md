@@ -6,11 +6,13 @@
 - 测试命令直接在宿主机终端执行
 - 日常开发自测、调试失败用例
 
+---
+
 ## 1. 首次准备
 
 需要工具：
 
-- `node`
+- `node`（推荐 18+）
 - `npm`
 - `docker`
 - `docker compose`
@@ -33,7 +35,7 @@ npm install
 安装 Playwright 浏览器：
 
 ```bash
-npm run playwright:install
+npx playwright install
 ```
 
 准备本地配置：
@@ -58,6 +60,8 @@ bash local/docker-build.sh dev
 - 用户名：`qatest`
 - 密码：`qatest2026`
 
+---
+
 ## 2. 日常执行
 
 桌面端回归：
@@ -66,7 +70,7 @@ bash local/docker-build.sh dev
 npm run test:e2e:full:chromium
 ```
 
-双项目全量：
+双项目全量（chromium + mobile-chrome）：
 
 ```bash
 npm run test:e2e:full
@@ -99,7 +103,7 @@ npm run test:e2e:headed:chromium -- tests/e2e/full/csrf-guards.spec.ts:8
 npm run test:e2e:headed:chromium -- -g "csrf guards reject admin mutations without valid token"
 ```
 
-说明：这些脚本已不再在命令内部硬编码 `tests/e2e/full`，默认范围仍由 `playwright.config.ts` 的 `testDir` 控制，所以追加文件、行号或 `-g` 时只会筛选你指定的目标，不会把整目录再次带进去。
+说明：这些脚本不再在命令内部硬编码 `tests/e2e/full`，默认范围仍由 `playwright.config.ts` 的 `testDir` 控制，所以追加文件、行号或 `-g` 时只会筛选你指定的目标。
 
 查看当前会跑哪些用例：
 
@@ -107,7 +111,7 @@ npm run test:e2e:headed:chromium -- -g "csrf guards reject admin mutations witho
 npm run test:e2e:full:chromium -- --list
 ```
 
-打开测试ui界面
+打开测试 UI 界面：
 
 ```bash
 npx playwright test --ui
@@ -125,11 +129,15 @@ BASE_URL=http://127.0.0.1:58081 npm run test:e2e:full:chromium
 PLAYWRIGHT_BROWSER_CHANNEL=chrome npm run test:e2e:full:chromium
 ```
 
+---
+
 ## 3. 产物位置
 
 - HTML 报告：`test-results/playwright-report-html/`
 - Markdown 报告：`test-results/playwright-report.md`
 - 截图、trace 等产物：`test-artifacts/`
+
+---
 
 ## 4. 常见问题
 
@@ -145,7 +153,7 @@ PLAYWRIGHT_BROWSER_CHANNEL=chrome npm run test:e2e:full:chromium
 
 ```bash
 rm -rf .playwright-browsers .playwright-runtime-home
-npm run playwright:install
+npx playwright install
 npm run test:e2e:full:chromium
 ```
 
@@ -160,7 +168,7 @@ npm run test:e2e:full:chromium
 如果报 `Executable doesn't exist`，执行：
 
 ```bash
-npm run playwright:install
+npx playwright install
 ```
 
 ### 4.3 站点没起来
@@ -176,6 +184,8 @@ curl -I http://127.0.0.1:58080
 ```bash
 bash local/docker-build.sh dev
 ```
+
+---
 
 ## 5. 推荐顺序
 

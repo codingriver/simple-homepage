@@ -2,32 +2,51 @@
 
 一个适合个人、家庭网络、NAS、软路由、小型 VPS 使用的私有导航首页。
 
-它不只是书签页，还带这些能力：
+它不只是书签页，还集成了这些能力：
 
-- 登录保护
-- 分组和站点管理
-- 反向代理入口
-- DNS 管理
-- DDNS 动态解析
-- 计划任务
-- 配置备份与恢复
-- 调试工具
-- Host-Agent 一键安装入口
+- 🔐 登录保护 + 多用户管理
+- 📁 分组和站点管理
+- 🔄 反向代理入口（Nginx 自动生成）
+- 🌐 DNS 管理（阿里云 / Cloudflare）
+- 🔄 DDNS 动态解析
+- ⏰ 计划任务（带日志、定时执行）
+- 💾 配置备份与恢复
+- 🔧 调试工具（日志、PHP 错误开关）
+- 🖥️ Host-Agent 一键安装入口
+- 📂 文件系统管理
+- 🐳 Docker 宿主管理
+- 🌐 WebDAV 服务端
+- 📢 Webhook 通知
 
 项目地址：
 
 - GitHub: <https://github.com/codingriver/simple-homepage>
 - Docker Hub: <https://hub.docker.com/r/codingriver/simple-homepage>
 
-镜像支持：
+镜像支持多架构：
 
 - `linux/amd64`
 - `linux/arm64`
 
-运行基础：
+---
 
-- Docker 镜像当前基于 Debian 系 `php:8.2-fpm-bookworm`
-- 这样更适合计划任务里执行常见第三方 Linux 二进制，兼容性比 Alpine 更好
+## 目录
+
+- [适合谁](#适合谁)
+- [主要功能](#主要功能)
+- [部署前准备](#部署前准备)
+- [小白部署流程（推荐）](#小白部署流程推荐)
+- [自动创建管理员](#自动创建管理员)
+- [升级方法](#升级方法)
+- [Host-Agent 说明](#host-agent-说明)
+- [常用命令](#常用命令)
+- [数据保存在哪里](#数据保存在哪里)
+- [默认端口修改](#默认端口修改)
+- [反向代理配置示例](#反向代理配置示例)
+- [常见问题与修复](#常见问题与修复)
+- [进阶内容](#进阶内容)
+
+---
 
 ## 适合谁
 
@@ -38,38 +57,48 @@
 - 不想装 MySQL、Redis，只想用 Docker 跑起来
 - 希望数据都保存在本地目录里，重建容器也不丢
 
+---
+
 ## 主要功能
 
 ### 前台导航
 
 - 分组展示站点卡片
-- 搜索站点
+- 搜索站点（支持 `/` 快捷键聚焦）
 - 支持公开分组和登录后可见分组
-- 支持背景图、背景色、卡片大小等设置
+- 支持背景图、背景色、卡片大小/布局/方向等设置
 - 自动抓取 favicon
 - 适配手机和桌面浏览器
+- 站点健康状态指示（up/down/unknown）
 
 ### 后台管理
 
-- 站点管理：普通链接、内部直达、反向代理
-- 分组管理：增删改查、排序、权限范围
-- 用户管理：管理员和普通用户
-- 系统设置：站点名称、域名、Cookie、安全项、Webhook
-- 备份恢复：导出、导入、恢复
-- 调试工具：日志查看、Cookie 清理、错误显示切换
+- **站点管理**：普通链接、内部直达、反向代理
+- **分组管理**：增删改查、排序、权限范围、图标
+- **用户管理**：管理员和普通用户、密码修改、角色切换
+- **系统设置**：站点名称、域名、Cookie 策略、安全项、Webhook
+- **Nginx 反代**：后台一键生成配置并 Reload
+- **备份恢复**：导出、导入、手动备份、自动备份、恢复
+- **调试工具**：日志查看、Cookie 清理、PHP 错误显示切换
+- **文件系统**：本机 + 远程主机文件浏览、编辑、上传、下载、压缩解压
+- **Docker 管理**：容器、镜像、卷、网络查看与操作
+- **WebDAV**：Basic Auth + 配额 + 审计
+- **通知中心**：Telegram、飞书、钉钉、企业微信、自定义 Webhook
 
 ### 运维相关
 
-- DNS 解析管理，目前支持阿里云 DNS、Cloudflare
-- DDNS 动态解析
+- DNS 解析管理（阿里云 DNS、Cloudflare）
+- DDNS 动态解析，支持多 IP 来源与 fallback
 - 计划任务管理，支持立即执行、持续写日志、日志查看
 - 后台支持检测并一键安装 `host-agent`
-- 主机管理页可直接查看和管理本机 SSH 服务
+- 主机管理页可查看和管理本机 SSH 服务、进程、服务、网络、用户
 - 计划任务统一工作目录固定为 `data/tasks`
 - 每个计划任务的脚本会落地保存为 `data/tasks/<脚本文件名>.sh`
 - 计划任务脚本和运行日志都落地在 `data/tasks/`
   - 脚本文件为 `xxx.sh`
   - 对应日志文件为同名 `xxx.log`
+
+---
 
 ## 部署前准备
 
@@ -88,7 +117,9 @@ docker compose version
 
 如果这两个命令都能正常输出版本号，就可以继续。
 
-## 小白部署流程
+---
+
+## 小白部署流程（推荐）
 
 下面是最简单、最推荐的部署方式：直接从 Docker Hub 拉镜像，用 `docker compose` 启动。
 
@@ -100,7 +131,7 @@ cd ~/simple-homepage
 mkdir -p data
 ```
 
-`data` 目录很重要，网站配置、用户、日志、备份都放在这里。
+`data` 目录很重要，网站配置、用户、日志、备份都放在这里。**这个目录必须持久化，否则重建容器后数据会丢失。**
 
 ### 2. 新建 `docker-compose.yml`
 
@@ -110,7 +141,7 @@ mkdir -p data
 
 ```yaml
 # ============================================================
-# 官方一键部署（推荐新手）
+# Simple Homepage 官方一键部署（推荐新手）
 # 启动: docker compose up -d
 # 停止: docker compose down
 # 日志: docker compose logs -f
@@ -179,16 +210,19 @@ http://192.168.1.10:58080
 
 按页面提示设置：
 
-- 管理员用户名
-- 管理员密码
+- 管理员用户名（2-32 位，字母数字下划线横杠）
+- 管理员密码（至少 8 位）
+- 确认密码
 - 网站名称
 - 网站域名（可以先不填完整正式域名，后面再改）
 
-安装完成后，就可以登录后台了。
+安装完成后，会跳转到登录页。用刚才设置的账号密码登录即可。
 
-## 如果想自动创建管理员
+---
 
-如果你不想手动走安装向导，也可以在 `docker-compose.yml` 里增加这些环境变量：
+## 自动创建管理员
+
+如果你不想手动走安装向导，可以在 `docker-compose.yml` 里增加这些环境变量：
 
 ```yaml
 environment:
@@ -208,9 +242,11 @@ environment:
 docker compose up -d
 ```
 
-首次启动时会自动创建管理员账号。
+首次启动时会自动创建管理员账号，并生成 `.installed` 安装锁。浏览器访问即可直接登录。
 
-生产环境建议部署完成后把明文密码从 compose 文件里删掉。
+> ⚠️ **安全提醒**：生产环境建议部署完成后把明文密码从 compose 文件里删掉。
+
+---
 
 ## 升级方法
 
@@ -224,160 +260,76 @@ docker compose up -d
 
 因为数据挂载在 `./data` 目录，所以更新镜像不会清空你的配置。
 
-## Host-Agent 一键安装说明
+> 如果升级后出现异常，可以先查看日志：
+> ```bash
+> docker compose logs -f
+> ```
 
-如果你后面要在后台里使用“宿主机能力桥接”相关功能，可以在 `系统设置 -> Host-Agent` 中执行一键安装。
+---
 
-这个功能默认不强制开启，选择权在你手里：
+## Host-Agent 说明
 
-- 没挂载 `docker.sock`：后台会明确提示需要挂载，且不会执行安装
-- 挂载了 `docker.sock`：后台才允许一键安装 `host-agent`
-- 安装完成并确认功能正常后：建议把 `docker.sock` 挂载移除
+如果你要在后台里使用"宿主机能力桥接"相关功能（如文件系统、SSH 管理、进程/服务/网络查看），需要安装 `host-agent`。
 
-推荐做法：
+### 安装步骤
 
-1. 先按上面的 compose 注释，临时取消这一行注释：
+1. 先临时在 `docker-compose.yml` 中取消 `docker.sock` 挂载的注释：
 
 ```yaml
-- /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  - ./data:/var/www/nav/data
+  - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-2. 执行：
+2. 重新启动容器：
 
 ```bash
 docker compose up -d
 ```
 
-3. 进入后台 `系统设置 -> Host-Agent`，点击一键安装
+3. 进入后台 **系统设置 → Host-Agent**，点击"一键安装"
 
-4. 确认 `host-agent` 状态正常后，再把这行挂载删掉，并重新执行：
+4. 确认 `host-agent` 状态正常后，**建议把这行挂载删掉**，重新执行 `docker compose up -d`
 
-```bash
-docker compose up -d
-```
+> 平时运行更干净，只有安装、升级、重装 `host-agent` 时才需要重新挂载。
 
-这样平时运行更干净，只有安装、升级、重装 `host-agent` 时才需要重新挂回。
+### 运行模式
 
-安装完成后，后台里会新增“主机管理”能力，可用于：
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `host` | 真实宿主机模式，可操作真实系统文件和 SSH | 生产环境 |
+| `simulate` | 模拟模式，操作落在数据目录下的模拟根目录，不碰真实宿主机 | 开发/测试（默认） |
 
-- 查看本机 SSH 服务状态
-- 启动、停止、重载、重启 SSH 服务
-- 在线编辑 `sshd_config`
+开发/测试环境强烈建议使用 `simulate` 模式，避免误改宿主机 SSH 配置和系统文件。
 
-开发/测试环境默认使用 `simulate` 模式，不会真的修改宿主机 SSH。
-
-## 本机文件系统和本机 SSH 是怎么实现的
-
-这两个能力都不是直接让 Web 页面去改系统文件，而是统一走一层 `host-agent`：
-
-- 后台页面发起 AJAX 请求
-- PHP 后台把请求转成 `host-agent` API 调用
-- `host-agent` 再在目标环境里执行文件或 SSH 操作
-
-这样做的原因是：
-
-- 前台页面和实际系统操作解耦
-- 本机和远程主机可以共用一套目标抽象
-- 可以区分 `host` 模式和 `simulate` 模式
-- 审计、权限判断、失败回滚更容易统一
-
-### 1. 本机文件系统实现原理
-
-调用链大致是：
-
-```text
-admin/files.php
-  -> admin/file_api.php
-  -> admin/shared/file_manager_lib.php
-  -> admin/shared/host_agent_lib.php
-  -> host-agent HTTP API
-  -> cli/host_agent.php
-```
-
-实际特点：
-
-- 文件系统页面本机目标不是直接用 PHP 的 `file_get_contents()` 在页面里读写
-- 页面操作会调用 `file_api.php`
-- `file_api.php` 再通过 `host_agent_fs_list/read/write/delete/...` 这些接口转发给 `host-agent`
-- `host-agent` 统一执行目录浏览、读写、重命名、复制、权限修改、压缩解压等操作
-
-你在后台看到的“本机文件系统”，默认是当前运行环境可见的文件系统视角：
-
-- 普通 Docker 部署下，默认看到的是应用容器内的文件系统
-- 如果某些目录是宿主机挂载进容器的卷，那么你改到的其实就是宿主机对应目录
-- 如果 `host-agent` 以真实 `host` 模式运行，则它可以直接操作宿主机上的 `/hostfs/...`
-- 开发/测试常用的 `simulate` 模式不会碰真实宿主机，而是操作 `data/host-agent-sim-root/` 下面的模拟目录
-
-所以“本机文件系统”不是魔法直通宿主机全盘，而是取决于 `host-agent` 当前运行模式和挂载方式。
-
-### 2. 本机 SSH 配置实现原理
-
-调用链大致是：
-
-```text
-admin/hosts.php
-  -> admin/host_api.php
-  -> admin/shared/host_agent_lib.php
-  -> host-agent HTTP API
-  -> cli/host_agent.php
-```
-
-后台里的“本机 SSH 服务”主要包含四类动作：
-
-- 读取 SSH 服务状态
-- 读取和保存 `sshd_config`
-- 校验配置
-- 启停、重载、重启、自启、安装 `openssh-server`
-
-保存 SSH 配置时，流程不是直接覆盖正式配置，而是：
-
-1. 先读取当前配置
-2. 先做格式校验
-3. 生成备份文件
-4. 再写回正式配置
-5. 如果选择“保存后自动重启”，则继续尝试重启 SSH
-6. 如果重启失败且开启了回滚，会自动恢复最近一次备份
-
-在真实 `host` 模式下：
-
-- `host-agent` 会调用宿主机里的 `sshd -t -f 临时文件` 做校验
-- 服务操作会调用 `systemctl` 或 `service`
-- 开机启动会调用 `systemctl enable/disable`，或 `update-rc.d` / `chkconfig`
-- 自动安装会调用 `apt`、`dnf`、`yum` 或 `apk`
-
-在 `simulate` 模式下：
-
-- 不会真的改宿主机
-- SSH 配置会写到共享数据目录下的模拟路径
-- SSH 服务状态、自启状态也只是模拟状态文件
-
-也就是说，开发环境里看到的 SSH 管理流程和正式环境界面一致，但底层默认只是在模拟根目录里演练，不会误伤宿主机。
+---
 
 ## 常用命令
 
-查看日志：
-
 ```bash
+# 查看日志
 docker compose logs -f
-```
 
-重启：
-
-```bash
+# 重启
 docker compose restart
-```
 
-停止：
-
-```bash
+# 停止
 docker compose down
-```
 
-进入容器：
-
-```bash
+# 进入容器
 docker exec -it simple-homepage sh
+
+# 查看用户列表
+docker exec simple-homepage php /var/www/nav/manage_users.php list
+
+# 修改密码
+docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+
+# 重置安装状态（清空配置，重新进入安装向导）
+docker exec simple-homepage php /var/www/nav/manage_users.php reset
 ```
+
+---
 
 ## 数据保存在哪里
 
@@ -393,30 +345,55 @@ docker exec -it simple-homepage sh
 /var/www/nav/data
 ```
 
+常见文件说明：
+
+```text
+data/
+├── .installed              # 安装完成锁
+├── auth_secret.key         # 认证密钥（权限 600）
+├── config.json             # 系统配置
+├── sites.json              # 站点与分组
+├── users.json              # 用户数据
+├── scheduled_tasks.json    # 计划任务
+├── dns_config.json         # DNS 配置
+├── ddns_tasks.json         # DDNS 任务
+├── notifications.json      # 通知渠道
+├── ip_locks.json           # IP 登录失败锁定
+├── sessions.json           # 会话撤销记录
+├── backups/                # 备份快照
+├── logs/                   # 各类日志
+├── tasks/                  # 计划任务脚本和日志
+├── favicon_cache/          # 自动抓取的 favicon 缓存
+├── bg/                     # 背景图上传目录
+└── nginx/                  # Nginx 代理参数模板
+```
+
 其中计划任务统一使用的工作目录是：
 
 ```text
 ./data/tasks
 ```
 
-不是每个任务一个单独目录，而是所有计划任务共享这个目录。
+所有计划任务共享这个目录。
 
-## 默认端口能不能改
+---
 
-可以。
+## 默认端口修改
 
-如果你不想用 `58080`，把 compose 里的这一行改掉就行：
-
-```yaml
-ports:
-  - "58080:58080"
-```
-
-例如改成 `8080`：
+如果你不想用 `58080`，把 compose 里的端口映射改掉就行：
 
 ```yaml
 ports:
   - "8080:58080"
+```
+
+或同时改容器内端口：
+
+```yaml
+ports:
+  - "8080:8080"
+environment:
+  NAV_PORT: "8080"
 ```
 
 改完重新执行：
@@ -425,58 +402,306 @@ ports:
 docker compose up -d
 ```
 
-然后访问：
+然后访问 `http://你的服务器IP:8080`。
 
-```text
-http://你的服务器IP:8080
+---
+
+## 反向代理配置示例
+
+如果你前面还有一层 Nginx/Caddy/Traefik，可以参考以下配置。
+
+### Nginx 前置反代
+
+```nginx
+server {
+    listen 80;
+    server_name nav.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name nav.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/nav.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/nav.yourdomain.com/privkey.pem;
+
+    location / {
+        proxy_pass         http://127.0.0.1:58080;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
-## 常见问题
+> 前置 Nginx 反代后，容器内 Cookie `secure=auto` 模式通过 `X-Forwarded-Proto: https` 自动识别 HTTPS，无需额外配置。
 
-### 打不开页面
+### Caddy
 
-先检查：
+```
+nav.yourdomain.com {
+    reverse_proxy 127.0.0.1:58080
+}
+```
+
+### Traefik
+
+使用 Docker 标签即可，无需额外写配置文件。
+
+---
+
+## 常见问题与修复
+
+### Q1: 打不开页面
+
+**排查步骤：**
+
+1. 确认容器在运行：
+   ```bash
+   docker ps | grep simple-homepage
+   ```
+
+2. 查看日志：
+   ```bash
+   docker compose logs -f
+   ```
+
+3. 确认服务器防火墙或路由器没有拦截映射出来的端口：
+   ```bash
+   # Linux 检查防火墙
+   sudo ufw status
+   sudo iptables -L -n | grep 58080
+   ```
+
+4. 如果是云服务器，检查安全组/网络 ACL 是否放行了对应端口。
+
+5. 本地测试容器内服务是否正常：
+   ```bash
+   docker exec simple-homepage curl -s http://localhost:58080/login.php
+   ```
+
+---
+
+### Q2: 重建容器后数据没了
+
+**原因：** 通常是因为没有挂载 `./data:/var/www/nav/data`，或者挂载路径写错了。
+
+**修复：** 检查 `docker-compose.yml` 中的 `volumes` 部分，确保有：
+
+```yaml
+volumes:
+  - ./data:/var/www/nav/data
+```
+
+如果数据已经丢失且没有备份，无法恢复。**请务必定期备份 `data` 目录。**
+
+---
+
+### Q3: 没有权限写入 `data`
+
+**现象：** 页面提示"无法保存"、日志为空、上传失败。
+
+**排查：**
 
 ```bash
-docker ps
-docker compose logs -f
+ls -la ./data
 ```
 
-再确认服务器防火墙或路由器没有拦截你映射出来的端口。
-
-### 重建容器后数据没了
-
-通常是因为没有挂载 `./data:/var/www/nav/data`。
-
-这个挂载一定不能删。
-
-### 没有权限写入 `data`
-
-先确保目录存在：
-
+**修复方法 1：** 确保目录存在：
 ```bash
 mkdir -p data
 ```
 
-如果是 Linux bind mount 场景，还可以按需显式指定：
-
+**修复方法 2：** 在 Linux bind mount 场景下，显式指定 PUID/PGID：
 ```bash
 export PUID=$(id -u)
 export PGID=$(id -g)
 docker compose up -d
 ```
 
-## 进阶内容去哪看
+**修复方法 3：** 如果目录已创建但权限不对，修正宿主目录权限：
+```bash
+sudo chown -R $(id -u):$(id -g) ./data
+```
+
+---
+
+### Q4: 登录后立即跳回登录页（Cookie 无效）
+
+**常见原因 1：** 后台设置了 `Cookie Secure 模式 = on`，但你在用 HTTP 访问。
+
+**修复：** 进入后台 → 系统设置 → Cookie Secure 模式，改为 `off` 或 `auto`。
+
+**常见原因 2：** Cookie Domain 填了域名，但你在用 IP 访问。
+
+**修复：** 清空 Cookie Domain，或改用域名访问。
+
+**常见原因 3：** 容器时间不对导致 Token 提前过期。
+
+**修复：** 确保 `TZ` 环境变量正确，或同步宿主机时间。
+
+> 代码已内置自动降级：用 IP 访问时会自动设置 `secure=false, domain=空`，保证内网 IP 访问始终可登录。
+
+---
+
+### Q5: 忘记管理员密码 / 无法登录
+
+**方法 1：** 通过命令行修改密码（不需要知道原密码）：
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+```
+
+**方法 2：** 如果不知道用户名，先查看用户列表：
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php list
+```
+
+**方法 3：** 如果完全无法恢复，可以重置整个系统（会清空所有配置，但备份文件保留）：
+```bash
+docker exec simple-homepage php /var/www/nav/manage_users.php reset
+```
+执行后刷新浏览器，会重新进入安装向导。
+
+---
+
+### Q6: 端口 58080 被占用
+
+**现象：** `docker compose up -d` 后容器启动失败，日志显示 `bind: address already in use`。
+
+**修复：** 修改 `docker-compose.yml` 中的端口映射，换一个未被占用的端口：
+```yaml
+ports:
+  - "58081:58080"
+```
+然后访问 `http://IP:58081`。
+
+---
+
+### Q7: 升级后页面空白或 502
+
+**排查：**
+
+1. 查看日志：
+   ```bash
+   docker compose logs -f
+   ```
+
+2. 可能是 Nginx 配置格式问题。进入容器检查：
+   ```bash
+   docker exec simple-homepage nginx -t
+   ```
+
+3. 如果是反代配置损坏，可以尝试从后台重新生成：
+   - 登录后台 → 系统设置 → Nginx 反代管理 → 生成配置并 Reload
+
+4. 极端情况下可以重置：
+   ```bash
+   docker exec simple-homepage php /var/www/nav/manage_users.php reset
+   ```
+
+---
+
+### Q8: Host-Agent 一键安装失败
+
+**排查：**
+
+1. 确认 `docker-compose.yml` 中挂载了 `docker.sock`：
+   ```yaml
+   - /var/run/docker.sock:/var/run/docker.sock
+   ```
+
+2. 确认容器内有权限访问 docker.sock：
+   ```bash
+   docker exec simple-homepage ls -la /var/run/docker.sock
+   ```
+
+3. 查看后台提示的具体错误信息，通常是网络问题或宿主机 Docker 版本不兼容。
+
+4. 安装成功后，**建议移除 `docker.sock` 挂载**，避免长期暴露 Docker API。
+
+---
+
+### Q9: 从 IP 访问迁移到域名 + HTTPS
+
+**步骤：**
+
+1. 配置好域名解析和前置 Nginx + SSL 证书
+2. 用域名访问后台，登录
+3. 进入 **系统设置**：
+   - `Cookie Secure 模式` 改为 `auto`（推荐）或 `on`
+   - `Cookie Domain` 填写 `.yourdomain.com`（前面带点，用于跨子域 SSO）
+4. 退出并重新登录
+5. 测试子站 SSO（如有）
+
+---
+
+### Q10: 如何备份和迁移数据
+
+**备份：**
+
+```bash
+cd ~/simple-homepage
+tar -czf nav-backup-$(date +%Y%m%d).tar.gz ./data
+```
+
+**迁移到新机器：**
+
+1. 在新机器上按小白部署流程创建目录和 `docker-compose.yml`
+2. 复制备份包到新机器的 `~/simple-homepage/` 目录
+3. 解压：
+   ```bash
+   tar -xzf nav-backup-20260101.tar.gz
+   ```
+4. 启动容器：
+   ```bash
+   docker compose up -d
+   ```
+
+> 无需复制任何程序文件，因为程序都在 Docker 镜像里。
+
+---
+
+### Q11: 计划任务不执行
+
+**排查：**
+
+1. 确认任务状态是"启用"
+2. 查看任务日志：`data/tasks/任务名.log`
+3. 确认容器内 crond 在运行：
+   ```bash
+   docker exec simple-homepage ps aux | grep cron
+   ```
+4. 检查任务命令是否正确，可以在容器内手动测试：
+   ```bash
+   docker exec simple-homepage sh /var/www/nav/data/tasks/你的任务.sh
+   ```
+
+---
+
+### Q12: 站点 favicon 无法显示
+
+**原因：** 部分内网站点或特殊域名无法被公网抓取到 favicon。
+
+**修复：**
+- 在后台站点编辑中手动设置图标（支持 Emoji）
+- 或上传自定义图标到可访问的 URL
+
+---
+
+## 进阶内容
 
 根目录这个 README 只保留新手部署和使用说明。
 
-这些进阶内容已经整理到 [local/README.md](local/README.md)：
+这些进阶内容已经整理到 [local/README.md](local/README.md) 和 `docs/` 目录：
 
-- 本地开发
-- 测试命令
-- 高级环境变量
-- 数据目录说明
+- 本地开发环境搭建
+- 测试命令（Playwright E2E / PHPUnit / Lighthouse）
+- 高级环境变量说明
+- 数据目录详细说明
 - CLI 管理命令
 - 多个 compose 组合方式
+- 技术架构与实现原理
 
 如果你只是想把项目跑起来，用这个 README 就够了。

@@ -1,13 +1,13 @@
 # PHP Web 开发注意事项
 
-> 基于 Nav Portal 项目实战踩坑总结，适用于所有 PHP Web 项目。
+> 基于 Simple Homepage 项目实战踩坑总结，适用于所有 PHP Web 项目。
 > 每一条都是真实 Bug 的教训。
 
 ---
 
 ## 一、HTTP Header 输出顺序（最高频 Bug）
 
-### 核心原则：**任何 `header()`、`setcookie()`、`session_start()` 调用都必须在任何 HTML/文本输出之前执行**
+### 核心原则：任何 `header()`、`setcookie()`、`session_start()` 调用都必须在任何 HTML/文本输出之前执行
 
 ### 典型错误模式
 
@@ -90,10 +90,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 ### 实际案例
 
-Nav Portal 的 `login.php` 和 `setup.php` 最初没有在顶部 `session_start()`，
-导致 `csrf_field()` 在 HTML 模板中调用时才触发 `session_start()`，
-此时 `Set-Cookie: PHPSESSID=...` 头无法发送，
-浏览器没有 session cookie，下次提交时 CSRF 验证失败（403）。
+`login.php` 和 `setup.php` 最初没有在顶部 `session_start()`，导致 `csrf_field()` 在 HTML 模板中调用时才触发 `session_start()`，此时 `Set-Cookie: PHPSESSID=...` 头无法发送，浏览器没有 session cookie，下次提交时 CSRF 验证失败（403）。
 
 ---
 
@@ -196,10 +193,6 @@ function is_safe_request_target(string $url): bool {
     $parsed = parse_url($url);
     $host   = $parsed['host'] ?? '';
     if (!$host) return false;
-    // 必须是合法 IP 或域名
-    if (!filter_var($host, FILTER_VALIDATE_IP) && !filter_var('http://'.$host, FILTER_VALIDATE_URL)) {
-        return false;
-    }
     // 禁止内网 IP
     if (filter_var($host, FILTER_VALIDATE_IP)) {
         if (!filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
@@ -212,15 +205,9 @@ function is_safe_request_target(string $url): bool {
 }
 ```
 
-### 注意：`FILTER_FLAG_NO_RES_RANGE` 不覆盖 loopback
+### 注意
 
-```php
-// 这个返回 false（正确，127.0.0.1 是保留地址）
-filter_var('127.0.0.1', FILTER_VALIDATE_IP, FILTER_FLAG_NO_RES_RANGE);
-
-// 但 is_private_ip 的实现如果只用这个 flag，
-// 需要额外用正则明确拒绝 127.x.x.x
-```
+`FILTER_FLAG_NO_RES_RANGE` 不覆盖 loopback，需要额外用正则明确拒绝 `127.x.x.x`。
 
 ---
 
@@ -278,40 +265,6 @@ if (!$path || strpos($path, $base) !== 0) {
 }
 ```
 
-### 
-## 八、Nginx + PHP-FPM 并发死锁
-
-nginx auth_request 会为每个请求发起子请求，子请求和主请求争抢 PHP-FPM worker 导致死锁。
-修复：在 PHP location 内加 auth_request off，由 PHP 自行鉴权。
-
-## 九、JSON 存储
-
-写入用 LOCK_EX + JSON_UNESCAPED_UNICODE，读取加 ?? [] 防空文件崩溃。
-
-## 十、密码安全
-
-用 password_hash/password_verify，token 比较用 hash_equals 防时序攻击。
-
-## 十一、PRG 模式
-
-POST 处理必须在 require header.php 之前，处理完立即 header Location + exit。
-
-## 快速检查清单
-
-- session_start() 在文件最顶部
-- header()/setcookie() 在任何 HTML 输出之前  
-- POST 处理在 require header.php 之前
-- 表单有 csrf_field()，POST 有 csrf_check()
-- 输出变量用 htmlspecialchars()
-- 文件路径参数用 basename() 或正则白名单
-- 密码用 password_hash()，比较用 password_verify()
-- Token 比较用 hash_equals()
-- JSON 写入用 LOCK_EX，读取有 ?? [] 默认值
-- AUTH_SECRET_KEY 已替换为随机值
-- nginx PHP location 有 auth_request off
-- Docker volume 只挂载数据目录
-\n## 八、Nginx+PHP-FPM 死锁\n\nnginx auth_request 子请求与主请求争抢 worker 导致504死锁。修复：PHP location 加 auth_request off。\n\n## 九、JSON存储\n\n写入用LOCK_EX+JSON_UNESCAPED_UNICODE，读取加??[]防崩溃。\n\n## 十、密码安全\n\npassword_hash/password_verify，token比较用hash_equals防时序攻击。\n\n## 快速检查清单\n\n- session_start()在文件顶部\n- header()/setcookie()在HTML输出前\n- POST处理在require header.php前\n- csrf_field()+csrf_check()\n- htmlspecialchars()转义输出\n- basename()防路径遍历\n- AUTH_SECRET_KEY随机值\n- nginx PHP location加auth_request off
-
 ### 文件上传安全
 
 ```php
@@ -345,6 +298,7 @@ location ^~ /admin/ {
 ```
 
 **PHP 端**：AJAX 鉴权失败返回 JSON，不能 302 重定向：
+
 ```php
 if (!auth_get_current_user()) {
     http_response_code(401);
@@ -399,7 +353,7 @@ require_once 'header.php'; // 之后才输出 HTML
 
 ---
 
-## 快速检查清单
+## 十二、开发环境常用检查清单
 
 - [ ] `session_start()` 在文件最顶部
 - [ ] `header()`/`setcookie()` 在任何 HTML 输出之前
@@ -414,3 +368,7 @@ require_once 'header.php'; // 之后才输出 HTML
 - [ ] nginx PHP location 有 `auth_request off`
 - [ ] Docker volume 只挂载数据目录，不挂载源码目录
 - [ ] 文件下载响应头在任何 HTML 输出之前
+
+---
+
+*文档版本：v2.0 | 整理自项目真实踩坑记录*
