@@ -170,7 +170,7 @@ services:
       - ./data:/var/www/nav/data
       # 可选：只在后台一键安装 / 升级 host-agent 时临时挂载
       # 确认 host-agent 正常后建议移除
-      # - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:
       disable: true
