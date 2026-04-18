@@ -1463,5 +1463,88 @@ if ($action === 'task_list') {
     host_api_send($result);
 }
 
+// Archive APIs
+if ($action === 'archive_extract') {
+    host_api_require_any_permission(['ssh.files.write', 'ssh.manage']);
+    csrf_check();
+    $path = trim((string)($_POST['path'] ?? ''));
+    $destDir = trim((string)($_POST['dest_dir'] ?? ''));
+    $hostId = trim((string)($_POST['host_id'] ?? 'local'));
+    $target = host_api_target_payload($hostId);
+    if (empty($target)) {
+        host_api_send(['ok' => false, 'msg' => '目标主机不存在']);
+    }
+    $root = ($target['type'] ?? 'local') === 'remote' ? '' : ($target['root'] ?? '/hostfs');
+    // 耗时操作走异步任务
+    $result = host_agent_task_submit('archive_extract', [
+        'path' => $path,
+        'dest_dir' => $destDir,
+        'root' => $root,
+    ]);
+    ssh_manager_audit('archive_extract', ['host_id' => $hostId, 'path' => $path, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'archive_compress') {
+    host_api_require_any_permission(['ssh.files.write', 'ssh.manage']);
+    csrf_check();
+    $paths = (array)($_POST['paths'] ?? []);
+    $destPath = trim((string)($_POST['dest_path'] ?? ''));
+    $format = trim((string)($_POST['format'] ?? 'tar.gz'));
+    $hostId = trim((string)($_POST['host_id'] ?? 'local'));
+    $target = host_api_target_payload($hostId);
+    if (empty($target)) {
+        host_api_send(['ok' => false, 'msg' => '目标主机不存在']);
+    }
+    $root = ($target['type'] ?? 'local') === 'remote' ? '' : ($target['root'] ?? '/hostfs');
+    $result = host_agent_task_submit('archive_compress', [
+        'paths' => $paths,
+        'dest_path' => $destPath,
+        'format' => $format,
+        'root' => $root,
+    ]);
+    ssh_manager_audit('archive_compress', ['host_id' => $hostId, 'dest_path' => $destPath, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
+if ($action === 'archive_list') {
+    host_api_require_any_permission(['ssh.files', 'ssh.manage']);
+    $path = trim((string)($_GET['path'] ?? $_POST['path'] ?? ''));
+    $hostId = trim((string)($_GET['host_id'] ?? $_POST['host_id'] ?? 'local'));
+    $target = host_api_target_payload($hostId);
+    if (empty($target)) {
+        host_api_send(['ok' => false, 'msg' => '目标主机不存在']);
+    }
+    $root = ($target['type'] ?? 'local') === 'remote' ? '' : ($target['root'] ?? '/hostfs');
+    $result = host_agent_archive_list($path);
+    host_api_send($result);
+}
+
+if ($action === 'archive_tools') {
+    host_api_require_any_permission(['ssh.files', 'ssh.manage']);
+    $result = host_agent_archive_tools();
+    host_api_send($result);
+}
+
+// HTTP Download API
+if ($action === 'download_submit') {
+    host_api_require_any_permission(['ssh.files.write', 'ssh.manage']);
+    csrf_check();
+    $url = trim((string)($_POST['url'] ?? ''));
+    $destDir = trim((string)($_POST['dest_dir'] ?? '/tmp'));
+    $filename = trim((string)($_POST['filename'] ?? ''));
+    if ($url === '') {
+        host_api_send(['ok' => false, 'msg' => '缺少下载 URL']);
+    }
+    $result = host_agent_task_submit('download', [
+        'url' => $url,
+        'dest_dir' => $destDir,
+        'filename' => $filename,
+        'root' => host_agent_install_mode() === 'simulate' ? '/var/www/nav/data/host-agent-sim-root' : '/hostfs',
+    ]);
+    ssh_manager_audit('download_submit', ['url' => $url, 'dest_dir' => $destDir, 'ok' => (bool)($result['ok'] ?? false)]);
+    host_api_send($result);
+}
+
 http_response_code(404);
 echo json_encode(['ok' => false, 'msg' => '未知 action'], JSON_UNESCAPED_UNICODE);

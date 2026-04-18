@@ -144,6 +144,7 @@ $csrfValue = csrf_token();
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="applyFileOp('chgrp')">chgrp</button><?php endif; ?>
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="archiveCurrentPath()">压缩</button><?php endif; ?>
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="extractCurrentFile()">解压</button><?php endif; ?>
+        <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="downloadFromUrl()">⬇️ URL下载</button><?php endif; ?>
       </div>
       <div id="fm-clipboard-meta" class="form-hint" style="margin-bottom:10px"></div>
       <div class="table-wrap">
@@ -335,9 +336,13 @@ function renderFileRows() {
     .forEach(function(item) {
       var tr = document.createElement('tr');
       var checkHtml = '<input type="checkbox" class="fm-item-check" value="' + escapeHtml(item.path) + '">';
+      var isArchive = item.type === 'file' && /\.(tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.lz|tlz|tar\.zst|tar|zip|7z|rar)$/i.test(item.name);
       var actions = item.type === 'dir'
         ? '<button type="button" class="btn btn-sm btn-secondary" data-open="' + escapeHtml(item.path) + '">进入</button>'
         : '<button type="button" class="btn btn-sm btn-secondary" data-read="' + escapeHtml(item.path) + '">编辑</button>';
+      if (isArchive) {
+        actions += ' <button type="button" class="btn btn-sm btn-secondary" data-extract="' + escapeHtml(item.path) + '">解压</button>';
+      }
       if (FM_CAN_WRITE) {
         actions += ' <button type="button" class="btn btn-sm btn-secondary" data-rename="' + escapeHtml(item.path) + '">重命名</button>';
         actions += ' <button type="button" class="btn btn-sm btn-danger" data-delete="' + escapeHtml(item.path) + '">删除</button>';
@@ -370,6 +375,11 @@ function renderFileRows() {
   tbody.querySelectorAll('[data-rename]').forEach(function(btn) {
     btn.addEventListener('click', function() {
       renamePath(this.getAttribute('data-rename'));
+    });
+  });
+  tbody.querySelectorAll('[data-extract]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      extractArchive(this.getAttribute('data-extract'));
     });
   });
 }
@@ -810,6 +820,24 @@ async function applyFileOp(action) {
   loadFiles();
 }
 
+async function pollTask(taskId, onProgress) {
+  while (true) {
+    await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+    var res = await fetch('host_api.php?action=task_status&task_id=' + encodeURIComponent(taskId), {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    var status = await res.json();
+    if (!status.ok) {
+      if (onProgress) onProgress({ status: 'error', error: status.msg });
+      return status;
+    }
+    if (onProgress) onProgress(status);
+    if (status.status !== 'pending' && status.status !== 'running') {
+      return status.result ? (status.result.ok !== undefined ? status.result : status) : status;
+    }
+  }
+}
+
 async function archiveCurrentPath() {
   if (!FM_CAN_WRITE) return;
   var path = selectedPaths()[0] || document.getElementById('fm-edit-path').value || currentPath();
@@ -819,11 +847,21 @@ async function archiveCurrentPath() {
   }
   var archivePath = prompt('请输入压缩包完整路径', path.replace(/\/$/, '') + '.tar.gz');
   if (!archivePath) return;
-  var data = await fmRun('fm-directory', '压缩文件', '正在创建压缩包…', function() {
-    return fileApiPost('archive', { host_id: currentHostId(), path: path, archive_path: archivePath });
-  });
-  showToast(data.msg || (data.ok ? '压缩成功' : '压缩失败'), data.ok ? 'success' : 'error');
-  if (data.ok) loadFiles();
+  showToast('正在提交压缩任务…', 'info');
+  var data = await fileApiPost('archive', { host_id: currentHostId(), path: path, archive_path: archivePath });
+  if (data.task_id) {
+    showToast('压缩任务已提交，ID: ' + data.task_id, 'info');
+    var final = await pollTask(data.task_id, function(status) {
+      var output = status.output || '';
+      var msg = (status.result && status.result.msg) ? status.result.msg : '';
+      showToast('压缩状态: ' + status.status + (msg ? ' | ' + msg : ''), 'info');
+    });
+    showToast(final.msg || (final.ok ? '压缩完成' : '压缩失败'), final.ok ? 'success' : 'error');
+    if (final.ok) loadFiles();
+  } else {
+    showToast(data.msg || (data.ok ? '压缩成功' : '压缩失败'), data.ok ? 'success' : 'error');
+    if (data.ok) loadFiles();
+  }
 }
 
 async function extractCurrentFile() {
@@ -835,11 +873,56 @@ async function extractCurrentFile() {
   }
   var destination = prompt('请输入解压目录', currentPath() || '/');
   if (!destination) return;
-  var data = await fmRun('fm-directory', '解压文件', '正在解压到目标目录…', function() {
-    return fileApiPost('extract', { host_id: currentHostId(), path: path, destination: destination });
+  showToast('正在提交解压任务…', 'info');
+  var data = await fileApiPost('extract', { host_id: currentHostId(), path: path, destination: destination });
+  if (data.task_id) {
+    showToast('解压任务已提交，ID: ' + data.task_id, 'info');
+    var final = await pollTask(data.task_id, function(status) {
+      var output = status.output || '';
+      var msg = (status.result && status.result.msg) ? status.result.msg : '';
+      showToast('解压状态: ' + status.status + (msg ? ' | ' + msg : ''), 'info');
+    });
+    showToast(final.msg || (final.ok ? '解压完成' : '解压失败'), final.ok ? 'success' : 'error');
+    if (final.ok) loadFiles();
+  } else {
+    showToast(data.msg || (data.ok ? '解压成功' : '解压失败'), data.ok ? 'success' : 'error');
+    if (data.ok) loadFiles();
+  }
+}
+
+async function downloadFromUrl() {
+  if (!FM_CAN_WRITE) return;
+  var url = prompt('请输入要下载的 URL');
+  if (!url) return;
+  var destDir = prompt('请输入保存目录', currentPath() || '/tmp');
+  if (!destDir) return;
+  var filename = prompt('请输入保存文件名（留空使用 URL 中的文件名）', '');
+  showToast('正在提交下载任务…', 'info');
+  var form = new URLSearchParams();
+  form.append('action', 'download_submit');
+  form.append('_csrf', FM_CSRF);
+  form.append('url', url);
+  form.append('dest_dir', destDir);
+  form.append('filename', filename || '');
+  var res = await fetch('host_api.php', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form
   });
-  showToast(data.msg || (data.ok ? '解压成功' : '解压失败'), data.ok ? 'success' : 'error');
-  if (data.ok) loadFiles();
+  var data = await res.json();
+  if (data.task_id) {
+    showToast('下载任务已提交，ID: ' + data.task_id, 'info');
+    var final = await pollTask(data.task_id, function(status) {
+      var output = status.output || '';
+      var msg = (status.result && status.result.msg) ? status.result.msg : '';
+      showToast('下载状态: ' + status.status + (msg ? ' | ' + msg : ''), 'info');
+    });
+    showToast(final.msg || (final.ok ? '下载完成' : '下载失败'), final.ok ? 'success' : 'error');
+    if (final.ok) loadFiles();
+  } else {
+    showToast(data.msg || (data.ok ? '下载成功' : '下载失败'), data.ok ? 'success' : 'error');
+  }
 }
 
 async function saveFavorite() {

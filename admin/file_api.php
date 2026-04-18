@@ -199,8 +199,9 @@ if ($action === 'archive') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
     $archivePath = trim((string)($_POST['archive_path'] ?? ($path . '.tar.gz')));
-    $result = host_agent_fs_archive(file_api_target_or_404($hostId), $path, $archivePath);
-    ssh_manager_audit('fs_archive', ['host_id' => $hostId, 'path' => $path, 'archive_path' => $archivePath, 'ok' => (bool)($result['ok'] ?? false)]);
+    // 默认走异步任务，避免大文件压缩阻塞
+    $result = host_agent_fs_archive_async(file_api_target_or_404($hostId), $path, $archivePath);
+    ssh_manager_audit('fs_archive', ['host_id' => $hostId, 'path' => $path, 'archive_path' => $archivePath, 'ok' => (bool)($result['ok'] ?? false), 'async' => true]);
     file_api_send($result);
 }
 
@@ -210,8 +211,9 @@ if ($action === 'extract') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
     $destination = trim((string)($_POST['destination'] ?? dirname($path))) ?: dirname($path);
-    $result = host_agent_fs_extract(file_api_target_or_404($hostId), $path, $destination);
-    ssh_manager_audit('fs_extract', ['host_id' => $hostId, 'path' => $path, 'destination' => $destination, 'ok' => (bool)($result['ok'] ?? false)]);
+    // 默认走异步任务，避免大文件解压阻塞
+    $result = host_agent_fs_extract_async(file_api_target_or_404($hostId), $path, $destination);
+    ssh_manager_audit('fs_extract', ['host_id' => $hostId, 'path' => $path, 'destination' => $destination, 'ok' => (bool)($result['ok'] ?? false), 'async' => true]);
     file_api_send($result);
 }
 

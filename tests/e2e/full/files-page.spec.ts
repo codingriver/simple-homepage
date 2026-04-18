@@ -347,3 +347,73 @@ test('files page can create webdav share from current local directory', async ({
   expect(accountCheck.stdout).toContain(baseDir);
   page.removeAllListeners('dialog');
 });
+
+test('files page supports URL download via host-agent task queue', async ({ page }) => {
+  test.setTimeout(120000);
+  await ensureInstalledHostAgent();
+  const tracker = await attachClientErrorTracking(page, {
+    ignoredMessages: [
+      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
+      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+    ],
+  });
+
+  const ts = Date.now();
+  const destDir = `/download-test-${ts}`;
+  const filename = `dummy-${ts}.pdf`;
+
+  await loginAsDevAdmin(page);
+
+  // 1. 提交下载任务
+  const csrfRes = await page.request.get('http://127.0.0.1:58080/admin/files.php');
+  const csrfBody = await csrfRes.text();
+  const csrfMatch = csrfBody.match(/name="_csrf" value="([^"]+)"/);
+  const csrfToken = csrfMatch ? csrfMatch[1] : '';
+
+  const submitRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php?action=download_submit', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+    form: {
+      _csrf: csrfToken,
+      url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      dest_dir: destDir,
+      filename: filename,
+    },
+  });
+  const submitBody = await submitRes.json();
+  expect(submitBody.ok).toBe(true);
+  expect(submitBody.task_id).toBeTruthy();
+
+  // 2. 轮询任务状态直到完成
+  let finalStatus: any = null;
+  const taskId = submitBody.task_id;
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(1000);
+    const statusRes = await page.request.get(
+      `http://127.0.0.1:58080/admin/host_api.php?action=task_status&task_id=${encodeURIComponent(taskId)}`,
+      { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
+    );
+    const status = await statusRes.json();
+    expect(status.ok).toBe(true);
+    if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+      finalStatus = status;
+      break;
+    }
+  }
+
+  expect(finalStatus).not.toBeNull();
+  expect(finalStatus.status).toBe('completed');
+  expect(finalStatus.result.ok).toBe(true);
+
+  // 3. 验证文件已下载到 simulate root
+  await expect
+    .poll(() => {
+      const result = runDockerPhpInline(
+        ['$path = "/var/www/nav/data/host-agent-sim-root' + destDir + '/' + filename + '";', 'echo file_exists($path) ? filesize($path) : "0";'].join(' ')
+      );
+      expect(result.code).toBe(0);
+      return parseInt(result.stdout.trim(), 10);
+    }, { timeout: 15000 })
+    .toBeGreaterThan(0);
+
+  await tracker.assertNoClientErrors();
+});

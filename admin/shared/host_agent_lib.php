@@ -562,6 +562,30 @@ function host_agent_fs_extract(array $target, string $path, string $destination)
     return host_agent_api_request('POST', '/fs/extract', ['target' => $target, 'path' => $path, 'destination' => $destination]);
 }
 
+function host_agent_fs_archive_async(array $target, string $path, string $archivePath): array {
+    if (($target['type'] ?? 'local') === 'remote') {
+        $root = '';
+    } else {
+        $root = !empty($target['root']) ? (string)$target['root'] : (host_agent_install_mode() === 'simulate' ? '/var/www/nav/data/host-agent-sim-root' : '/hostfs');
+    }
+    return host_agent_api_request('POST', '/task/submit', [
+        'action' => 'archive_compress',
+        'payload' => ['paths' => [$path], 'dest_path' => $archivePath, 'format' => 'tar.gz', 'root' => $root],
+    ]);
+}
+
+function host_agent_fs_extract_async(array $target, string $path, string $destination): array {
+    if (($target['type'] ?? 'local') === 'remote') {
+        $root = '';
+    } else {
+        $root = !empty($target['root']) ? (string)$target['root'] : (host_agent_install_mode() === 'simulate' ? '/var/www/nav/data/host-agent-sim-root' : '/hostfs');
+    }
+    return host_agent_api_request('POST', '/task/submit', [
+        'action' => 'archive_extract',
+        'payload' => ['path' => $path, 'dest_dir' => $destination, 'root' => $root],
+    ]);
+}
+
 function host_agent_remote_exec_command(array $target, string $command): array {
     return host_agent_api_request('POST', '/remote/exec', ['target' => $target, 'command' => $command]);
 }
@@ -1220,4 +1244,31 @@ function host_agent_task_cancel(string $taskId): array {
 
 function host_agent_task_list(): array {
     return host_agent_api_request('GET', '/task/list');
+}
+
+// ============================================================
+// Archive Extract / Compress SDK
+// ============================================================
+
+function host_agent_archive_extract(string $path, string $destDir): array {
+    return host_agent_api_request('POST', '/archive/extract', [
+        'path' => $path,
+        'dest_dir' => $destDir,
+    ]);
+}
+
+function host_agent_archive_compress(array $paths, string $destPath, string $format = 'tar.gz'): array {
+    return host_agent_api_request('POST', '/archive/compress', [
+        'paths' => $paths,
+        'dest_path' => $destPath,
+        'format' => $format,
+    ]);
+}
+
+function host_agent_archive_list(string $path): array {
+    return host_agent_api_request('GET', '/archive/list?path=' . rawurlencode($path));
+}
+
+function host_agent_archive_tools(): array {
+    return host_agent_api_request('GET', '/archive/tools');
 }

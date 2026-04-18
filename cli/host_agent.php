@@ -3140,6 +3140,189 @@ function host_agent_local_mkdir(string $root, string $path): array {
     return ['ok' => true, 'msg' => '目录已创建', 'path' => host_agent_local_display_path($root, $target)];
 }
 
+// ============================================================
+// Archive Extract / Compress (文件解压/压缩)
+// ============================================================
+
+function host_agent_archive_detect_format(string $path): ?string {
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    $name = strtolower(basename($path));
+    if (str_ends_with($name, '.tar.gz') || str_ends_with($name, '.tgz')) return 'tar.gz';
+    if (str_ends_with($name, '.tar.bz2') || str_ends_with($name, '.tbz2')) return 'tar.bz2';
+    if (str_ends_with($name, '.tar.xz') || str_ends_with($name, '.txz')) return 'tar.xz';
+    if (str_ends_with($name, '.tar.lz') || str_ends_with($name, '.tlz')) return 'tar.lz';
+    if ($ext === 'tar') return 'tar';
+    if ($ext === 'zip') return 'zip';
+    if ($ext === '7z') return '7z';
+    if ($ext === 'rar') return 'rar';
+    if (str_ends_with($name, '.tar.zst')) return 'tar.zst';
+    return null;
+}
+
+function host_agent_archive_extract_cmd(string $format, string $path, string $destDir): ?string {
+    $path = escapeshellarg($path);
+    $destDir = escapeshellarg($destDir);
+    $cmds = [
+        'tar.gz'  => 'tar -xzf ' . $path . ' -C ' . $destDir,
+        'tar.bz2' => 'tar -xjf ' . $path . ' -C ' . $destDir,
+        'tar.xz'  => 'tar -xJf ' . $path . ' -C ' . $destDir,
+        'tar.lz'  => 'tar --lzip -xf ' . $path . ' -C ' . $destDir,
+        'tar.zst' => 'tar --zstd -xf ' . $path . ' -C ' . $destDir,
+        'tar'     => 'tar -xf ' . $path . ' -C ' . $destDir,
+        'zip'     => 'unzip -o ' . $path . ' -d ' . $destDir,
+        '7z'      => '7z x ' . $path . ' -o' . $destDir . ' -y',
+        'rar'     => 'unrar x -o+ ' . $path . ' ' . $destDir,
+    ];
+    return $cmds[$format] ?? null;
+}
+
+function host_agent_archive_compress_cmd(string $format, array $paths, string $destPath): ?string {
+    $destPath = escapeshellarg($destPath);
+    if ($format === 'tar.gz') {
+        return 'tar -czf ' . $destPath . ' -C ' . escapeshellarg(dirname($paths[0])) . ' ' . implode(' ', array_map('basename', $paths));
+    }
+    if ($format === 'tar.bz2') {
+        return 'tar -cjf ' . $destPath . ' -C ' . escapeshellarg(dirname($paths[0])) . ' ' . implode(' ', array_map('basename', $paths));
+    }
+    if ($format === 'tar.xz') {
+        return 'tar -cJf ' . $destPath . ' -C ' . escapeshellarg(dirname($paths[0])) . ' ' . implode(' ', array_map('basename', $paths));
+    }
+    if ($format === 'zip') {
+        $items = implode(' ', array_map('escapeshellarg', $paths));
+        return 'zip -r ' . $destPath . ' ' . $items;
+    }
+    if ($format === '7z') {
+        $items = implode(' ', array_map('escapeshellarg', $paths));
+        return '7z a ' . $destPath . ' ' . $items;
+    }
+    if ($format === 'tar') {
+        return 'tar -cf ' . $destPath . ' -C ' . escapeshellarg(dirname($paths[0])) . ' ' . implode(' ', array_map('basename', $paths));
+    }
+    return null;
+}
+
+function host_agent_archive_list_cmd(string $format, string $path): ?string {
+    $path = escapeshellarg($path);
+    $cmds = [
+        'tar.gz'  => 'tar -tzf ' . $path,
+        'tar.bz2' => 'tar -tjf ' . $path,
+        'tar.xz'  => 'tar -tJf ' . $path,
+        'tar.lz'  => 'tar --lzip -tf ' . $path,
+        'tar.zst' => 'tar --zstd -tf ' . $path,
+        'tar'     => 'tar -tf ' . $path,
+        'zip'     => 'unzip -l ' . $path,
+        '7z'      => '7z l ' . $path,
+        'rar'     => 'unrar l ' . $path,
+    ];
+    return $cmds[$format] ?? null;
+}
+
+function host_agent_archive_extract(string $root, string $path, string $destDir): array {
+    $resolved = host_agent_safe_local_path($root, $path);
+    if (empty($resolved['ok'])) return $resolved;
+    $sourcePath = (string)$resolved['path'];
+    if (!is_file($sourcePath)) return ['ok' => false, 'msg' => '文件不存在'];
+
+    $format = host_agent_archive_detect_format($sourcePath);
+    if ($format === null) return ['ok' => false, 'msg' => '不支持的压缩格式'];
+
+    $destResolved = host_agent_safe_local_path($root, $destDir);
+    if (empty($destResolved['ok'])) return $destResolved;
+    $destPath = (string)$destResolved['path'];
+
+    if (!is_dir($destPath)) {
+        mkdir($destPath, 0755, true);
+    }
+
+    $cmd = host_agent_archive_extract_cmd($format, $sourcePath, $destPath);
+    if ($cmd === null) return ['ok' => false, 'msg' => '无法构建解压命令'];
+
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? '解压完成' : ('解压失败：' . trim($result['stderr'] ?: $result['stdout'])),
+        'format' => $format,
+        'dest' => host_agent_local_display_path($root, $destPath),
+    ];
+}
+
+function host_agent_archive_compress(string $root, array $paths, string $destPath, string $format): array {
+    $resolvedPaths = [];
+    foreach ($paths as $p) {
+        $r = host_agent_safe_local_path($root, $p);
+        if (empty($r['ok'])) return $r;
+        $resolvedPaths[] = (string)$r['path'];
+    }
+    $destResolved = host_agent_safe_local_path($root, $destPath);
+    if (empty($destResolved['ok'])) return $destResolved;
+    $dest = (string)$destResolved['path'];
+
+    host_agent_ensure_parent_dir($dest);
+
+    $validFormats = ['tar.gz', 'tar.bz2', 'tar.xz', 'tar', 'zip', '7z'];
+    if (!in_array($format, $validFormats, true)) {
+        return ['ok' => false, 'msg' => '不支持的压缩格式，支持: ' . implode(', ', $validFormats)];
+    }
+
+    $cmd = host_agent_archive_compress_cmd($format, $resolvedPaths, $dest);
+    if ($cmd === null) return ['ok' => false, 'msg' => '无法构建压缩命令'];
+
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    $ok = $result['ok'] && $result['code'] === 0;
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? '压缩完成' : ('压缩失败：' . trim($result['stderr'] ?: $result['stdout'])),
+        'format' => $format,
+        'dest' => host_agent_local_display_path($root, $dest),
+    ];
+}
+
+function host_agent_archive_list(string $root, string $path): array {
+    $resolved = host_agent_safe_local_path($root, $path);
+    if (empty($resolved['ok'])) return $resolved;
+    $sourcePath = (string)$resolved['path'];
+    if (!is_file($sourcePath)) return ['ok' => false, 'msg' => '文件不存在'];
+
+    $format = host_agent_archive_detect_format($sourcePath);
+    if ($format === null) return ['ok' => false, 'msg' => '不支持的压缩格式'];
+
+    $cmd = host_agent_archive_list_cmd($format, $sourcePath);
+    if ($cmd === null) return ['ok' => false, 'msg' => '无法构建列表命令'];
+
+    $result = host_agent_host_shell($cmd . ' 2>&1');
+    if (!$result['ok'] || $result['code'] !== 0) {
+        return ['ok' => false, 'msg' => '读取压缩包内容失败', 'output' => trim($result['stderr'] ?: $result['stdout'])];
+    }
+
+    $lines = preg_split('/\r?\n/', trim($result['stdout'])) ?: [];
+    $entries = [];
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line === '.' || $line === '..') continue;
+        $entries[] = $line;
+    }
+    return ['ok' => true, 'format' => $format, 'entries' => $entries, 'total' => count($entries)];
+}
+
+function host_agent_archive_detect_tools(): array {
+    $tools = [];
+    $checks = [
+        'tar'   => 'command -v tar',
+        'zip'   => 'command -v unzip',
+        '7z'    => 'command -v 7z',
+        'unrar' => 'command -v unrar',
+        'rar'   => 'command -v rar',
+    ];
+    foreach ($checks as $name => $cmd) {
+        $result = host_agent_host_shell($cmd . ' >/dev/null 2>&1 && echo yes || echo no');
+        if (trim($result['stdout'] ?? '') === 'yes') {
+            $tools[] = $name;
+        }
+    }
+    return $tools;
+}
+
 function host_agent_local_file_stat(string $root, string $path, string $mode = 'host'): array {
     $resolved = host_agent_safe_local_path($root, $path);
     if (empty($resolved['ok'])) {
@@ -3378,10 +3561,21 @@ function host_agent_local_archive(string $root, string $path, string $archivePat
     if (!file_exists($source)) {
         return ['ok' => false, 'msg' => '源文件或目录不存在'];
     }
+    $format = host_agent_archive_detect_format($archive);
+    if ($format === null) {
+        $format = 'tar.gz'; // 默认格式
+    }
+    $validFormats = ['tar.gz', 'tar.bz2', 'tar.xz', 'tar', 'zip', '7z'];
+    if (!in_array($format, $validFormats, true)) {
+        return ['ok' => false, 'msg' => '不支持的压缩格式，支持: ' . implode(', ', $validFormats)];
+    }
     host_agent_ensure_parent_dir($archive);
-    $cmd = 'tar -czf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg(dirname($source)) . ' ' . escapeshellarg(basename($source));
+    $cmd = host_agent_archive_compress_cmd($format, [$source], $archive);
+    if ($cmd === null) {
+        return ['ok' => false, 'msg' => '无法构建压缩命令'];
+    }
     $result = host_agent_proc_run(['sh', '-lc', $cmd]);
-    return ['ok' => $result['ok'], 'msg' => $result['ok'] ? '压缩包已创建' : trim($result['stderr'] ?: $result['stdout'] ?: '压缩失败'), 'path' => host_agent_local_display_path($root, $archive)];
+    return ['ok' => $result['ok'], 'msg' => $result['ok'] ? '压缩包已创建' : trim($result['stderr'] ?: $result['stdout'] ?: '压缩失败'), 'path' => host_agent_local_display_path($root, $archive), 'format' => $format];
 }
 
 function host_agent_local_extract(string $root, string $path, string $destination): array {
@@ -3401,9 +3595,16 @@ function host_agent_local_extract(string $root, string $path, string $destinatio
     if (!is_dir($dest)) {
         mkdir($dest, 0755, true);
     }
-    $cmd = 'tar -xzf ' . escapeshellarg($archive) . ' -C ' . escapeshellarg($dest);
+    $format = host_agent_archive_detect_format($archive);
+    if ($format === null) {
+        return ['ok' => false, 'msg' => '不支持的压缩格式'];
+    }
+    $cmd = host_agent_archive_extract_cmd($format, $archive, $dest);
+    if ($cmd === null) {
+        return ['ok' => false, 'msg' => '无法构建解压命令'];
+    }
     $result = host_agent_proc_run(['sh', '-lc', $cmd]);
-    return ['ok' => $result['ok'], 'msg' => $result['ok'] ? '压缩包已解压' : trim($result['stderr'] ?: $result['stdout'] ?: '解压失败'), 'path' => host_agent_local_display_path($root, $dest)];
+    return ['ok' => $result['ok'], 'msg' => $result['ok'] ? '压缩包已解压' : trim($result['stderr'] ?: $result['stdout'] ?: '解压失败'), 'path' => host_agent_local_display_path($root, $dest), 'format' => $format];
 }
 
 function host_agent_remote_file_list(array $target, string $path): array {
@@ -5616,6 +5817,56 @@ function host_agent_execute_action(string $action, array $payload): array {
             $manifest = is_array($payload['manifest'] ?? null) ? $payload['manifest'] : [];
             return host_agent_manifest_apply($manifest, true);
 
+        case 'download':
+            $url = trim((string)($payload['url'] ?? ''));
+            $destDir = trim((string)($payload['dest_dir'] ?? '/tmp'));
+            $filename = trim((string)($payload['filename'] ?? ''));
+            $root = trim((string)($payload['root'] ?? '/hostfs'));
+            if ($url === '') return ['ok' => false, 'msg' => '缺少下载 URL'];
+            if ($filename === '') {
+                $filename = basename(parse_url($url, PHP_URL_PATH) ?: 'download');
+            }
+            $destDirResolved = host_agent_safe_local_path($root, $destDir);
+            if (empty($destDirResolved['ok'])) return $destDirResolved;
+            $destDirReal = (string)$destDirResolved['path'];
+            $destPath = rtrim($destDirReal, '/') . '/' . $filename;
+            host_agent_ensure_parent_dir($destPath);
+            // 检测可用下载工具（优先 aria2）
+            $aria2Check = host_agent_host_shell('command -v aria2c >/dev/null 2>&1 && echo yes || echo no');
+            $wgetCheck = host_agent_host_shell('command -v wget >/dev/null 2>&1 && echo yes || echo no');
+            $curlCheck = host_agent_host_shell('command -v curl >/dev/null 2>&1 && echo yes || echo no');
+            if (trim($aria2Check['stdout'] ?? '') === 'yes') {
+                // aria2 支持断点续传和多线程，输出简洁进度
+                $cmd = 'aria2c -c -x 4 -s 4 --file-allocation=none --summary-interval=5 --console-log-level=warn -d ' . escapeshellarg($destDirReal) . ' -o ' . escapeshellarg($filename) . ' ' . escapeshellarg($url) . ' 2>&1';
+            } elseif (trim($wgetCheck['stdout'] ?? '') === 'yes') {
+                $cmd = 'wget -c --progress=dot:giga -O ' . escapeshellarg($destPath) . ' ' . escapeshellarg($url) . ' 2>&1';
+            } elseif (trim($curlCheck['stdout'] ?? '') === 'yes') {
+                $cmd = 'curl -C - -L --progress-bar -o ' . escapeshellarg($destPath) . ' ' . escapeshellarg($url) . ' 2>&1';
+            } else {
+                return ['ok' => false, 'msg' => '宿主机未安装 aria2、wget 或 curl，无法下载'];
+            }
+            $result = host_agent_host_shell($cmd);
+            $ok = $result['ok'] && file_exists($destPath);
+            return [
+                'ok' => $ok,
+                'msg' => $ok ? ('下载完成: ' . host_agent_local_display_path($root, $destPath)) : ('下载失败: ' . trim($result['stderr'] ?: $result['stdout'])),
+                'dest_path' => host_agent_local_display_path($root, $destPath),
+                'url' => $url,
+            ];
+
+        case 'archive_extract':
+            $path = trim((string)($payload['path'] ?? ''));
+            $destDir = trim((string)($payload['dest_dir'] ?? ''));
+            $root = trim((string)($payload['root'] ?? '/hostfs'));
+            return host_agent_archive_extract($root, $path, $destDir);
+
+        case 'archive_compress':
+            $paths = (array)($payload['paths'] ?? []);
+            $destPath = trim((string)($payload['dest_path'] ?? ''));
+            $format = trim((string)($payload['format'] ?? 'tar.gz'));
+            $root = trim((string)($payload['root'] ?? '/hostfs'));
+            return host_agent_archive_compress($root, $paths, $destPath, $format);
+
         default:
             return ['ok' => false, 'msg' => '未知 action: ' . $action];
     }
@@ -6644,6 +6895,41 @@ function host_agent_handle_request(string $request, string $token, string $root,
             'msg' => empty($errors) ? 'Manifest 格式有效' : 'Manifest 格式校验失败',
             'errors' => $errors,
         ], empty($errors) ? 200 : 422);
+    }
+
+    // Archive Extract / Compress / List Routes
+    if ($method === 'POST' && $path === '/archive/extract') {
+        $payload = host_agent_json_decode($body);
+        $result = host_agent_archive_extract(
+            $root,
+            trim((string)($payload['path'] ?? '')),
+            trim((string)($payload['dest_dir'] ?? ''))
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/archive/compress') {
+        $payload = host_agent_json_decode($body);
+        $result = host_agent_archive_compress(
+            $root,
+            (array)($payload['paths'] ?? []),
+            trim((string)($payload['dest_path'] ?? '')),
+            trim((string)($payload['format'] ?? 'tar.gz'))
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'GET' && $path === '/archive/list') {
+        $result = host_agent_archive_list(
+            $root,
+            trim((string)($query['path'] ?? ''))
+        );
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'GET' && $path === '/archive/tools') {
+        $result = ['ok' => true, 'tools' => host_agent_archive_detect_tools()];
+        return host_agent_json_response($result, 200);
     }
 
     if ($method !== 'GET' && $method !== 'POST') {
