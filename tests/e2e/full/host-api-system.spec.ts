@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -54,7 +54,7 @@ test('host api system actions return expected payloads and process_kill works', 
   expect(overviewRes.status()).toBe(200);
   const overviewBody = await overviewRes.json();
   expect(overviewBody.ok).toBe(true);
-  expect(typeof overviewBody.data).toBe('object');
+  expect(typeof overviewBody.hostname).toBe('string');
 
   // process_list
   const processRes = await page.request.get(
@@ -64,7 +64,7 @@ test('host api system actions return expected payloads and process_kill works', 
   expect(processRes.status()).toBe(200);
   const processBody = await processRes.json();
   expect(processBody.ok).toBe(true);
-  expect(Array.isArray(processBody.data?.processes ?? processBody.processes)).toBe(true);
+  expect(Array.isArray(processBody.items)).toBe(true);
 
   // service_list
   const serviceRes = await page.request.get(
@@ -74,7 +74,7 @@ test('host api system actions return expected payloads and process_kill works', 
   expect(serviceRes.status()).toBe(200);
   const serviceBody = await serviceRes.json();
   expect(serviceBody.ok).toBe(true);
-  expect(Array.isArray(serviceBody.data?.services ?? serviceBody.services)).toBe(true);
+  expect(Array.isArray(serviceBody.items)).toBe(true);
 
   // service_logs
   const logsRes = await page.request.get(
@@ -84,7 +84,7 @@ test('host api system actions return expected payloads and process_kill works', 
   expect(logsRes.status()).toBe(200);
   const logsBody = await logsRes.json();
   expect(logsBody.ok).toBe(true);
-  expect(typeof logsBody.data?.logs).toBe('string');
+  expect(Array.isArray(logsBody.lines)).toBe(true);
 
   // network_overview
   const networkRes = await page.request.get(
@@ -94,7 +94,7 @@ test('host api system actions return expected payloads and process_kill works', 
   expect(networkRes.status()).toBe(200);
   const networkBody = await networkRes.json();
   expect(networkBody.ok).toBe(true);
-  expect(typeof networkBody.data).toBe('object');
+  expect(Array.isArray(networkBody.listeners)).toBe(true);
 
   // process_kill (simulate mode may return ok:false but we test the contract)
   const csrf = await getHostCsrf(page);

@@ -2,8 +2,20 @@ import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { runDockerPhpInline } from '../../helpers/cli';
 
+async function ensureInstalledHostAgent() {
+  const result = runDockerPhpInline(
+    [
+      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+      '$result = host_agent_install();',
+      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+    ].join(' ')
+  );
+  expect(result.code).toBe(0);
+}
+
 test('file api read actions return expected payloads', async ({ page }) => {
   test.setTimeout(120000);
+  await ensureInstalledHostAgent();
   const tracker = await attachClientErrorTracking(page);
 
   const ts = Date.now();
@@ -41,8 +53,8 @@ test('file api read actions return expected payloads', async ({ page }) => {
   expect(searchRes.status()).toBe(200);
   const searchBody = await searchRes.json();
   expect(searchBody.ok).toBe(true);
-  expect(Array.isArray(searchBody.data?.results ?? searchBody.results)).toBe(true);
-  const hits = (searchBody.data?.results ?? searchBody.results) as any[];
+  expect(Array.isArray(searchBody.data?.items ?? searchBody.items)).toBe(true);
+  const hits = (searchBody.data?.items ?? searchBody.items) as any[];
   expect(hits.some((h) => (h.path || '').includes('searchable.txt'))).toBe(true);
 
   // favorites_list (empty at first for this user)

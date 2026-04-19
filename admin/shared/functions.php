@@ -5,6 +5,7 @@
  */
 require_once __DIR__ . '/../../shared/auth.php';
 require_once __DIR__ . '/../../shared/notify_runtime.php';
+require_once __DIR__ . '/../../shared/http_client.php';
 
 // 数据文件路径常量
 define('SITES_FILE',   DATA_DIR . '/sites.json');
@@ -45,6 +46,45 @@ function save_config(array $cfg): void {
     file_put_contents(CONFIG_FILE,
         json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         LOCK_EX);
+}
+
+// ── 文件系统白名单 ──
+
+function fs_allowed_roots(): array {
+    $cfg = load_config();
+    $roots = $cfg['fs_allowed_roots'] ?? [];
+    if (!is_array($roots)) {
+        $roots = [];
+    }
+    $roots = array_values(array_filter(array_map('strval', $roots)));
+    if (empty($roots)) {
+        return [];
+    }
+    return $roots;
+}
+
+function fs_path_in_allowed_roots(string $path, ?array $roots = null): bool {
+    $roots = $roots ?? fs_allowed_roots();
+    if (empty($roots)) {
+        return true;
+    }
+    $normalized = rtrim($path, '/');
+    if ($normalized === '') {
+        $normalized = '/';
+    }
+    foreach ($roots as $root) {
+        $root = rtrim($root, '/');
+        if ($root === '') {
+            continue;
+        }
+        if ($normalized === $root) {
+            return true;
+        }
+        if (strpos($normalized . '/', $root . '/') === 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ── CSRF 保护 ──
@@ -97,14 +137,99 @@ function flash_get() {
  * 受控执行系统命令（统一出口）
  * @return array{ok:bool,code:int,output:string}
  */
-function admin_run_command(string $command): array {
-    $output = [];
-    $code = 0;
-    exec($command . ' 2>&1', $output, $code);
+function admin_run_command(string $command, int $timeoutSeconds = 60): array {
+    $descriptors = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $proc = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($proc)) {
+        return ['ok' => false, 'code' => 1, 'output' => '无法启动进程'];
+    }
+    foreach ($pipes as $pipe) {
+        stream_set_blocking($pipe, false);
+    }
+    fclose($pipes[0]);
+    $stdout = '';
+    $stderr = '';
+    $startAt = microtime(true);
+    $sigtermAt = null;
+    $killAfter = 5;
+    while (true) {
+        $status = proc_get_status($proc);
+        if (!($status['running'] ?? false)) {
+            break;
+        }
+        $elapsed = microtime(true) - $startAt;
+        if ($timeoutSeconds > 0 && $elapsed >= $timeoutSeconds) {
+            if ($sigtermAt === null) {
+                $pid = (int)($status['pid'] ?? 0);
+                if ($pid > 0 && function_exists('posix_kill')) {
+                    @posix_kill($pid, SIGTERM);
+                }
+                $sigtermAt = microtime(true);
+            } elseif ((microtime(true) - $sigtermAt) >= $killAfter) {
+                $pid = (int)($status['pid'] ?? 0);
+                if ($pid > 0 && function_exists('posix_kill')) {
+                    @posix_kill($pid, SIGKILL);
+                }
+                for ($i = 0; $i < 20; $i++) {
+                    $status = proc_get_status($proc);
+                    if (!($status['running'] ?? false)) {
+                        break 2;
+                    }
+                    usleep(100000);
+                }
+                break;
+            }
+        }
+        $read = [$pipes[1], $pipes[2]];
+        $write = null;
+        $except = null;
+        $tv_sec = 0;
+        $tv_usec = 100000;
+        if (stream_select($read, $write, $except, $tv_sec, $tv_usec) > 0) {
+            foreach ($read as $stream) {
+                $data = fread($stream, 4096);
+                if ($data !== false && $data !== '') {
+                    if ($stream === $pipes[1]) {
+                        $stdout .= $data;
+                    } else {
+                        $stderr .= $data;
+                    }
+                }
+            }
+        }
+    }
+    $remainingStdout = stream_get_contents($pipes[1]);
+    $remainingStderr = stream_get_contents($pipes[2]);
+    if ($remainingStdout !== false) {
+        $stdout .= $remainingStdout;
+    }
+    if ($remainingStderr !== false) {
+        $stderr .= $remainingStderr;
+    }
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = 0;
+    $status = proc_get_status($proc);
+    if ($status['running'] ?? false) {
+        $exitCode = 1;
+    } else {
+        $exitCode = (int)($status['exitcode'] ?? 0);
+    }
+    proc_close($proc);
+    $output = trim($stdout . ($stderr ? "\n" . $stderr : ''));
+    $timedOut = ($timeoutSeconds > 0 && (microtime(true) - $startAt) >= $timeoutSeconds);
+    if ($timedOut) {
+        $output .= "\n[TIMEOUT] 命令执行超过 {$timeoutSeconds} 秒，已强制终止。";
+        $exitCode = 124;
+    }
     return [
-        'ok' => $code === 0,
-        'code' => $code,
-        'output' => implode("\n", $output),
+        'ok' => $exitCode === 0 && !$timedOut,
+        'code' => $exitCode,
+        'output' => $output,
     ];
 }
 
@@ -335,6 +460,149 @@ function backup_delete(string $filename): bool {
     $path = BACKUPS_DIR . '/' . $filename;
     if (!file_exists($path)) return false;
     return unlink($path);
+}
+
+// ── 回收站 ──
+
+define('TRASH_DIR', DATA_DIR . '/trash');
+define('TRASH_RETENTION_DAYS', 30);
+
+function trash_ensure_dir(): void {
+    if (!is_dir(TRASH_DIR)) {
+        @mkdir(TRASH_DIR, 0750, true);
+    }
+}
+
+function trash_generate_entry_id(): string {
+    return 'trash_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4));
+}
+
+function trash_meta_path(string $entryId): string {
+    return TRASH_DIR . '/' . $entryId . '/meta.json';
+}
+
+function trash_data_path(string $entryId): string {
+    return TRASH_DIR . '/' . $entryId . '/data';
+}
+
+function trash_move(string $hostId, string $path, string $operator = ''): array {
+    trash_ensure_dir();
+    $entryId = trash_generate_entry_id();
+    $entryDir = TRASH_DIR . '/' . $entryId;
+    $dataDir = $entryDir . '/data';
+    $metaPath = $entryDir . '/meta.json';
+
+    if (!@mkdir($entryDir, 0750, true)) {
+        return ['ok' => false, 'msg' => '无法创建回收站目录'];
+    }
+
+    $meta = [
+        'entry_id' => $entryId,
+        'host_id' => $hostId,
+        'original_path' => $path,
+        'deleted_at' => date('Y-m-d H:i:s'),
+        'operator' => $operator,
+    ];
+    file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+
+    // 通过 host-agent 将文件/目录移动到回收站
+    $result = host_agent_fs_move(['type' => 'local'], $path, $dataDir);
+    if (empty($result['ok'])) {
+        // 移动失败，清理回收站目录
+        @unlink($metaPath);
+        @rmdir($dataDir);
+        @rmdir($entryDir);
+        return ['ok' => false, 'msg' => '移动到回收站失败: ' . ($result['msg'] ?? '')];
+    }
+
+    return ['ok' => true, 'msg' => '已移至回收站', 'entry_id' => $entryId];
+}
+
+function trash_list(int $limit = 200): array {
+    trash_ensure_dir();
+    $items = [];
+    foreach (scandir(TRASH_DIR) ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') continue;
+        $metaPath = TRASH_DIR . '/' . $entry . '/meta.json';
+        if (!is_file($metaPath)) continue;
+        $meta = json_decode(file_get_contents($metaPath), true);
+        if (!is_array($meta)) continue;
+        $dataDir = TRASH_DIR . '/' . $entry . '/data';
+        $meta['entry_id'] = $entry;
+        $meta['exists'] = file_exists($dataDir);
+        $meta['size'] = is_dir($dataDir) ? 0 : (is_file($dataDir) ? filesize($dataDir) : 0);
+        $items[] = $meta;
+    }
+    usort($items, static function(array $a, array $b): int {
+        return strcmp((string)($b['deleted_at'] ?? ''), (string)($a['deleted_at'] ?? ''));
+    });
+    return array_slice($items, 0, $limit);
+}
+
+function trash_restore(string $entryId): array {
+    $metaPath = trash_meta_path($entryId);
+    if (!is_file($metaPath)) {
+        return ['ok' => false, 'msg' => '回收站条目不存在'];
+    }
+    $meta = json_decode(file_get_contents($metaPath), true);
+    if (!is_array($meta)) {
+        return ['ok' => false, 'msg' => '回收站元数据损坏'];
+    }
+    $originalPath = (string)($meta['original_path'] ?? '');
+    if ($originalPath === '') {
+        return ['ok' => false, 'msg' => '原始路径记录缺失'];
+    }
+    $dataDir = trash_data_path($entryId);
+    if (!file_exists($dataDir)) {
+        return ['ok' => false, 'msg' => '回收站数据已丢失'];
+    }
+
+    $result = host_agent_fs_move(['type' => 'local'], $dataDir, $originalPath);
+    if (empty($result['ok'])) {
+        return ['ok' => false, 'msg' => '恢复失败: ' . ($result['msg'] ?? '')];
+    }
+
+    // 清理回收站目录
+    @unlink($metaPath);
+    @rmdir(dirname($metaPath));
+    $entryDir = dirname($metaPath);
+    @rmdir($entryDir);
+
+    return ['ok' => true, 'msg' => '已恢复到 ' . $originalPath];
+}
+
+function trash_permanent_delete(string $entryId): array {
+    $metaPath = trash_meta_path($entryId);
+    $dataDir = trash_data_path($entryId);
+    $entryDir = dirname($metaPath);
+
+    if (is_dir($dataDir)) {
+        $result = host_agent_fs_delete(['type' => 'local'], $dataDir);
+        if (empty($result['ok'])) {
+            return ['ok' => false, 'msg' => '永久删除失败: ' . ($result['msg'] ?? '')];
+        }
+    }
+
+    @unlink($metaPath);
+    @rmdir($entryDir);
+
+    return ['ok' => true, 'msg' => '已永久删除'];
+}
+
+function trash_auto_clean(): void {
+    trash_ensure_dir();
+    $cutoff = strtotime('-' . TRASH_RETENTION_DAYS . ' days');
+    foreach (scandir(TRASH_DIR) ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') continue;
+        $metaPath = TRASH_DIR . '/' . $entry . '/meta.json';
+        if (!is_file($metaPath)) continue;
+        $meta = json_decode(file_get_contents($metaPath), true);
+        if (!is_array($meta)) continue;
+        $deletedAt = strtotime((string)($meta['deleted_at'] ?? ''));
+        if ($deletedAt !== false && $deletedAt < $cutoff) {
+            trash_permanent_delete($entry);
+        }
+    }
 }
 
 /**
@@ -762,65 +1030,7 @@ function api_token_get_name(string $token): string {
  * @param string $note     附加说明
  */
 function webhook_http_post_json(string $url, string $payload, int $timeout = 5): array {
-    if (!filter_var($url, FILTER_VALIDATE_URL)) {
-        return ['ok' => false, 'status' => 0, 'body' => '', 'error' => 'Webhook URL 无效'];
-    }
-
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'Content-Length: ' . strlen($payload),
-            ],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 3,
-            CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-        ]);
-        $body = curl_exec($ch);
-        if ($body === false) {
-            $error = curl_error($ch);
-            curl_close($ch);
-            return ['ok' => false, 'status' => 0, 'body' => '', 'error' => $error ?: '请求失败'];
-        }
-        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
-        return [
-            'ok' => $status >= 200 && $status < 400,
-            'status' => $status,
-            'body' => (string) $body,
-            'error' => '',
-        ];
-    }
-
-    $ctx = stream_context_create([
-        'http' => [
-            'method'  => 'POST',
-            'header'  => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
-            'content' => $payload,
-            'timeout' => $timeout,
-            'ignore_errors' => true,
-            'follow_location' => 1,
-            'max_redirects' => 3,
-        ],
-    ]);
-    $body = @file_get_contents($url, false, $ctx);
-    $status = 0;
-    if (!empty($http_response_header) && preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m)) {
-        $status = (int) ($m[1] ?? 0);
-    }
-    return [
-        'ok' => $body !== false && $status >= 200 && $status < 400,
-        'status' => $status,
-        'body' => $body === false ? '' : (string) $body,
-        'error' => $body === false ? '请求失败' : '',
-    ];
+    return http_post_json($url, $payload, $timeout);
 }
 
 function webhook_send(string $event, string $username, string $ip, string $note = ''): void {

@@ -13,7 +13,7 @@ test('logs api supports clear_all and download', async ({ page }) => {
   await fs.mkdir(logsDir, { recursive: true });
   await fs.writeFile(path.join(logsDir, 'dns.log'), `dns log entry ${ts}\n`, 'utf8');
   await fs.writeFile(path.join(logsDir, 'ssh_manager_audit.log'), `ssh audit entry ${ts}\n`, 'utf8');
-  await fs.writeFile(path.join(logsDir, 'app.log'), `app entry ${ts}\n`, 'utf8');
+  await fs.writeFile(path.join(logsDir, 'audit.log'), `audit entry ${ts}\n`, 'utf8');
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/logs.php');
@@ -28,13 +28,11 @@ test('logs api supports clear_all and download', async ({ page }) => {
   const clearAllBody = await clearAllRes.json();
   expect(clearAllBody.ok).toBe(true);
 
-  // verify logs directory has no .log files (or they are empty)
-  const logFiles = await fs.readdir(logsDir).catch(() => []);
-  for (const f of logFiles) {
-    if (f.endsWith('.log')) {
-      const content = await fs.readFile(path.join(logsDir, f), 'utf8');
-      expect(content.trim()).toBe('');
-    }
+  // verify clearable logs are empty (ignore logs written by background requests between clear and check)
+  const clearableKeys = ['request_timing', 'dns', 'dns_python', 'notifications', 'auth', 'audit'];
+  for (const key of clearableKeys) {
+    const content = await fs.readFile(path.join(logsDir, `${key}.log`), 'utf8').catch(() => '');
+    expect(content.trim()).toBe('');
   }
 
   // re-seed for download test

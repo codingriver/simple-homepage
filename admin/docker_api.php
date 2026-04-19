@@ -99,5 +99,19 @@ if ($action === 'container_delete') {
     docker_api_send($result);
 }
 
+if ($action === 'compose_list') {
+    docker_api_send(host_agent_compose_list());
+}
+
+if ($action === 'compose_action') {
+    docker_api_require_manage($user);
+    csrf_check();
+    $file = trim((string)($_POST['file'] ?? ''));
+    $composeAction = trim((string)($_POST['compose_action'] ?? ''));
+    $result = host_agent_compose_action($file, $composeAction);
+    ssh_manager_audit('docker_compose_action', ['file' => $file, 'compose_action' => $composeAction, 'ok' => (bool)($result['ok'] ?? false)]);
+    docker_api_send($result);
+}
+
 http_response_code(404);
 echo json_encode(['ok' => false, 'msg' => '未知操作'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

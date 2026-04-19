@@ -1,73 +1,133 @@
-import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
-import { runDockerPhpInline } from '../../helpers/cli';
+import { runDockerCommand, runDockerPhpInline } from '../../helpers/cli';
 
-const sshHostsPath = path.resolve(__dirname, '../../../data/ssh_hosts.json');
+const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAINER}-host-agent` : 'simple-homepage-host-agent';
+
+async function cleanupHostAgent() {
+  runDockerCommand(['rm', '-f', hostAgentContainer]);
+  for (let i = 0; i < 10; i++) {
+    const check = runDockerCommand(['ps', '-q', '--filter', `name=${hostAgentContainer}`]);
+    if (!check.stdout.trim()) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
+}
+
+async function ensureInstalledHostAgent() {
+  const result = runDockerPhpInline(
+    [
+      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+      '$result = host_agent_install();',
+      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+    ].join(' ')
+  );
+  expect(result.code).toBe(0);
+  const payload = JSON.parse(result.stdout);
+  expect(payload.ok).toBe(true);
+}
+
+test.beforeEach(async () => {
+  await cleanupHostAgent();
+});
+
+test.afterEach(async () => {
+  await cleanupHostAgent();
+});
 
 test('hosts page filters remote hosts via frontend search and group filter', async ({ page }) => {
   test.setTimeout(120000);
+  await ensureInstalledHostAgent();
+  await page.waitForTimeout(3000);
   const tracker = await attachClientErrorTracking(page);
   const ts = Date.now();
   const hostA = `filter-alpha-${ts}`;
   const hostB = `filter-beta-${ts}`;
+  const hostIdA = 'h_' + 'a'.repeat(16);
+  const hostIdB = 'h_' + 'b'.repeat(16);
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-  const payload = {
+  // 通过容器内 PHP CLI 直接写入 ssh_hosts.json，避免 Docker Desktop bind mount 同步问题
+  const hostsPayload = JSON.stringify({
+    version: 1,
     hosts: [
       {
-        id: `ha-${ts}`,
+        id: hostIdA,
         name: hostA,
         hostname: '192.168.1.10',
         port: 22,
         username: 'root',
         auth_type: 'password',
+        key_id: '',
+        password_enc: '',
         group_name: 'group-a',
-        tags: 'test',
+        tags: ['test'],
         favorite: false,
         notes: '',
+        created_at: now,
+        updated_at: now,
       },
       {
-        id: `hb-${ts}`,
+        id: hostIdB,
         name: hostB,
         hostname: '192.168.1.11',
         port: 22,
         username: 'root',
         auth_type: 'password',
+        key_id: '',
+        password_enc: '',
         group_name: 'group-b',
-        tags: 'prod',
+        tags: ['prod'],
         favorite: true,
         notes: '',
+        created_at: now,
+        updated_at: now,
       },
     ],
-  };
+  });
 
-  await fs.writeFile(sshHostsPath, JSON.stringify(payload, null, 2), 'utf8');
+  const writeResult = runDockerPhpInline(
+    `file_put_contents("/var/www/nav/data/ssh_hosts.json", ${JSON.stringify(hostsPayload)}, LOCK_EX);`
+  );
+  expect(writeResult.code).toBe(0);
 
-  try {
-    await loginAsDevAdmin(page);
-    await page.goto('/admin/hosts.php#remote');
+  await loginAsDevAdmin(page);
+  await page.goto('/admin/hosts.php#remote');
 
-    // search by name
-    await page.locator('input#host-search').fill(hostA);
-    await page.waitForTimeout(200);
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeVisible();
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toHaveCount(0);
+  // 等待页面至少渲染出一个 remote-host-row
+  await expect(page.locator('tr.remote-host-row').first()).toBeVisible();
 
-    // clear search
-    await page.locator('input#host-search').fill('');
-    await page.waitForTimeout(200);
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeVisible();
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
+  // search by name
+  await page.locator('input#remote-host-search').fill(hostA);
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeVisible();
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeHidden();
 
-    // group filter
-    await page.locator('select#host-group-filter').selectOption('group-b');
-    await page.waitForTimeout(200);
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
-    await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toHaveCount(0);
-  } finally {
-    await fs.writeFile(sshHostsPath, JSON.stringify({ hosts: [] }, null, 2), 'utf8').catch(() => undefined);
-  }
+  // clear search
+  await page.locator('input#remote-host-search').fill('');
+  await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeVisible();
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
+
+  // group filter
+  await page.locator('select#remote-host-group-filter').selectOption('group-b');
+  await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeHidden();
+
+  // favorite-only filter
+  await page.locator('select#remote-host-group-filter').selectOption('');
+  await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
+  await page.locator('input#remote-host-favorite-only').check();
+  await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeHidden();
+
+  // uncheck favorite-only
+  await page.locator('input#remote-host-favorite-only').uncheck();
+  await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeVisible();
+  await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
 
   await tracker.assertNoClientErrors();
 });

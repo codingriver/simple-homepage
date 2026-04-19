@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -76,7 +76,7 @@ test('host api audit and share history actions return expected payloads', async 
   expect(shareAuditRes.status()).toBe(200);
   const shareAuditBody = await shareAuditRes.json();
   expect(shareAuditBody.ok).toBe(true);
-  expect(Array.isArray(shareAuditBody.data?.logs ?? shareAuditBody.logs)).toBe(true);
+  expect(Array.isArray(shareAuditBody.data?.items ?? shareAuditBody.items)).toBe(true);
 
   // share_audit_export
   const shareExportRes = await page.request.get(
@@ -96,7 +96,7 @@ test('host api audit and share history actions return expected payloads', async 
   expect(auditRes.status()).toBe(200);
   const auditBody = await auditRes.json();
   expect(auditBody.ok).toBe(true);
-  expect(Array.isArray(auditBody.data?.logs ?? auditBody.logs)).toBe(true);
+  expect(Array.isArray(auditBody.data?.items ?? auditBody.items)).toBe(true);
 
   // audit_export
   const exportRes = await page.request.get(

@@ -21,20 +21,30 @@ test('login logs and logs center support frontend filtering and level selection'
   try {
     await loginAsDevAdmin(page);
 
-    // login_logs.php filter
-    await page.goto('/admin/login_logs.php');
-    await expect(page.locator('table tbody tr').first()).toBeVisible();
-    await page.locator('input#ll-keyword').fill('zzzzzz-no-match');
-    await page.waitForTimeout(200);
-    await expect(page.locator('table tbody tr:visible')).toHaveCount(0);
+    // login_logs.php AJAX endpoint returns seeded data
+    const loginLogsRes = await page.request.get('/admin/login_logs.php', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    expect(loginLogsRes.status()).toBe(200);
+    const loginLogsBody = await loginLogsRes.json();
+    expect(loginLogsBody.ok).toBe(true);
+    expect(JSON.stringify(loginLogsBody.rows)).toContain(`filter-user-${ts}`);
 
-    // logs.php center filter by level
-    await page.goto('/admin/logs.php');
-    await expect(page.locator('#log-table tbody tr').first()).toBeVisible();
-    await page.locator('select#log-level').selectOption('CRITICAL');
-    await page.waitForTimeout(200);
-    // CRITICAL may show zero rows or existing rows; we just ensure no JS error occurs
-    await expect(page.locator('#log-table')).toBeVisible();
+    // logs.php page loads and supports keyword filtering via Ace Editor
+    await page.goto('/admin/logs.php', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#logsSidebar')).toBeVisible();
+    // click auth log source
+    await page.locator('[data-key="auth"]').click();
+    await expect(page.locator('#logEditor')).toBeVisible();
+    // filter by non-matching keyword
+    await page.locator('input#logKeyword').fill('zzzzzz-no-match');
+    await page.waitForTimeout(300);
+    // verify Ace Editor shows no matching lines via JS
+    const filtered = await page.evaluate(() => {
+      const ed = (window as any).ace?.edit('logEditor');
+      return ed ? ed.getValue() : '';
+    });
+    expect(filtered).not.toContain(`filter-user-${ts}`);
   } finally {
     await fs.writeFile(authLogPath, originalAuthLog, 'utf8');
   }

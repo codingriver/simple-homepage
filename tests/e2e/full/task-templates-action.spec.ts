@@ -16,9 +16,8 @@ test('task templates create_task_from_template action works directly via post', 
     await loginAsDevAdmin(page);
     await page.goto('/admin/task_templates.php');
 
-    // grab first template_id from the page
-    const firstTemplateId = await page.locator('input[name="template_id"]').first().inputValue();
-    expect(firstTemplateId).toBeTruthy();
+    // use a template without required variables
+    const firstTemplateId = 'tpl_nginx_reload';
 
     const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 

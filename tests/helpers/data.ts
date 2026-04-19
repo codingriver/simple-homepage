@@ -8,34 +8,41 @@ const dataDir = path.resolve(__dirname, '../../data');
  * 保留 config.json / users.json / .installed 等全局配置和账号信息。
  */
 export async function resetVolatileAppData(): Promise<void> {
-  // 1. 清空核心 JSON 数据文件（删除即可，PHP 会回退到默认值）
-  const jsonFilesToRemove = [
-    'sites.json',
-    'api_tokens.json',
-    'health_cache.json',
-    'dns_config.json',
-    'ddns_tasks.json',
-    'scheduled_tasks.json',
-    'notifications.json',
-    'task_templates.json',
-    'sessions.json',
-    'ssh_hosts.json',
-    'ssh_keys.json',
-    'expiry_scan.json',
-    'file_favorites.json',
-    'file_recent.json',
-    'ip_locks.json',
-    'ip_locks.json.lock',
-    'webdav_accounts.json',
-    'host_agent.json',
-  ];
+  // 1. 重置核心 JSON 数据文件（不删除，而是清空内容；Docker Desktop for Mac
+  // 下删除后容器内可能无法重新创建同名文件，写入到 overlay 而非 bind mount）。
+  const jsonFilesToReset: Record<string, string> = {
+    'sites.json': '{"groups":[]}',
+    'api_tokens.json': '[]',
+    'health_cache.json': '{}',
+    'dns_config.json': '{}',
+    'ddns_tasks.json': '[]',
+    'scheduled_tasks.json': '[]',
+    'notifications.json': '[]',
+    'task_templates.json': '[]',
+    'sessions.json': '{}',
+    'ssh_hosts.json': '[]',
+    'ssh_keys.json': '[]',
+    'expiry_scan.json': '{}',
+    'file_favorites.json': '[]',
+    'file_recent.json': '[]',
+    'ip_locks.json': '{}',
+    'webdav_accounts.json': '{}',
+    'host_agent.json': '{}',
+  };
 
-  for (const f of jsonFilesToRemove) {
+  for (const [f, content] of Object.entries(jsonFilesToReset)) {
     try {
-      await fs.rm(path.join(dataDir, f), { force: true });
+      await fs.writeFile(path.join(dataDir, f), content, { mode: 0o644 });
     } catch {
       // ignore
     }
+  }
+
+  // ip_locks.json.lock 不是 JSON，需要作为空文件保留
+  try {
+    await fs.writeFile(path.join(dataDir, 'ip_locks.json.lock'), '', { mode: 0o644 });
+  } catch {
+    // ignore
   }
 
   // 2. 清空日志目录（保留目录本身）
@@ -53,6 +60,41 @@ export async function resetVolatileAppData(): Promise<void> {
     }
   } catch {
     // ignore
+  }
+  try {
+    await fs.mkdir(logsDir, { recursive: true });
+  } catch {
+    // ignore
+  }
+
+  // Docker Desktop for Mac 的文件系统同步问题：删除后容器内可能无法重新创建同名文件，
+  // 因此在宿主机上预先创建空文件，避免容器内 PHP 写入时报 "No such file or directory"。
+  const ensureEmptyFiles = [
+    { file: 'sessions.json', content: '{}' },
+    { file: 'ip_locks.json', content: '{}' },
+    { file: 'ip_locks.json.lock', content: '' },
+    { file: 'logs/auth.log', content: '' },
+    { file: 'logs/audit.log', content: '' },
+    { file: 'logs/ssh_audit.log', content: '' },
+    { file: 'logs/share_service_audit.log', content: '' },
+    { file: 'logs/webdav.log', content: '' },
+    { file: 'logs/notifications.log', content: '' },
+    { file: 'logs/notify_probe.log', content: '' },
+    { file: 'logs/ssh_manager_audit.log', content: '' },
+    { file: 'logs/dns.log', content: '' },
+    { file: 'logs/dns_python.log', content: '' },
+    { file: 'logs/task_dispatch.log', content: '' },
+  ];
+  for (const { file, content } of ensureEmptyFiles) {
+    const p = path.join(dataDir, file);
+    try {
+      if (!await fs.stat(p).then(() => true).catch(() => false)) {
+        await fs.mkdir(path.dirname(p), { recursive: true });
+        await fs.writeFile(p, content, { mode: 0o644 });
+      }
+    } catch {
+      // ignore
+    }
   }
 
   // 3. 清空备份目录（测试会自己创建和验证备份）

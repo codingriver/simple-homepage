@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -57,7 +57,7 @@ test('host api authorized_keys actions manage keys for local root', async ({ pag
   expect(listRes.status()).toBe(200);
   const listBody = await listRes.json();
   expect(listBody.ok).toBe(true);
-  expect(Array.isArray(listBody.data?.keys ?? listBody.keys)).toBe(true);
+  expect(Array.isArray(listBody.entries)).toBe(true);
 
   // authorized_keys_add
   const csrf = await getHostCsrf(page);
@@ -74,8 +74,8 @@ test('host api authorized_keys actions manage keys for local root', async ({ pag
     { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
   );
   const listAfterBody = await listAfterRes.json();
-  const keys = (listAfterBody.data?.keys ?? listAfterBody.keys) as any[];
-  const addedKey = keys.find((k) => (k.key || '').includes(`AuthKeyTest${ts}`));
+  const entries = (listAfterBody.entries) as any[];
+  const addedKey = entries.find((k) => (k.key || '').includes(`AuthKeyTest${ts}`));
   expect(addedKey).toBeTruthy();
 
   // authorized_keys_remove
@@ -93,8 +93,8 @@ test('host api authorized_keys actions manage keys for local root', async ({ pag
     { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
   );
   const listFinalBody = await listFinalRes.json();
-  const finalKeys = (listFinalBody.data?.keys ?? listFinalBody.keys) as any[];
-  expect(finalKeys.some((k) => (k.key || '').includes(`AuthKeyTest${ts}`))).toBe(false);
+  const finalEntries = (listFinalBody.entries) as any[];
+  expect(finalEntries.some((k) => (k.key || '').includes(`AuthKeyTest${ts}`))).toBe(false);
 
   await tracker.assertNoClientErrors();
 });

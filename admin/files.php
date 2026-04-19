@@ -19,6 +19,7 @@ $quickPaths = file_manager_quick_paths();
 $selectedHostId = trim((string)($_GET['host_id'] ?? 'local')) ?: 'local';
 $selectedPath = trim((string)($_GET['path'] ?? '/')) ?: '/';
 $csrfValue = csrf_token();
+$fsAllowedRoots = fs_allowed_roots();
 ?>
 
 <style>
@@ -125,6 +126,9 @@ $csrfValue = csrf_token();
         <?php if ($canWebdavManage): ?><button type="button" class="btn btn-secondary" onclick="createWebdavShare()">创建 WebDAV 共享</button><?php endif; ?>
         <?php if ($canAudit): ?><a href="file_audit.php" class="btn btn-secondary">文件审计</a><?php endif; ?>
       </div>
+      <div id="fm-whitelist-hint" class="form-hint" data-has-roots="<?= !empty($fsAllowedRoots) ? '1' : '0' ?>" style="display:none;margin-bottom:10px;padding:8px 12px;border:1px dashed var(--bd);border-radius:8px;background:var(--bg);color:var(--tm);font-size:12px">
+        <b>白名单限制</b>：当前仅允许访问以下路径前缀的目录 — <?= implode('、', array_map(function($r){ return '<code style="background:var(--sf);padding:1px 4px;border-radius:3px">' . htmlspecialchars($r) . '</code>'; }, $fsAllowedRoots)) ?>
+      </div>
       <div id="fm-breadcrumbs" class="form-hint" style="margin-bottom:10px"></div>
       <div id="fm-directory-status" style="display:none;margin-bottom:10px;padding:12px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--bg)"></div>
       <div id="fm-webdav-shares" class="form-hint" style="margin-bottom:10px;padding:10px 12px;border:1px dashed var(--bd);border-radius:10px;background:var(--bg)">正在检查当前目录的 WebDAV 共享...</div>
@@ -145,8 +149,28 @@ $csrfValue = csrf_token();
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="archiveCurrentPath()">压缩</button><?php endif; ?>
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="extractCurrentFile()">解压</button><?php endif; ?>
         <?php if ($canWrite): ?><button type="button" class="btn btn-secondary" onclick="downloadFromUrl()">⬇️ URL下载</button><?php endif; ?>
+        <button type="button" class="btn btn-secondary" onclick="toggleTrashView()">🗑 回收站</button>
       </div>
       <div id="fm-clipboard-meta" class="form-hint" style="margin-bottom:10px"></div>
+      <div id="fm-trash-panel" style="display:none;margin-bottom:16px">
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>🗑 回收站</span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn btn-secondary" onclick="loadTrash()" style="font-size:12px;padding:6px 10px">刷新</button>
+              <button type="button" class="btn btn-danger" onclick="autoCleanTrash()" style="font-size:12px;padding:6px 10px">清理30天前</button>
+              <button type="button" class="btn btn-secondary" onclick="toggleTrashView()" style="font-size:12px;padding:6px 10px">关闭</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="fm-trash-table">
+              <thead><tr><th>原始路径</th><th>删除时间</th><th>操作人</th><th>操作</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="fm-trash-empty" class="form-hint" style="display:none">回收站为空</div>
+        </div>
+      </div>
       <div class="table-wrap">
         <table id="fm-table">
           <thead><tr><th style="width:36px"><input type="checkbox" id="fm-check-all"></th><th>名称</th><th>类型</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
@@ -165,8 +189,11 @@ $csrfValue = csrf_token();
       <div id="fm-stat-meta" class="form-hint" style="margin-bottom:8px"></div>
       <div id="fm-preview-type" class="form-hint" style="margin-bottom:8px"></div>
       <div id="fm-editor-status" style="display:none;margin-bottom:8px;padding:12px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--bg)"></div>
-      <div id="fm-preview-image-wrap" style="display:none;margin-bottom:8px">
+      <div id="fm-preview-image-wrap" style="display:none;margin-bottom:8px;cursor:zoom-in" onclick="openImageLightbox()">
         <img id="fm-preview-image" alt="图片预览" style="max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--bd);background:var(--bg)">
+      </div>
+      <div id="fm-lightbox" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:10000;align-items:center;justify-content:center;cursor:zoom-out" onclick="closeImageLightbox()">
+        <img id="fm-lightbox-image" alt="放大预览" style="max-width:90vw;max-height:90vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
       </div>
       <pre id="fm-preview-config" style="display:none;max-height:220px;overflow:auto;margin-bottom:8px;background:#0b1220;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px;color:#d8f5d0;font-family:var(--mono);font-size:12px;line-height:1.6"></pre>
       <textarea id="fm-editor" spellcheck="false" style="width:100%;min-height:360px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-family:var(--mono)"></textarea>
@@ -1059,10 +1086,17 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
   });
+  function updateWhitelistHint() {
+    var hint = document.getElementById('fm-whitelist-hint');
+    if (!hint) return;
+    hint.style.display = (currentHostId() === 'local' && hint.dataset.hasRoots === '1') ? 'block' : 'none';
+  }
   document.getElementById('fm-host-select').addEventListener('change', function() {
     document.getElementById('fm-path').value = '/';
+    updateWhitelistHint();
     loadFiles();
   });
+  updateWhitelistHint();
   document.getElementById('fm-filter').addEventListener('input', renderFileRows);
   document.getElementById('fm-check-all').addEventListener('change', function() {
     document.querySelectorAll('.fm-item-check').forEach(function(input) {
@@ -1084,6 +1118,89 @@ document.addEventListener('DOMContentLoaded', function() {
   loadFiles();
   loadFavorites();
   loadRecent();
+});
+
+function toggleTrashView() {
+  var panel = document.getElementById('fm-trash-panel');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    loadTrash();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+async function loadTrash() {
+  var tbody = document.querySelector('#fm-trash-table tbody');
+  var emptyMsg = document.getElementById('fm-trash-empty');
+  tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--tm)">加载中…</td></tr>';
+  emptyMsg.style.display = 'none';
+  var data = await fileApiGet('trash_list');
+  if (!data.ok || !data.data || !data.data.items) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--tm)">加载失败</td></tr>';
+    return;
+  }
+  var items = data.data.items;
+  if (!items.length) {
+    tbody.innerHTML = '';
+    emptyMsg.style.display = 'block';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+  tbody.innerHTML = items.map(function(item) {
+    return '<tr>'
+      + '<td style="font-family:var(--mono);font-size:12px">' + escHtml(item.original_path || '') + '</td>'
+      + '<td>' + escHtml(item.deleted_at || '') + '</td>'
+      + '<td>' + escHtml(item.operator || '') + '</td>'
+      + '<td>'
+      + '<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 8px" onclick="restoreTrashItem(\'' + escHtml(item.entry_id) + '\')">恢复</button> '
+      + '<button type="button" class="btn btn-danger" style="font-size:12px;padding:4px 8px" onclick="deleteTrashItem(\'' + escHtml(item.entry_id) + '\')">永久删除</button>'
+      + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function restoreTrashItem(entryId) {
+  if (!confirm('确定要恢复该文件/目录到原始位置吗？')) return;
+  var data = await fileApiPost('trash_restore', { entry_id: entryId });
+  showToast(data.msg || (data.ok ? '恢复成功' : '恢复失败'), data.ok ? 'success' : 'error');
+  if (data.ok) {
+    loadTrash();
+    loadFiles();
+  }
+}
+
+async function deleteTrashItem(entryId) {
+  if (!confirm('确定要永久删除吗？此操作不可恢复。')) return;
+  var data = await fileApiPost('trash_delete', { entry_id: entryId });
+  showToast(data.msg || (data.ok ? '已永久删除' : '删除失败'), data.ok ? 'success' : 'error');
+  if (data.ok) loadTrash();
+}
+
+async function autoCleanTrash() {
+  if (!confirm('确定要清理回收站中超过30天的条目吗？')) return;
+  var data = await fileApiPost('trash_auto_clean', {});
+  showToast(data.msg || (data.ok ? '清理完成' : '清理失败'), data.ok ? 'success' : 'error');
+  if (data.ok) loadTrash();
+}
+
+function openImageLightbox() {
+  var src = document.getElementById('fm-preview-image').src;
+  if (!src) return;
+  var box = document.getElementById('fm-lightbox');
+  var img = document.getElementById('fm-lightbox-image');
+  img.src = src;
+  box.style.display = 'flex';
+}
+
+function closeImageLightbox() {
+  document.getElementById('fm-lightbox').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeImageLightbox();
+  }
 });
 </script>
 

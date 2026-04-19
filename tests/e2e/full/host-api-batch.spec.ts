@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -49,50 +49,71 @@ test('host api batch actions execute across selected hosts', async ({ page }) =>
   const hostB = `batch-host-b-${ts}`;
   const keyName = `batch-key-${ts}`;
 
-  // seed a key
-  const keySeed = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/ssh_manager_lib.php";',
-      '$result = ssh_manager_upsert_key(["name" => "' + keyName + '", "username" => "", "private_key" => "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----", "passphrase" => ""], null);',
-      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(keySeed.code).toBe(0);
-  expect(JSON.parse(keySeed.stdout).ok).toBe(true);
+  // seed a key and hosts via direct JSON write to avoid Docker Desktop bind mount sync issues
+  const hostIdA = 'h_' + 'a'.repeat(16);
+  const hostIdB = 'h_' + 'b'.repeat(16);
+  const keyId = 'k_' + 'c'.repeat(16);
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-  // seed hosts
-  const hostSeed = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/ssh_manager_lib.php";',
-      '$keys = ssh_manager_list_keys();',
-      '$keyId = "";',
-      'foreach ($keys as $key) { if (($key["name"] ?? "") === "' + keyName + '") { $keyId = (string)($key["id"] ?? ""); break; } }',
-      '$r1 = ssh_manager_upsert_host(["name" => "' + hostA + '", "hostname" => "127.0.0.1", "port" => 1, "username" => "root", "auth_type" => "password", "key_id" => "", "password" => "x", "group_name" => "", "tags" => "", "favorite" => false, "notes" => ""], null);',
-      '$r2 = ssh_manager_upsert_host(["name" => "' + hostB + '", "hostname" => "127.0.0.1", "port" => 2, "username" => "root", "auth_type" => "password", "key_id" => "", "password" => "x", "group_name" => "", "tags" => "", "favorite" => false, "notes" => ""], null);',
-      'echo json_encode([$r1, $r2], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(hostSeed.code).toBe(0);
-  expect(JSON.parse(hostSeed.stdout)[0].ok).toBe(true);
+  const sshKeysPayload = JSON.stringify({
+    version: 1,
+    keys: [
+      {
+        id: keyId,
+        name: keyName,
+        username: 'root',
+        private_key_enc: '',
+        passphrase_enc: '',
+        created_at: now,
+        updated_at: now,
+      },
+    ],
+  });
 
-  // get host ids
-  const idsResult = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/ssh_manager_lib.php";',
-      '$hosts = ssh_manager_list_hosts();',
-      '$ids = [];',
-      'foreach ($hosts as $host) {',
-      '  $name = $host["name"] ?? "";',
-      '  if ($name === "' + hostA + '" || $name === "' + hostB + '") {',
-      '    $ids[] = $host["id"] ?? "";',
-      '  }',
-      '}',
-      'echo implode(",", $ids);',
-    ].join(' ')
-  );
-  expect(idsResult.code).toBe(0);
-  const hostIds = idsResult.stdout.trim().split(',').filter(Boolean);
-  expect(hostIds.length).toBe(2);
+  const sshHostsPayload = JSON.stringify({
+    version: 1,
+    hosts: [
+      {
+        id: hostIdA,
+        name: hostA,
+        hostname: '127.0.0.1',
+        port: 1,
+        username: 'root',
+        auth_type: 'password',
+        key_id: '',
+        password_enc: '',
+        group_name: '',
+        tags: [],
+        favorite: false,
+        notes: '',
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: hostIdB,
+        name: hostB,
+        hostname: '127.0.0.1',
+        port: 2,
+        username: 'root',
+        auth_type: 'password',
+        key_id: '',
+        password_enc: '',
+        group_name: '',
+        tags: [],
+        favorite: false,
+        notes: '',
+        created_at: now,
+        updated_at: now,
+      },
+    ],
+  });
+
+  const writeKeys = runDockerPhpInline(`file_put_contents("/var/www/nav/data/ssh_keys.json", ${JSON.stringify(sshKeysPayload)}, LOCK_EX);`);
+  expect(writeKeys.code).toBe(0);
+  const writeHosts = runDockerPhpInline(`file_put_contents("/var/www/nav/data/ssh_hosts.json", ${JSON.stringify(sshHostsPayload)}, LOCK_EX);`);
+  expect(writeHosts.code).toBe(0);
+
+  const hostIds = [hostIdA, hostIdB];
 
   await loginAsDevAdmin(page);
   const csrf = await getHostCsrf(page);
@@ -100,45 +121,33 @@ test('host api batch actions execute across selected hosts', async ({ page }) =>
   // batch_test_hosts
   const testRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_test_hosts', _csrf: csrf, 'host_ids[]': hostIds.join(',') },
+    form: { action: 'batch_test_hosts', _csrf: csrf, host_ids: hostIds.join(',') },
   });
   expect(testRes.status()).toBe(200);
   const testBody = await testRes.json();
   expect(testBody.ok).toBe(true);
-  expect(Array.isArray(testBody.data?.results)).toBe(true);
-  expect(testBody.data.results.length).toBeGreaterThanOrEqual(1);
+  expect(Array.isArray(testBody.results)).toBe(true);
+  expect(testBody.results.length).toBeGreaterThanOrEqual(1);
 
   // batch_exec_hosts
   const execRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_exec_hosts', _csrf: csrf, 'host_ids[]': hostIds.join(','), command: 'echo batch-exec' },
+    form: { action: 'batch_exec_hosts', _csrf: csrf, host_ids: hostIds.join(','), command: 'echo batch-exec' },
   });
   expect(execRes.status()).toBe(200);
   const execBody = await execRes.json();
   expect(execBody.ok).toBe(true);
-  expect(Array.isArray(execBody.data?.results)).toBe(true);
+  expect(Array.isArray(execBody.results)).toBe(true);
 
   // batch_distribute_key
-  const keyQuery = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/ssh_manager_lib.php";',
-      '$keys = ssh_manager_list_keys();',
-      'foreach ($keys as $key) {',
-      '  if (($key["name"] ?? "") === "' + keyName + '") { echo $key["id"] ?? ""; break; }',
-      '}',
-    ].join(' ')
-  );
-  expect(keyQuery.code).toBe(0);
-  const keyId = keyQuery.stdout.trim();
-
   const distRes = await page.request.post('http://127.0.0.1:58080/admin/host_api.php', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    form: { action: 'batch_distribute_key', _csrf: csrf, 'host_ids[]': hostIds.join(','), key_id: keyId, user: 'root' },
+    form: { action: 'batch_distribute_key', _csrf: csrf, host_ids: hostIds.join(','), key_id: keyId, user: 'root' },
   });
   expect(distRes.status()).toBe(200);
   const distBody = await distRes.json();
   expect(distBody.ok).toBe(true);
-  expect(Array.isArray(distBody.data?.results)).toBe(true);
+  expect(Array.isArray(distBody.results)).toBe(true);
 
   await tracker.assertNoClientErrors();
 });

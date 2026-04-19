@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -58,7 +58,7 @@ test('host api users and groups actions return expected payloads', async ({ page
   expect(userListRes.status()).toBe(200);
   const userListBody = await userListRes.json();
   expect(userListBody.ok).toBe(true);
-  expect(Array.isArray(userListBody.data?.users ?? userListBody.users)).toBe(true);
+  expect(Array.isArray(userListBody.items)).toBe(true);
 
   // group_list
   const groupListRes = await page.request.get(
@@ -68,7 +68,7 @@ test('host api users and groups actions return expected payloads', async ({ page
   expect(groupListRes.status()).toBe(200);
   const groupListBody = await groupListRes.json();
   expect(groupListBody.ok).toBe(true);
-  expect(Array.isArray(groupListBody.data?.groups ?? groupListBody.groups)).toBe(true);
+  expect(Array.isArray(groupListBody.items)).toBe(true);
 
   // user_save
   let csrf = await getHostCsrf(page);

@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -88,7 +88,7 @@ test('host api terminal actions manage sessions', async ({ page }) => {
   expect(readRes.status()).toBe(200);
   const readBody = await readRes.json();
   expect(readBody.ok).toBe(true);
-  expect(typeof readBody.data).toBe('string');
+  expect(typeof readBody.output).toBe('string');
 
   // terminal_close
   csrf = await getHostCsrf(page);

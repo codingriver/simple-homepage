@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -84,7 +84,7 @@ test('host api fs read actions return expected payloads', async ({ page }) => {
   expect(statRes.status()).toBe(200);
   const statBody = await statRes.json();
   expect(statBody.ok).toBe(true);
-  expect(statBody.data?.name ?? statBody.name).toContain('sample.txt');
+  expect(statBody.path).toContain('sample.txt');
 
   // share_path_stat
   const shareStatRes = await page.request.get(
@@ -94,7 +94,7 @@ test('host api fs read actions return expected payloads', async ({ page }) => {
   expect(shareStatRes.status()).toBe(200);
   const shareStatBody = await shareStatRes.json();
   expect(shareStatBody.ok).toBe(true);
-  expect(shareStatBody.data?.name ?? shareStatBody.name).toContain('sample.txt');
+  expect(shareStatBody.path).toContain('sample.txt');
 
   await tracker.assertNoClientErrors();
 });

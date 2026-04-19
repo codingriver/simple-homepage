@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/http_client.php';
 /**
  * 统一通知运行时
  * 供前台/后台/CLI 共用，不依赖 admin 页面上下文
@@ -198,65 +199,7 @@ function notify_channel_toggle(string $id): ?bool {
 }
 
 function notify_http_post_json(string $url, string $payload, int $timeout = 5): array {
-    if (!filter_var($url, FILTER_VALIDATE_URL)) {
-        return ['ok' => false, 'status' => 0, 'body' => '', 'error' => 'Webhook URL 无效'];
-    }
-
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'Content-Length: ' . strlen($payload),
-            ],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 3,
-            CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-        ]);
-        $body = curl_exec($ch);
-        if ($body === false) {
-            $error = curl_error($ch);
-            curl_close($ch);
-            return ['ok' => false, 'status' => 0, 'body' => '', 'error' => $error ?: '请求失败'];
-        }
-        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
-        return [
-            'ok' => $status >= 200 && $status < 400,
-            'status' => $status,
-            'body' => (string)$body,
-            'error' => '',
-        ];
-    }
-
-    $ctx = stream_context_create([
-        'http' => [
-            'method' => 'POST',
-            'header' => "Content-Type: application/json\r\nContent-Length: " . strlen($payload) . "\r\n",
-            'content' => $payload,
-            'timeout' => $timeout,
-            'ignore_errors' => true,
-            'follow_location' => 1,
-            'max_redirects' => 3,
-        ],
-    ]);
-    $body = @file_get_contents($url, false, $ctx);
-    $status = 0;
-    if (!empty($http_response_header) && preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $http_response_header[0], $m)) {
-        $status = (int)($m[1] ?? 0);
-    }
-    return [
-        'ok' => $body !== false && $status >= 200 && $status < 400,
-        'status' => $status,
-        'body' => $body === false ? '' : (string)$body,
-        'error' => $body === false ? '请求失败' : '',
-    ];
+    return http_post_json($url, $payload, $timeout);
 }
 
 function notify_build_text(string $event, array $payload = []): string {

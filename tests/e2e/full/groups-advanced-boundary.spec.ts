@@ -15,7 +15,7 @@ test('groups advanced boundaries cover long text stable ordering and visibility 
   const stableB = `groups-adv-b-${ts}`;
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/groups.php');
+  await page.goto('/admin/groups.php', { waitUntil: 'domcontentloaded' });
 
   for (const [gid, name, vis, auth, order] of [
     [publicId, `😀 公开超长分组 ${'名'.repeat(20)}`, 'all', '0', '10'],

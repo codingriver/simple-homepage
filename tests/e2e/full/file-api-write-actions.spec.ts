@@ -2,6 +2,17 @@ import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { runDockerPhpInline } from '../../helpers/cli';
 
+async function ensureInstalledHostAgent() {
+  const result = runDockerPhpInline(
+    [
+      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+      '$result = host_agent_install();',
+      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+    ].join(' ')
+  );
+  expect(result.code).toBe(0);
+}
+
 async function getCsrf(page: any) {
   await page.goto('/admin/files.php');
   return page.evaluate(() => (window as any)._csrf);
@@ -9,6 +20,7 @@ async function getCsrf(page: any) {
 
 test('file api write actions mutate filesystem as expected', async ({ page }) => {
   test.setTimeout(120000);
+  await ensureInstalledHostAgent();
   const tracker = await attachClientErrorTracking(page);
 
   const ts = Date.now();

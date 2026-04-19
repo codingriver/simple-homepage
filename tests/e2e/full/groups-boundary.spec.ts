@@ -15,7 +15,7 @@ test('admin sees validation feedback for invalid duplicate and long-name groups'
   const gid = `dup-group-${Date.now()}`;
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/groups.php');
+  await page.goto('/admin/groups.php', { waitUntil: 'domcontentloaded' });
 
   page.once('dialog', dialog => {
     expect(dialog.message()).toContain('ID 只允许小写字母/数字/下划线/横杠，名称不能为空');
@@ -74,7 +74,7 @@ test('deleting a group removes its linked site from admin and homepage', async (
 
   await loginAsDevAdmin(page);
 
-  await page.goto('/admin/groups.php');
+  await page.goto('/admin/groups.php', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: /添加分组/ }).click();
   await page.locator('#fi_id').fill(gid);
   await page.locator('#fi_name').fill(`关联分组 ${ts}`);
@@ -82,7 +82,7 @@ test('deleting a group removes its linked site from admin and homepage', async (
   await submitVisibleModal(page);
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first()).toBeVisible();
 
-  await page.goto('/admin/sites.php');
+  await page.goto('/admin/sites.php', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: /添加站点/ }).click();
   await page.locator('#fi_sid').fill(sid);
   await page.locator('#fi_name').fill('关联站点');
@@ -95,7 +95,7 @@ test('deleting a group removes its linked site from admin and homepage', async (
   await page.goto('/index.php');
   await expect(page.locator('body')).toContainText('关联站点');
 
-  await page.goto('/admin/groups.php');
+  await page.goto('/admin/groups.php', { waitUntil: 'domcontentloaded' });
   const groupRow = page.locator(`tr:has(input[name="gid"][value="${gid}"])`).first();
   page.once('dialog', dialog => dialog.accept());
   await Promise.all([
@@ -106,7 +106,7 @@ test('deleting a group removes its linked site from admin and homepage', async (
   ]);
   await expect(page.locator(`tr:has(input[name="gid"][value="${gid}"])`)).toHaveCount(0);
 
-  await page.goto('/admin/sites.php');
+  await page.goto('/admin/sites.php', { waitUntil: 'domcontentloaded' });
   await expect(page.locator(`tr:has(input[name="sid"][value="${sid}"])`)).toHaveCount(0);
 
   await page.goto('/index.php');

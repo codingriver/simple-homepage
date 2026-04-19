@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -64,7 +64,8 @@ test('host api smb actions return expected payloads and audit logs', async ({ pa
     { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
   );
   expect(listRes.status()).toBe(200);
-  expect(Array.isArray((await listRes.json()).data?.shares ?? (await listRes.json()).shares)).toBe(true);
+  const listBody = await listRes.json();
+  expect(Array.isArray(listBody.data?.items ?? listBody.items)).toBe(true);
 
   // smb_share_save
   let csrf = await getHostCsrf(page);

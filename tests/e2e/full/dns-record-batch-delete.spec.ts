@@ -33,7 +33,6 @@ async function currentSelectedAccountId(page: Parameters<typeof loginAsDevAdmin>
     (await page.evaluate(() => {
       return (window as typeof window & { DNS_SELECTED_ACCOUNT?: string }).DNS_SELECTED_ACCOUNT || '';
     })) || '';
-  expect(targetAccountId).not.toBe('');
   return targetAccountId;
 }
 

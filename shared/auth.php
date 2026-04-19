@@ -78,6 +78,7 @@ function auth_default_config(): array {
         'ssh_terminal_idle_minutes' => 120,
         'task_execution_timeout' => 7200,
         'nginx_last_applied'  => 0,
+        'fs_allowed_roots'    => [],
     ];
 }
 

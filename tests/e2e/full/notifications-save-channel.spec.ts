@@ -18,14 +18,16 @@ test('notifications save_channel action persists directly via post', async ({ pa
     const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
 
     const saveRes = await page.request.post('http://127.0.0.1:58080/admin/notifications.php', {
-      form: {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      data: new URLSearchParams({
         action: 'save_channel',
         _csrf: csrf,
         name: channelName,
         type: 'custom',
         webhook_url: `https://example.com/webhook-${ts}`,
         enabled: '1',
-      },
+        'events[]': 'task_failed',
+      }).toString(),
       maxRedirects: 0,
     });
     expect(saveRes.status()).toBe(302);

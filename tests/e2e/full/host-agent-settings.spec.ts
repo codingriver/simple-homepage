@@ -99,7 +99,7 @@ test('settings page can stop and restart host-agent', async ({ page }) => {
   await expect(page.locator('#host-agent-restart-btn')).toBeEnabled();
 
   // Stop
-  page.on('dialog', async dialog => {
+  page.once('dialog', async dialog => {
     expect(dialog.message()).toContain('确认停止 host-agent');
     await dialog.accept();
   });
@@ -107,7 +107,9 @@ test('settings page can stop and restart host-agent', async ({ page }) => {
   await page.waitForLoadState('networkidle');
 
   // Refresh and verify stopped
-  await page.goto('/admin/settings.php#host-agent');
+  await page.reload();
+  await page.waitForTimeout(500);
+  await page.evaluate(() => { (window as any).loadHostAgentStatus && (window as any).loadHostAgentStatus(true); });
   await expect(page.locator('#host-agent-status-text')).toContainText('已安装未运行', { timeout: 20000 });
   await expect(page.locator('#host-agent-stop-btn')).toBeDisabled();
   await expect(page.locator('#host-agent-install-btn')).toBeEnabled();
@@ -118,7 +120,7 @@ test('settings page can stop and restart host-agent', async ({ page }) => {
   expect(inspectAfterStop.stdout.trim()).toBe('false');
 
   // Restart
-  page.on('dialog', async dialog => {
+  page.once('dialog', async dialog => {
     expect(dialog.message()).toContain('确认重启 host-agent');
     await dialog.accept();
   });
@@ -126,7 +128,9 @@ test('settings page can stop and restart host-agent', async ({ page }) => {
   await page.waitForLoadState('networkidle');
 
   // Refresh and verify running again
-  await page.goto('/admin/settings.php#host-agent');
+  await page.reload();
+  await page.waitForTimeout(500);
+  await page.evaluate(() => { (window as any).loadHostAgentStatus && (window as any).loadHostAgentStatus(true); });
   await expect(page.locator('#host-agent-status-text')).toContainText('已运行并健康', { timeout: 20000 });
   await expect(page.locator('#host-agent-stop-btn')).toBeEnabled();
   await expect(page.locator('#host-agent-install-btn')).toBeDisabled();

@@ -54,6 +54,18 @@ function file_api_target_or_404(string $hostId): array {
     exit;
 }
 
+function file_api_check_local_path_allowed(string $path): void {
+    $roots = fs_allowed_roots();
+    if (empty($roots)) {
+        return;
+    }
+    if (!fs_path_in_allowed_roots($path, $roots)) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'msg' => '路径不在白名单允许范围内'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 function file_api_resolve_local_webdav_root(string $path): string {
     $normalized = trim($path);
     if ($normalized === '') {
@@ -71,6 +83,9 @@ function file_api_resolve_local_webdav_root(string $path): string {
 if ($action === 'list') {
     $hostId = trim((string)($_GET['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_GET['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     $result = host_agent_fs_list(file_api_target_or_404($hostId), $path);
     file_api_send($result);
 }
@@ -78,6 +93,9 @@ if ($action === 'list') {
 if ($action === 'read') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     file_api_send(host_agent_fs_read(file_api_target_or_404($hostId), $path));
 }
 
@@ -98,6 +116,9 @@ if ($action === 'mkdir') {
     csrf_check();
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     $result = host_agent_fs_mkdir(file_api_target_or_404($hostId), $path);
     ssh_manager_audit('fs_mkdir', ['host_id' => $hostId, 'path' => $path, 'ok' => (bool)($result['ok'] ?? false)]);
     file_api_send($result);
@@ -109,6 +130,10 @@ if ($action === 'rename') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $sourcePath = trim((string)($_POST['source_path'] ?? ''));
     $targetPath = trim((string)($_POST['target_path'] ?? ''));
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($sourcePath);
+        file_api_check_local_path_allowed($targetPath);
+    }
     $result = host_agent_fs_rename(file_api_target_or_404($hostId), $sourcePath, $targetPath);
     ssh_manager_audit('fs_rename', ['host_id' => $hostId, 'source_path' => $sourcePath, 'target_path' => $targetPath, 'ok' => (bool)($result['ok'] ?? false)]);
     file_api_send($result);
@@ -120,6 +145,10 @@ if ($action === 'copy') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $sourcePath = trim((string)($_POST['source_path'] ?? ''));
     $targetPath = trim((string)($_POST['target_path'] ?? ''));
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($sourcePath);
+        file_api_check_local_path_allowed($targetPath);
+    }
     $result = host_agent_fs_copy(file_api_target_or_404($hostId), $sourcePath, $targetPath);
     ssh_manager_audit('fs_copy', ['host_id' => $hostId, 'source_path' => $sourcePath, 'target_path' => $targetPath, 'ok' => (bool)($result['ok'] ?? false)]);
     file_api_send($result);
@@ -131,6 +160,10 @@ if ($action === 'move') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $sourcePath = trim((string)($_POST['source_path'] ?? ''));
     $targetPath = trim((string)($_POST['target_path'] ?? ''));
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($sourcePath);
+        file_api_check_local_path_allowed($targetPath);
+    }
     $result = host_agent_fs_move(file_api_target_or_404($hostId), $sourcePath, $targetPath);
     ssh_manager_audit('fs_move', ['host_id' => $hostId, 'source_path' => $sourcePath, 'target_path' => $targetPath, 'ok' => (bool)($result['ok'] ?? false)]);
     file_api_send($result);
@@ -141,14 +174,27 @@ if ($action === 'delete') {
     csrf_check();
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
-    $result = host_agent_fs_delete(file_api_target_or_404($hostId), $path);
-    ssh_manager_audit('fs_delete', ['host_id' => $hostId, 'path' => $path, 'ok' => (bool)($result['ok'] ?? false)]);
-    file_api_send($result);
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
+    // 本地操作先移至回收站
+    if ($hostId === 'local') {
+        $trashResult = trash_move($hostId, $path, (string)($user['username'] ?? ''));
+        ssh_manager_audit('fs_delete', ['host_id' => $hostId, 'path' => $path, 'ok' => (bool)($trashResult['ok'] ?? false), 'trash' => true]);
+        file_api_send($trashResult);
+    } else {
+        $result = host_agent_fs_delete(file_api_target_or_404($hostId), $path);
+        ssh_manager_audit('fs_delete', ['host_id' => $hostId, 'path' => $path, 'ok' => (bool)($result['ok'] ?? false)]);
+        file_api_send($result);
+    }
 }
 
 if ($action === 'stat') {
     $hostId = trim((string)($_GET['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_GET['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     file_api_send(host_agent_fs_stat(file_api_target_or_404($hostId), $path));
 }
 
@@ -165,6 +211,9 @@ if ($action === 'chmod') {
     csrf_check();
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     $mode = trim((string)($_POST['mode'] ?? ''));
     $result = host_agent_fs_chmod(file_api_target_or_404($hostId), $path, $mode);
     ssh_manager_audit('fs_chmod', ['host_id' => $hostId, 'path' => $path, 'mode' => $mode, 'ok' => (bool)($result['ok'] ?? false)]);
@@ -176,6 +225,9 @@ if ($action === 'chown') {
     csrf_check();
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     $owner = trim((string)($_POST['owner'] ?? ''));
     $result = host_agent_fs_chown(file_api_target_or_404($hostId), $path, $owner);
     ssh_manager_audit('fs_chown', ['host_id' => $hostId, 'path' => $path, 'owner' => $owner, 'ok' => (bool)($result['ok'] ?? false)]);
@@ -187,6 +239,9 @@ if ($action === 'chgrp') {
     csrf_check();
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+    }
     $group = trim((string)($_POST['group'] ?? ''));
     $result = host_agent_fs_chgrp(file_api_target_or_404($hostId), $path, $group);
     ssh_manager_audit('fs_chgrp', ['host_id' => $hostId, 'path' => $path, 'group' => $group, 'ok' => (bool)($result['ok'] ?? false)]);
@@ -199,6 +254,10 @@ if ($action === 'archive') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
     $archivePath = trim((string)($_POST['archive_path'] ?? ($path . '.tar.gz')));
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+        file_api_check_local_path_allowed($archivePath);
+    }
     // 默认走异步任务，避免大文件压缩阻塞
     $result = host_agent_fs_archive_async(file_api_target_or_404($hostId), $path, $archivePath);
     ssh_manager_audit('fs_archive', ['host_id' => $hostId, 'path' => $path, 'archive_path' => $archivePath, 'ok' => (bool)($result['ok'] ?? false), 'async' => true]);
@@ -211,6 +270,10 @@ if ($action === 'extract') {
     $hostId = trim((string)($_POST['host_id'] ?? 'local')) ?: 'local';
     $path = trim((string)($_POST['path'] ?? '/')) ?: '/';
     $destination = trim((string)($_POST['destination'] ?? dirname($path))) ?: dirname($path);
+    if ($hostId === 'local') {
+        file_api_check_local_path_allowed($path);
+        file_api_check_local_path_allowed($destination);
+    }
     // 默认走异步任务，避免大文件解压阻塞
     $result = host_agent_fs_extract_async(file_api_target_or_404($hostId), $path, $destination);
     ssh_manager_audit('fs_extract', ['host_id' => $hostId, 'path' => $path, 'destination' => $destination, 'ok' => (bool)($result['ok'] ?? false), 'async' => true]);
@@ -326,6 +389,41 @@ if ($action === 'audit_export') {
     header('Content-Disposition: attachment; filename="file-audit-export.json"');
     echo json_encode($logs, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+if ($action === 'trash_list') {
+    file_api_send(['ok' => true, 'data' => ['ok' => true, 'items' => trash_list()]]);
+}
+
+if ($action === 'trash_restore') {
+    file_api_require_write();
+    csrf_check();
+    $entryId = trim((string)($_POST['entry_id'] ?? ''));
+    if ($entryId === '') {
+        file_api_send(['ok' => false, 'msg' => '缺少回收站条目 ID']);
+    }
+    $result = trash_restore($entryId);
+    ssh_manager_audit('trash_restore', ['entry_id' => $entryId, 'ok' => (bool)($result['ok'] ?? false)]);
+    file_api_send($result);
+}
+
+if ($action === 'trash_delete') {
+    file_api_require_write();
+    csrf_check();
+    $entryId = trim((string)($_POST['entry_id'] ?? ''));
+    if ($entryId === '') {
+        file_api_send(['ok' => false, 'msg' => '缺少回收站条目 ID']);
+    }
+    $result = trash_permanent_delete($entryId);
+    ssh_manager_audit('trash_delete', ['entry_id' => $entryId, 'ok' => (bool)($result['ok'] ?? false)]);
+    file_api_send($result);
+}
+
+if ($action === 'trash_auto_clean') {
+    file_api_require_write();
+    csrf_check();
+    trash_auto_clean();
+    file_api_send(['ok' => true, 'msg' => '回收站自动清理完成']);
 }
 
 http_response_code(404);

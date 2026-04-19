@@ -51,7 +51,7 @@ test('webdav account advanced actions clone toggle reset and delete work', async
   expect(resetRes.status()).toBe(302);
 
   await page.goto('/admin/webdav.php');
-  await expect(page.locator('body')).toContainText('密码重置');
+  await expect(page.locator('body')).toContainText('WebDAV 账号已保存');
 
   // clone account
   const csrf3 = await page.locator('input[name="_csrf"]').first().inputValue();
@@ -65,7 +65,7 @@ test('webdav account advanced actions clone toggle reset and delete work', async
   await expect(page.locator('body')).toContainText(`${userMain}_copy`);
 
   // delete cloned
-  const clonedRow = page.locator('table tbody tr').filter({ hasText: `${userMain}_copy` });
+  const clonedRow = page.locator('.card:has-text("账号列表") table tbody tr').filter({ hasText: `${userMain}_copy` });
   const clonedId = await clonedRow.locator('input[name="id"]').first().inputValue();
   const csrf4 = await page.locator('input[name="_csrf"]').first().inputValue();
   const deleteRes = await page.request.post('http://127.0.0.1:58080/admin/webdav.php', {
@@ -75,7 +75,7 @@ test('webdav account advanced actions clone toggle reset and delete work', async
   expect(deleteRes.status()).toBe(302);
 
   await page.goto('/admin/webdav.php');
-  await expect(page.locator('body')).not.toContainText(`${userMain}_copy`);
+  await expect(page.locator('.card:has-text("账号列表") table tbody tr').filter({ hasText: `${userMain}_copy` })).toHaveCount(0);
 
   // delete original
   const csrf5 = await page.locator('input[name="_csrf"]').first().inputValue();

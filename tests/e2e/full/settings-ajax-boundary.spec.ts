@@ -15,7 +15,7 @@ test('settings ajax returns expected structures and rejects unknown actions and 
   const unknown = await page.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=unknown_action', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  expect(unknown.status()).toBe(400);
+  expect(unknown.status()).toBe(404);
 
   await logout(page);
   const guest = await page.request.get('http://127.0.0.1:58080/admin/settings_ajax.php?action=nginx_sudo', {

@@ -61,6 +61,7 @@ $csrfValue = csrf_token();
     <button type="button" class="btn btn-secondary docker-tab-btn" data-tab="images" onclick="dockerSwitchTab('images')">镜像</button>
     <button type="button" class="btn btn-secondary docker-tab-btn" data-tab="volumes" onclick="dockerSwitchTab('volumes')">卷</button>
     <button type="button" class="btn btn-secondary docker-tab-btn" data-tab="networks" onclick="dockerSwitchTab('networks')">网络</button>
+    <button type="button" class="btn btn-secondary docker-tab-btn" data-tab="compose" onclick="dockerSwitchTab('compose')">Compose 栈</button>
   </div>
 
   <section id="docker-tab-containers" class="docker-tab-panel">
@@ -111,6 +112,18 @@ $csrfValue = csrf_token();
       <thead><tr><th>名称</th><th>ID</th><th>驱动</th><th>作用域</th><th>容器数</th></tr></thead>
       <tbody id="docker-networks-tbody"><tr><td colspan="5" style="color:var(--tm)">加载中…</td></tr></tbody>
     </table></div>
+  </section>
+
+  <section id="docker-tab-compose" class="docker-tab-panel" style="display:none">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <input type="text" id="docker-compose-keyword" placeholder="搜索栈名 / 路径" style="min-width:260px">
+      <button type="button" class="btn btn-secondary" onclick="dockerLoadCompose()">刷新 Compose 栈</button>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>栈名</th><th>路径</th><th>状态</th><th>服务数</th><th>操作</th></tr></thead>
+      <tbody id="docker-compose-tbody"><tr><td colspan="5" style="color:var(--tm)">加载中…</td></tr></tbody>
+    </table></div>
+    <div id="docker-compose-empty" class="form-hint" style="display:none;margin-top:10px">未找到 Compose 栈。host-agent 会在 /opt、/home、/root、/var/www、/srv、/data 目录下扫描 docker-compose.yml / compose.yaml 文件。</div>
   </section>
 </div>
 
@@ -542,8 +555,78 @@ function dockerSwitchTab(tab) {
   });
 }
 
+async function dockerLoadCompose() {
+  var tbody = document.getElementById('docker-compose-tbody');
+  var emptyMsg = document.getElementById('docker-compose-empty');
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--tm)">加载中…</td></tr>';
+  emptyMsg.style.display = 'none';
+  var res = await fetch('docker_api.php?action=compose_list', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+  var data = await res.json();
+  if (!data.ok || !data.data || !data.data.items) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--tm)">加载失败</td></tr>';
+    return;
+  }
+  var items = data.data.items;
+  window.DOCKER_COMPOSE_ITEMS = items;
+  dockerRenderCompose();
+}
+
+function dockerRenderCompose() {
+  var tbody = document.getElementById('docker-compose-tbody');
+  var emptyMsg = document.getElementById('docker-compose-empty');
+  var keyword = (document.getElementById('docker-compose-keyword').value || '').toLowerCase();
+  var items = (window.DOCKER_COMPOSE_ITEMS || []).filter(function(item) {
+    if (!keyword) return true;
+    var haystack = (item.name + ' ' + item.file + ' ' + item.dir).toLowerCase();
+    return haystack.indexOf(keyword) !== -1;
+  });
+  if (!items.length) {
+    tbody.innerHTML = '';
+    emptyMsg.style.display = 'block';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+  var statusMap = { running: '✅ 运行中', stopped: '⏹ 已停止', partial: '⚠️ 部分运行', unknown: '❓ 未知' };
+  tbody.innerHTML = items.map(function(item) {
+    var statusText = statusMap[item.status] || item.status;
+    var serviceCount = (item.services || []).length;
+    return '<tr>'
+      + '<td>' + escHtml(item.name || '') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px">' + escHtml(item.file || '') + '</td>'
+      + '<td>' + statusText + '</td>'
+      + '<td>' + serviceCount + '</td>'
+      + '<td>'
+      + '<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 8px" onclick="dockerComposeAction(\'' + escHtml(item.file) + '\', \'up\')">up</button> '
+      + '<button type="button" class="btn btn-secondary" style="font-size:12px;padding:4px 8px" onclick="dockerComposeAction(\'' + escHtml(item.file) + '\', \'down\')">down</button> '
+      + '<button type="button" class="btn btn-secondary" style="font-size:12px;padding:4px 8px" onclick="dockerComposeAction(\'' + escHtml(item.file) + '\', \'pull\')">pull</button> '
+      + '<button type="button" class="btn btn-secondary" style="font-size:12px;padding:4px 8px" onclick="dockerComposeAction(\'' + escHtml(item.file) + '\', \'restart\')">restart</button> '
+      + '<a href="files.php?path=' + encodeURIComponent(item.dir || '/') + '" class="btn btn-secondary" style="font-size:12px;padding:4px 8px">编辑</a>'
+      + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function dockerComposeAction(file, action) {
+  var form = new URLSearchParams();
+  form.append('action', 'compose_action');
+  form.append('_csrf', window.DOCKER_CSRF || '');
+  form.append('file', file);
+  form.append('compose_action', action);
+  var res = await fetch('docker_api.php', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form
+  });
+  var data = await res.json();
+  showToast(data.msg || (data.ok ? action + ' 完成' : action + ' 失败'), data.ok ? 'success' : 'error');
+  if (data.ok) dockerLoadCompose();
+}
+
+document.getElementById('docker-compose-keyword').addEventListener('input', dockerRenderCompose);
+
 async function dockerLoadAll() {
-  await Promise.all([dockerLoadSummary(), dockerLoadContainers(), dockerLoadImages(), dockerLoadVolumes(), dockerLoadNetworks()]);
+  await Promise.all([dockerLoadSummary(), dockerLoadContainers(), dockerLoadImages(), dockerLoadVolumes(), dockerLoadNetworks(), dockerLoadCompose()]);
 }
 
 document.getElementById('docker-container-keyword').addEventListener('input', dockerRenderContainers);

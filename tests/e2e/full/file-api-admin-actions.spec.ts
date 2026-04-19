@@ -1,6 +1,19 @@
 import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { runDockerPhpInline } from '../../helpers/cli';
+import fs from 'fs';
+import path from 'path';
+
+async function ensureInstalledHostAgent() {
+  const result = runDockerPhpInline(
+    [
+      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+      '$result = host_agent_install();',
+      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+    ].join(' ')
+  );
+  expect(result.code).toBe(0);
+}
 
 async function getCsrf(page: any) {
   await page.goto('/admin/files.php');
@@ -9,6 +22,7 @@ async function getCsrf(page: any) {
 
 test('file api admin-only and audit actions work as expected', async ({ page }) => {
   test.setTimeout(120000);
+  await ensureInstalledHostAgent();
   const tracker = await attachClientErrorTracking(page);
 
   const ts = Date.now();
@@ -28,14 +42,18 @@ test('file api admin-only and audit actions work as expected', async ({ page }) 
     ].join(' ')
   );
 
-  // seed an audit event
-  runDockerPhpInline(
-    [
-      '$log = "/var/www/nav/data/logs/ssh_manager_audit.log";',
-      '$entry = json_encode(["t" => time(), "action" => "fs_write", "host_id" => "local", "path" => "' + baseDir + '/x.txt", "username" => "qatest"], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) . "\n";',
-      'file_put_contents($log, $entry, FILE_APPEND|LOCK_EX);',
-    ].join(' ')
-  );
+  // seed an audit event (write directly on host to avoid Docker Desktop fs sync issues)
+  const auditLogPath = path.resolve(__dirname, '../../../data/logs/ssh_audit.log');
+  const auditEntry = JSON.stringify({
+    time: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    action: 'fs_write',
+    host_id: 'local',
+    path: baseDir + '/x.txt',
+    user: 'qatest',
+    context: { host_id: 'local', path: baseDir + '/x.txt' },
+  }) + '\n';
+  fs.mkdirSync(path.dirname(auditLogPath), { recursive: true });
+  fs.appendFileSync(auditLogPath, auditEntry);
 
   await loginAsDevAdmin(page);
   const csrf = await getCsrf(page);

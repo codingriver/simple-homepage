@@ -10,7 +10,7 @@ const hostAgentContainer = process.env.APP_CONTAINER ? `${process.env.APP_CONTAI
 
 async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
-  await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
+  await runDockerPhpInline('file_put_contents("/var/www/nav/data/host_agent.json", "{}", LOCK_EX);');
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
 }
 
@@ -64,7 +64,8 @@ test('host api sftp and afp actions return expected payloads and audit logs', as
     { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
   );
   expect(sftpListRes.status()).toBe(200);
-  expect(Array.isArray((await sftpListRes.json()).data?.policies ?? (await sftpListRes.json()).policies)).toBe(true);
+  const sftpListBody = await sftpListRes.json();
+  expect(Array.isArray(sftpListBody.data?.items ?? sftpListBody.items)).toBe(true);
 
   // sftp_policy_save
   let csrf = await getHostCsrf(page);

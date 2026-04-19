@@ -707,6 +707,17 @@ function host_agent_docker_networks_list(): array {
     return host_agent_api_request('GET', '/docker/networks');
 }
 
+function host_agent_compose_list(): array {
+    return host_agent_api_request('GET', '/docker/compose/list');
+}
+
+function host_agent_compose_action(string $file, string $action): array {
+    return host_agent_api_request('POST', '/docker/compose/action', [
+        'file' => $file,
+        'compose_action' => $action,
+    ]);
+}
+
 function host_agent_user_list(string $keyword = ''): array {
     return host_agent_api_request('POST', '/user/list', ['keyword' => $keyword]);
 }
@@ -976,6 +987,28 @@ function host_agent_status_summary(): array {
     return $summary;
 }
 
+function host_agent_docker_start_fallback(string $container_name): bool {
+    $socketPath = host_agent_docker_socket_path();
+    $path = '/containers/' . rawurlencode($container_name) . '/start';
+    $fp = @stream_socket_client('unix://' . $socketPath, $errno, $errstr, 3);
+    if (!$fp) {
+        return false;
+    }
+    $request = "POST $path HTTP/1.1\r\n"
+        . "Host: localhost\r\n"
+        . "Content-Type: application/json\r\n"
+        . "Content-Length: 0\r\n"
+        . "Connection: close\r\n\r\n";
+    fwrite($fp, $request);
+    $response = '';
+    $timeoutAt = microtime(true) + 5;
+    while (!feof($fp) && microtime(true) < $timeoutAt) {
+        $response .= fgets($fp, 1024);
+    }
+    fclose($fp);
+    return strpos($response, 'HTTP/1.1 204') !== false || strpos($response, 'HTTP/1.1 304') !== false;
+}
+
 function host_agent_install(): array {
     $status = host_agent_status_summary();
     if (!$status['docker_accessible']) {
@@ -992,12 +1025,27 @@ function host_agent_install(): array {
     }
 
     $container_name = (string)$status['container_name'];
+    $state = host_agent_load_state();
+    $tokenLost = $status['installed'] && trim((string)($state['token'] ?? '')) === '';
+    $needCreate = false;
     if ($status['installed'] && !$status['running']) {
         $start = host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/start');
         if (!$start['ok'] && $start['status'] !== 304) {
-            return ['ok' => false, 'msg' => '启动已存在的 host-agent 容器失败：' . ($start['error'] ?: $start['body'])];
+            // Fallback: Docker Desktop for Mac 下 curl + unix socket 对 start 可能超时，使用 stream_socket_client
+            $fallbackStart = host_agent_docker_start_fallback($container_name);
+            if (!$fallbackStart) {
+                return ['ok' => false, 'msg' => '启动已存在的 host-agent 容器失败：' . ($start['error'] ?: $start['body'])];
+            }
         }
+    } elseif ($tokenLost) {
+        // Token 丢失但容器还在运行，删除后重新创建
+        host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/stop?t=10');
+        host_agent_docker_request('DELETE', '/containers/' . rawurlencode($container_name) . '?force=1');
+        $needCreate = true;
     } elseif (!$status['installed']) {
+        $needCreate = true;
+    }
+    if ($needCreate) {
         $token = host_agent_token();
         $mode = host_agent_install_mode();
         $cmd = [
@@ -1062,7 +1110,11 @@ function host_agent_install(): array {
         }
         $start = host_agent_docker_request('POST', '/containers/' . rawurlencode($container_id) . '/start');
         if (!$start['ok'] && $start['status'] !== 304) {
-            return ['ok' => false, 'msg' => '启动 host-agent 容器失败：' . ($start['error'] ?: $start['body'])];
+            // Fallback: Docker Desktop for Mac 下 curl + unix socket 对 start 可能超时，使用 stream_socket_client
+            $fallbackStart = host_agent_docker_start_fallback($container_name);
+            if (!$fallbackStart) {
+                return ['ok' => false, 'msg' => '启动 host-agent 容器失败：' . ($start['error'] ?: $start['body'])];
+            }
         }
 
         host_agent_save_state([

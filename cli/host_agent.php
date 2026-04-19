@@ -5370,6 +5370,109 @@ function host_agent_docker_networks_list(): array {
     return ['ok' => true, 'items' => $items];
 }
 
+function host_agent_compose_scan(array $scanDirs = []): array {
+    if (empty($scanDirs)) {
+        $scanDirs = ['/opt', '/home', '/root', '/var/www', '/srv', '/data'];
+    }
+    $composeFiles = [];
+    $seen = [];
+    foreach ($scanDirs as $dir) {
+        if (!is_dir($dir)) continue;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) continue;
+            $name = strtolower($file->getFilename());
+            if ($name !== 'docker-compose.yml' && $name !== 'compose.yaml' && $name !== 'docker-compose.yaml') continue;
+            $realPath = $file->getRealPath();
+            if (isset($seen[$realPath])) continue;
+            $seen[$realPath] = true;
+            // 限制扫描深度，避免遍历过大目录
+            $depth = substr_count(substr($realPath, strlen($dir)), DIRECTORY_SEPARATOR);
+            if ($depth > 4) continue;
+            $composeFiles[] = $realPath;
+        }
+    }
+    return array_values($composeFiles);
+}
+
+function host_agent_compose_status(string $composeFile): array {
+    $dir = dirname($composeFile);
+    $cmd = 'cd ' . escapeshellarg($dir) . ' && docker compose -f ' . escapeshellarg(basename($composeFile)) . ' ps --format json 2>&1';
+    $result = host_agent_host_shell($cmd);
+    $items = [];
+    if ($result['ok'] && $result['code'] === 0) {
+        $lines = array_filter(array_map('trim', explode("\n", $result['stdout'])));
+        foreach ($lines as $line) {
+            $decoded = json_decode($line, true);
+            if (is_array($decoded)) {
+                $items[] = $decoded;
+            }
+        }
+    }
+    // 判断整体状态
+    $status = 'unknown';
+    if (!empty($items)) {
+        $running = 0;
+        $total = count($items);
+        foreach ($items as $item) {
+            $state = strtolower((string)($item['State'] ?? $item['Status'] ?? ''));
+            if (strpos($state, 'running') !== false) {
+                $running++;
+            }
+        }
+        if ($running === $total) {
+            $status = 'running';
+        } elseif ($running === 0) {
+            $status = 'stopped';
+        } else {
+            $status = 'partial';
+        }
+    }
+    return [
+        'ok' => true,
+        'file' => $composeFile,
+        'dir' => $dir,
+        'name' => basename($dir),
+        'status' => $status,
+        'services' => $items,
+    ];
+}
+
+function host_agent_compose_list(): array {
+    $files = host_agent_compose_scan();
+    $stacks = [];
+    foreach ($files as $file) {
+        $stacks[] = host_agent_compose_status($file);
+    }
+    usort($stacks, static function(array $a, array $b): int {
+        return strcmp((string)$a['name'], (string)$b['name']);
+    });
+    return ['ok' => true, 'items' => $stacks];
+}
+
+function host_agent_compose_action(string $composeFile, string $action): array {
+    $allowed = ['up', 'down', 'pull', 'restart'];
+    if (!in_array($action, $allowed, true)) {
+        return ['ok' => false, 'msg' => '不支持的 Compose 操作，支持: ' . implode(', ', $allowed)];
+    }
+    $dir = dirname($composeFile);
+    $extra = '';
+    if ($action === 'up') {
+        $extra = ' -d';
+    }
+    $cmd = 'cd ' . escapeshellarg($dir) . ' && docker compose -f ' . escapeshellarg(basename($composeFile)) . ' ' . $action . $extra . ' 2>&1';
+    $result = host_agent_host_shell($cmd);
+    $ok = $result['ok'] && $result['code'] === 0;
+    return [
+        'ok' => $ok,
+        'msg' => $ok ? ('Compose ' . $action . ' 完成') : ('Compose ' . $action . ' 失败: ' . trim($result['stderr'] ?: $result['stdout'])),
+        'output' => trim($result['stdout'] ?: ''),
+    ];
+}
+
 function host_agent_docker_summary(): array {
     if (!host_agent_docker_available()) {
         return ['ok' => false, 'msg' => 'docker.sock 不可用'];
@@ -6285,6 +6388,20 @@ function host_agent_handle_request(string $request, string $token, string $root,
 
     if ($method === 'GET' && $path === '/docker/networks') {
         $result = host_agent_docker_networks_list();
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'GET' && $path === '/docker/compose/list') {
+        $result = host_agent_compose_list();
+        return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    if ($method === 'POST' && $path === '/docker/compose/action') {
+        $payload = host_agent_json_decode($body);
+        $result = host_agent_compose_action(
+            trim((string)($payload['file'] ?? '')),
+            trim((string)($payload['compose_action'] ?? ''))
+        );
         return host_agent_json_response($result, !empty($result['ok']) ? 200 : 422);
     }
 

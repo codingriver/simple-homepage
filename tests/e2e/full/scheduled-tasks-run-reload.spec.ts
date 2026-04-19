@@ -26,7 +26,7 @@ test('scheduled tasks run cron reload and log clear actions work end to end', as
   await fs.writeFile(scheduledTasksFile, JSON.stringify(tasksPayload, null, 2), 'utf8');
 
   // seed a log file for the task
-  const logPath = path.resolve(__dirname, `../../../data/logs/tasks/${taskId}.log`);
+  const logPath = path.resolve(__dirname, `../../../data/tasks/task_${taskId}.log`);
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   await fs.writeFile(logPath, 'line1\nline2\n', 'utf8');
 
