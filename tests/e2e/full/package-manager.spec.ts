@@ -12,18 +12,40 @@ async function cleanupHostAgent() {
   runDockerCommand(['rm', '-f', hostAgentContainer]);
   await fs.rm(hostAgentStatePath, { force: true }).catch(() => undefined);
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
+  // 等待 Docker 引擎完成容器清理，避免立即创建时冲突
+  await new Promise(r => setTimeout(r, 1500));
 }
 
 async function ensureInstalledHostAgent() {
-  const result = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
-      '$result = host_agent_install();',
-      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(result.code).toBe(0);
-  expect(JSON.parse(result.stdout).ok).toBe(true);
+  let lastError = '';
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const result = runDockerPhpInline(
+      [
+        'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+        '$result = host_agent_install();',
+        'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+      ].join(' ')
+    );
+    if (result.code === 0) {
+      try {
+        const payload = JSON.parse(result.stdout);
+        if (payload.ok === true) {
+          // 安装成功后等待容器状态稳定
+          await new Promise(r => setTimeout(r, 2000));
+          return;
+        }
+        lastError = JSON.stringify(payload);
+      } catch {
+        lastError = 'JSON parse error: stdout=' + result.stdout + '|stderr=' + result.stderr;
+      }
+    } else {
+      lastError = 'exit code ' + result.code + ' stdout=' + result.stdout + '|stderr=' + result.stderr;
+    }
+    if (attempt < 5) {
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  throw new Error('ensureInstalledHostAgent failed after 5 attempts: ' + lastError);
 }
 
 async function getHostCsrf(page: any) {

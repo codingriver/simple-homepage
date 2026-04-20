@@ -2,8 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const scheduledTasksFile = path.resolve(__dirname, '../../../data/scheduled_tasks.json');
+const containerScheduledTasksFile = '/var/www/nav/data/scheduled_tasks.json';
 
 test('scheduled tasks advanced cases normalize invalid pages and keep system dispatchers guarded', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
@@ -157,13 +159,19 @@ test('scheduled tasks auto-correct stale running state when no active lock exist
   const row = page.locator(`tr[data-task-row]:has-text("${name}")`).first();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
 
-  const payload = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as { tasks: Array<Record<string, any>> };
+  const payload = JSON.parse(readContainerFile(containerScheduledTasksFile)) as { tasks: Array<Record<string, any>> };
   const task = payload.tasks.find((item) => item.id === taskId);
   if (!task) throw new Error(`task ${taskId} not found`);
   task.runtime = { ...(task.runtime || {}), running: true, started_at: '2026-04-10 10:00:00' };
   task.last_run = '';
   task.last_code = null;
-  await fs.writeFile(scheduledTasksFile, JSON.stringify(payload, null, 2), 'utf8');
+  writeContainerFile(containerScheduledTasksFile, JSON.stringify(payload, null, 2));
+  // 回写宿主机，保证测试读取时也能看到最新内容
+  try {
+    await fs.writeFile(scheduledTasksFile, JSON.stringify(payload, null, 2), 'utf8');
+  } catch {
+    // ignore
+  }
 
   const statusResponse = await page.request.get(`http://127.0.0.1:58080/admin/api/task_status.php?ids=${encodeURIComponent(taskId)}`);
   expect(statusResponse.status()).toBe(200);
@@ -173,7 +181,7 @@ test('scheduled tasks auto-correct stale running state when no active lock exist
 
   await expect(row.locator('[data-task-run-btn]')).toHaveText('▶▶ 立即执行', { timeout: 4000 });
 
-  const refreshedPayload = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8')) as { tasks: Array<Record<string, any>> };
+  const refreshedPayload = JSON.parse(readContainerFile(containerScheduledTasksFile)) as { tasks: Array<Record<string, any>> };
   const refreshedTask = refreshedPayload.tasks.find((item) => item.id === taskId);
   expect(refreshedTask?.runtime?.running).toBe(false);
   expect(refreshedTask?.runtime?.started_at).toBe('');

@@ -122,6 +122,7 @@ if ($action === 'list') {
     $result = [];
     foreach ($logSources as $key => $meta) {
         $path = $meta['path'];
+        clearstatcache(true, $path);
         $exists = file_exists($path);
         $size = $exists ? filesize($path) : 0;
         $lines = $exists ? log_count_lines($path) : 0;
@@ -149,6 +150,8 @@ if ($action === 'read') {
         exit;
     }
     $path = $logSources[$type]['path'];
+    // 清除文件状态缓存，避免 bind-mount 环境下 filesize/ftell 返回旧值
+    clearstatcache(true, $path);
     if (!file_exists($path) || !is_readable($path)) {
         echo json_encode(['ok' => true, 'type' => $type, 'total_lines' => 0, 'offset' => 0, 'limit' => 0, 'lines' => [], 'has_more' => false], JSON_UNESCAPED_UNICODE);
         exit;

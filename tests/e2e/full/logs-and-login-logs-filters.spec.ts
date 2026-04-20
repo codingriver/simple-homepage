@@ -2,21 +2,24 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const authLogPath = path.resolve(__dirname, '../../../data/logs/auth.log');
+const containerAuthLogPath = '/var/www/nav/data/logs/auth.log';
 
 test('login logs and logs center support frontend filtering and level selection', async ({ page }) => {
   test.setTimeout(120000);
   const tracker = await attachClientErrorTracking(page);
   const ts = Date.now();
-  const originalAuthLog = await fs.readFile(authLogPath, 'utf8').catch(() => '');
+  const originalAuthLog = readContainerFile(containerAuthLogPath);
 
   const logLines = [
     `[2026-04-07 10:00:00] SUCCESS    user=filter-user-${ts} ip=127.0.0.1 note=e2e`,
     `[2026-04-07 10:01:00] FAIL       user=filter-user-fail-${ts} ip=127.0.0.2 note=e2e`,
   ].join('\n');
   const nextAuthLog = `${originalAuthLog.replace(/\s*$/, '')}\n${logLines}\n`.replace(/^\n/, '');
-  await fs.writeFile(authLogPath, nextAuthLog, 'utf8');
+  writeContainerFile(containerAuthLogPath, nextAuthLog);
+  await fs.writeFile(authLogPath, nextAuthLog, 'utf8').catch(() => undefined);
 
   try {
     await loginAsDevAdmin(page);
@@ -46,7 +49,8 @@ test('login logs and logs center support frontend filtering and level selection'
     });
     expect(filtered).not.toContain(`filter-user-${ts}`);
   } finally {
-    await fs.writeFile(authLogPath, originalAuthLog, 'utf8');
+    writeContainerFile(containerAuthLogPath, originalAuthLog);
+    await fs.writeFile(authLogPath, originalAuthLog, 'utf8').catch(() => undefined);
   }
 
   await tracker.assertNoClientErrors();

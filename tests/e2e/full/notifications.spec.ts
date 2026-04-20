@@ -2,10 +2,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile, readContainerFile, runDockerShell } from '../../helpers/cli';
 
 const notificationsFile = path.resolve(__dirname, '../../../data/notifications.json');
 const notifyLogFile = path.resolve(__dirname, '../../../data/logs/notifications.log');
 const notifyProbeLogFile = path.resolve(__dirname, '../../../data/logs/notify_probe.log');
+const containerNotificationsFile = '/var/www/nav/data/notifications.json';
+const containerNotifyLogFile = '/var/www/nav/data/logs/notifications.log';
+const containerNotifyProbeLogFile = '/var/www/nav/data/logs/notify_probe.log';
 
 test('notifications center can save a channel and receive task failure events', async ({ page }) => {
   test.setTimeout(180000);
@@ -19,8 +23,10 @@ test('notifications center can save a channel and receive task failure events', 
   const channelName = `任务失败通知 ${ts}`;
   const taskName = `notify_fail_${ts}`;
 
-  await fs.rm(notifyLogFile, { force: true });
-  await fs.rm(notifyProbeLogFile, { force: true });
+  // 容器内清空日志，避免 bind-mount 同步问题
+  runDockerShell('rm -f /var/www/nav/data/logs/notifications.log /var/www/nav/data/logs/notify_probe.log');
+  await fs.rm(notifyLogFile, { force: true }).catch(() => undefined);
+  await fs.rm(notifyProbeLogFile, { force: true }).catch(() => undefined);
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/notifications.php');
@@ -51,18 +57,22 @@ test('notifications center can save a channel and receive task failure events', 
 
   await expect
     .poll(async () => {
-      const raw = JSON.parse(await fs.readFile(notificationsFile, 'utf8')) as {
-        channels?: Array<{ name?: string; runtime?: { last_status?: string; last_sent_at?: string } }>;
-      };
-      const channel = raw.channels?.find((item) => item.name === channelName);
-      return channel?.runtime?.last_status || '';
+      try {
+        const raw = JSON.parse(readContainerFile(containerNotificationsFile)) as {
+          channels?: Array<{ name?: string; runtime?: { last_status?: string; last_sent_at?: string } }>;
+        };
+        const channel = raw.channels?.find((item) => item.name === channelName);
+        return channel?.runtime?.last_status || '';
+      } catch {
+        return '';
+      }
     }, { timeout: 30000 })
     .toBe('success');
 
   await expect
     .poll(async () => {
       try {
-        return await fs.readFile(notifyLogFile, 'utf8');
+        return readContainerFile(containerNotifyLogFile);
       } catch {
         return '';
       }
@@ -71,7 +81,7 @@ test('notifications center can save a channel and receive task failure events', 
   await expect
     .poll(async () => {
       try {
-        return await fs.readFile(notifyProbeLogFile, 'utf8');
+        return readContainerFile(containerNotifyProbeLogFile);
       } catch {
         return '';
       }

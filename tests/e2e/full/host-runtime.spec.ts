@@ -16,19 +16,40 @@ async function cleanupHostAgent() {
   await fs.rm(simulateRootPath, { recursive: true, force: true }).catch(() => undefined);
   await fs.rm(shareHistoryPath, { recursive: true, force: true }).catch(() => undefined);
   await fs.rm(shareAuditLogPath, { force: true }).catch(() => undefined);
+  // 等待 Docker 引擎完成容器清理，避免立即创建时冲突
+  await new Promise(r => setTimeout(r, 1500));
 }
 
 async function ensureInstalledHostAgent() {
-  const result = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
-      '$result = host_agent_install();',
-      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(result.code).toBe(0);
-  const payload = JSON.parse(result.stdout);
-  expect(payload.ok).toBe(true);
+  let lastError = '';
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const result = runDockerPhpInline(
+      [
+        'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+        '$result = host_agent_install();',
+        'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+      ].join(' ')
+    );
+    if (result.code === 0) {
+      try {
+        const payload = JSON.parse(result.stdout);
+        if (payload.ok === true) {
+          // 安装成功后等待容器状态稳定
+          await new Promise(r => setTimeout(r, 2000));
+          return;
+        }
+        lastError = JSON.stringify(payload);
+      } catch {
+        lastError = 'JSON parse error: stdout=' + result.stdout + '|stderr=' + result.stderr;
+      }
+    } else {
+      lastError = 'exit code ' + result.code + ' stdout=' + result.stdout + '|stderr=' + result.stderr;
+    }
+    if (attempt < 5) {
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  throw new Error('ensureInstalledHostAgent failed after 5 attempts: ' + lastError);
 }
 
 test.beforeEach(async () => {
@@ -86,6 +107,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   const spawn = runDockerCommand([
     'exec',
@@ -172,6 +194,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   await fs.mkdir(path.join(simulateRootPath, 'srv', `share-${ts}`, 'nested'), { recursive: true });
   await fs.writeFile(path.join(simulateRootPath, 'srv', `share-${ts}`, 'nested', 'demo.txt'), 'hello host runtime\n', 'utf8');
@@ -204,6 +227,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   await expect(page.locator('#smb-tbody')).toContainText('权限');
   await page.evaluate((targetPath) => {
@@ -270,6 +294,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   await page.getByRole('button', { name: '安装 NFS' }).click({ force: true });
   await page.locator('#nfs-path').fill(`/srv/nfs-${ts}`);
@@ -325,6 +350,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   await page.getByRole('button', { name: '安装 AFP' }).click({ force: true });
   await page.locator('#afp-name').fill(`afp${ts}`);
@@ -333,11 +359,12 @@ test('host runtime page covers overview processes services network users and gro
   await page.locator('#afp-valid-users').fill(username);
   await page.locator('#afp-rwlist').fill(username);
   await page.getByRole('button', { name: '保存 AFP 共享' }).click({ force: true });
+  await expect(page.locator('#afp-tbody')).toContainText(`afp${ts}`, { timeout: 15000 });
   await expect
     .poll(() => runDockerPhpInline([
       '$path = "/var/www/nav/data/host-agent-sim-root/etc/netatalk/afp.conf";',
       'echo is_file($path) ? file_get_contents($path) : "";',
-    ].join(' ')).stdout)
+    ].join(' ')).stdout, { timeout: 15000 })
     .toContain(`[afp${ts}]`);
   await expect(page.locator('#afp-tbody')).toContainText('编辑');
   await expect(page.locator('#afp-tbody')).toContainText('权限');
@@ -365,6 +392,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   await page.getByRole('button', { name: '安装 Async' }).click({ force: true });
   await page.locator('#async-name').fill(`async${ts}`);
@@ -419,6 +447,7 @@ test('host runtime page covers overview processes services network users and gro
     if (typeof fn !== 'function') throw new Error('closeServiceLogs not found');
     fn();
   });
+  await expect(page.locator('#service-log-modal')).toBeHidden();
 
   const userList = await page.evaluate(async () => {
     const res = await fetch('/admin/host_api.php?action=user_list', {

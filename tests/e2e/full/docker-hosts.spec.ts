@@ -15,16 +15,35 @@ async function cleanupHostAgent() {
 }
 
 async function ensureInstalledHostAgent() {
-  const result = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
-      '$result = host_agent_install();',
-      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(result.code).toBe(0);
-  const payload = JSON.parse(result.stdout);
-  expect(payload.ok).toBe(true);
+  let lastError = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const result = runDockerPhpInline(
+      [
+        'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+        '$result = host_agent_install();',
+        'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+      ].join(' ')
+    );
+    if (result.code === 0) {
+      try {
+        const payload = JSON.parse(result.stdout);
+        if (payload.ok === true) {
+          // 安装成功后短暂等待，让容器状态稳定
+          await new Promise(r => setTimeout(r, 1000));
+          return;
+        }
+        lastError = JSON.stringify(payload);
+      } catch {
+        lastError = 'JSON parse error: stdout=' + result.stdout + ', stderr=' + result.stderr;
+      }
+    } else {
+      lastError = 'exit code ' + result.code + ': ' + result.output;
+    }
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  throw new Error('ensureInstalledHostAgent failed after 3 attempts: ' + lastError);
 }
 
 function cleanupDockerArtifact(name: string, type: 'container' | 'volume' | 'network') {
@@ -88,7 +107,9 @@ test('docker hosts page manages containers and displays images volumes and netwo
     await page.goto('/admin/docker_hosts.php');
 
     await expect(page.locator('body')).toContainText('Docker 宿主管理');
-    await expect(page.locator('#docker-summary')).toContainText('Docker 版本', { timeout: 30000 });
+    // 等待加载指示器消失（host-agent 刚启动时 Docker 信息可能需要额外时间）
+    await expect.poll(() => page.locator('#docker-summary').textContent().then(t => !t?.includes('加载中')), { timeout: 30000 }).toBe(true);
+    await expect(page.locator('#docker-summary')).toContainText('Docker 版本');
 
     await page.locator('#docker-container-keyword').fill(containerName);
     await expect(page.locator('#docker-containers-tbody')).toContainText(containerName, { timeout: 30000 });

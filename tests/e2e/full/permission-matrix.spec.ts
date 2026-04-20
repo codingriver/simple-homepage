@@ -2,29 +2,41 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking } from '../../helpers/auth';
-import { runDockerPhpInline } from '../../helpers/cli';
+import { runDockerPhpInline, writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const usersFile = path.resolve(__dirname, '../../../data/users.json');
+const containerUsersFile = '/var/www/nav/data/users.json';
 
 async function createTestUser(role: string, username: string, password: string) {
   const hashResult = runDockerPhpInline(`echo password_hash('${password}', PASSWORD_DEFAULT);`);
   if (hashResult.code !== 0) throw new Error('密码哈希生成失败');
   const hash = hashResult.stdout.trim();
-  const raw = await fs.readFile(usersFile, 'utf8').catch(() => '{}');
-  const users = JSON.parse(raw);
+  const raw = readContainerFile(containerUsersFile);
+  const users = JSON.parse(raw || '{}');
   users[username] = {
     role,
     password_hash: hash,
     created_at: new Date().toISOString(),
   };
-  await fs.writeFile(usersFile, JSON.stringify(users, null, 2), 'utf8');
+  writeContainerFile(containerUsersFile, JSON.stringify(users, null, 2));
+  // 同时回写宿主机，保持双向一致
+  try {
+    await fs.writeFile(usersFile, JSON.stringify(users, null, 2), 'utf8');
+  } catch {
+    // ignore
+  }
 }
 
 async function deleteTestUser(username: string) {
-  const raw = await fs.readFile(usersFile, 'utf8').catch(() => '{}');
-  const users = JSON.parse(raw);
+  const raw = readContainerFile(containerUsersFile);
+  const users = JSON.parse(raw || '{}');
   delete users[username];
-  await fs.writeFile(usersFile, JSON.stringify(users, null, 2), 'utf8');
+  writeContainerFile(containerUsersFile, JSON.stringify(users, null, 2));
+  try {
+    await fs.writeFile(usersFile, JSON.stringify(users, null, 2), 'utf8');
+  } catch {
+    // ignore
+  }
 }
 
 async function loginAsUser(page: any, username: string, password: string) {

@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { runDockerShell, writeContainerFile } from './cli';
 
 const dataDir = path.resolve(__dirname, '../../data');
 
@@ -30,45 +31,60 @@ export async function resetVolatileAppData(): Promise<void> {
     'host_agent.json': '{}',
   };
 
+  // 优先在容器内写入关键 JSON / 日志文件，避免 Docker Desktop for Mac 的 bind-mount 同步延迟
+  // 导致容器内 PHP 读取到旧内容或空内容。
   for (const [f, content] of Object.entries(jsonFilesToReset)) {
     try {
-      await fs.writeFile(path.join(dataDir, f), content, { mode: 0o644 });
+      writeContainerFile(`/var/www/nav/data/${f}`, content);
+    } catch {
+      // fallback to host
+      try {
+        await fs.writeFile(path.join(dataDir, f), content, { mode: 0o644 });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // ip_locks.json.lock
+  try {
+    writeContainerFile('/var/www/nav/data/ip_locks.json.lock', '');
+  } catch {
+    try {
+      await fs.writeFile(path.join(dataDir, 'ip_locks.json.lock'), '', { mode: 0o644 });
     } catch {
       // ignore
     }
   }
 
-  // ip_locks.json.lock 不是 JSON，需要作为空文件保留
+  // 2. 清空日志目录（容器内执行更可靠）
   try {
-    await fs.writeFile(path.join(dataDir, 'ip_locks.json.lock'), '', { mode: 0o644 });
+    runDockerShell('rm -f /var/www/nav/data/logs/*.log /var/www/nav/data/logs/*.lock /var/www/nav/data/logs/*.gz 2>/dev/null; mkdir -p /var/www/nav/data/logs');
   } catch {
-    // ignore
-  }
-
-  // 2. 清空日志目录（保留目录本身）
-  const logsDir = path.join(dataDir, 'logs');
-  try {
-    const logEntries = await fs.readdir(logsDir);
-    for (const entry of logEntries) {
-      if (entry.endsWith('.log') || entry.endsWith('.lock') || entry.endsWith('.gz')) {
-        try {
-          await fs.rm(path.join(logsDir, entry), { force: true });
-        } catch {
-          // ignore
+    // fallback to host
+    const logsDir = path.join(dataDir, 'logs');
+    try {
+      const logEntries = await fs.readdir(logsDir);
+      for (const entry of logEntries) {
+        if (entry.endsWith('.log') || entry.endsWith('.lock') || entry.endsWith('.gz')) {
+          try {
+            await fs.rm(path.join(logsDir, entry), { force: true });
+          } catch {
+            // ignore
+          }
         }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
-  }
-  try {
-    await fs.mkdir(logsDir, { recursive: true });
-  } catch {
-    // ignore
+    try {
+      await fs.mkdir(logsDir, { recursive: true });
+    } catch {
+      // ignore
+    }
   }
 
-  // Docker Desktop for Mac 的文件系统同步问题：删除后容器内可能无法重新创建同名文件，
-  // 因此在宿主机上预先创建空文件，避免容器内 PHP 写入时报 "No such file or directory"。
+  // 在容器内预先创建空日志文件，确保 PHP 追加时不会报 "No such file or directory"
   const ensureEmptyFiles = [
     { file: 'sessions.json', content: '{}' },
     { file: 'ip_locks.json', content: '{}' },
@@ -86,14 +102,18 @@ export async function resetVolatileAppData(): Promise<void> {
     { file: 'logs/task_dispatch.log', content: '' },
   ];
   for (const { file, content } of ensureEmptyFiles) {
-    const p = path.join(dataDir, file);
     try {
-      if (!await fs.stat(p).then(() => true).catch(() => false)) {
-        await fs.mkdir(path.dirname(p), { recursive: true });
-        await fs.writeFile(p, content, { mode: 0o644 });
-      }
+      writeContainerFile(`/var/www/nav/data/${file}`, content);
     } catch {
-      // ignore
+      const p = path.join(dataDir, file);
+      try {
+        if (!await fs.stat(p).then(() => true).catch(() => false)) {
+          await fs.mkdir(path.dirname(p), { recursive: true });
+          await fs.writeFile(p, content, { mode: 0o644 });
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 

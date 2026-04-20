@@ -64,7 +64,8 @@ test('nginx settings show pending reload warning and keep feedback visible after
   await page.goto('/admin/settings.php#nginx');
   await page.locator('label[data-ppm-card="simple"]').click();
   await page.getByRole('button', { name: /保存模式/ }).click();
-  await expect(page.locator('.alert-warn')).toContainText(/需要重新生成配置并 Reload Nginx 才能生效/);
+  // 页面上可能有多个 .alert-warn（Flash 消息 + JS 注入的警告），使用 filter 精确定位
+  await expect(page.locator('.alert-warn').filter({ hasText: /需要重新生成配置并 Reload Nginx 才能生效/ })).toBeVisible();
   await expect(page.locator('body')).toContainText(/生成配置并 Reload Nginx/);
 
   await page.getByRole('button', { name: /仅生成配置文件/ }).click();

@@ -63,7 +63,7 @@ test('admin ajax endpoints return expected payloads for login logs settings and 
   expect(logsReadBody.ok).toBe(true);
   expect(Array.isArray(logsReadBody.lines)).toBe(true);
 
-  await page.goto('/admin/logs.php');
+  await page.goto('/admin/logs.php', { waitUntil: 'domcontentloaded', timeout: 30000 });
   const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
   const clearLog = await page.request.post('http://127.0.0.1:58080/admin/logs_api.php?action=clear&type=dns', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },

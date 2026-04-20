@@ -2,34 +2,38 @@ import fs from 'fs/promises';
 import path from 'path';
 import { expect, test } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile } from '../../helpers/cli';
 
 const sessionsFile = path.resolve(__dirname, '../../../data/sessions.json');
+const containerSessionsFile = '/var/www/nav/data/sessions.json';
 
 test('sessions page lists active sessions and supports filtering', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page);
   const ts = Date.now();
 
-  // seed sessions
-  await fs.writeFile(
-    sessionsFile,
-    JSON.stringify({
-      [`jti-list-${ts}`]: {
-        jti: `jti-list-${ts}`,
-        username: 'qatest',
-        ip: '127.0.0.1',
-        user_agent: 'E2E Test Agent',
-        created_at: new Date().toISOString(),
-      },
-      [`jti-other-${ts}`]: {
-        jti: `jti-other-${ts}`,
-        username: 'otheruser',
-        ip: '192.168.1.1',
-        user_agent: 'Other Agent',
-        created_at: new Date().toISOString(),
-      },
-    }, null, 2),
-    'utf8'
-  );
+  // seed sessions (容器内写入避免 Docker Desktop bind-mount 同步延迟)
+  const sessionsData = {
+    [`jti-list-${ts}`]: {
+      jti: `jti-list-${ts}`,
+      username: 'qatest',
+      ip: '127.0.0.1',
+      user_agent: 'E2E Test Agent',
+      created_at: new Date().toISOString(),
+    },
+    [`jti-other-${ts}`]: {
+      jti: `jti-other-${ts}`,
+      username: 'otheruser',
+      ip: '192.168.1.1',
+      user_agent: 'Other Agent',
+      created_at: new Date().toISOString(),
+    },
+  };
+  writeContainerFile(containerSessionsFile, JSON.stringify(sessionsData, null, 2));
+  try {
+    await fs.writeFile(sessionsFile, JSON.stringify(sessionsData, null, 2), 'utf8');
+  } catch {
+    // ignore host-side fallback failure
+  }
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/sessions.php');

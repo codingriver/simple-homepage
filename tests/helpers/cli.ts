@@ -105,3 +105,38 @@ export async function restoreContainerFiles(snapshot: ContainerSnapshot) {
     }
   }
 }
+
+export function writeContainerFile(containerPath: string, content: string) {
+  const base64 = Buffer.from(content).toString('base64');
+  const result = runDockerPhpInline(
+    [
+      '$p = $argv[1];',
+      '$data = base64_decode($argv[2], true);',
+      'if ($data === false) { fwrite(STDERR, "decode failed\\n"); exit(1); }',
+      '$dir = dirname($p);',
+      'if (!is_dir($dir)) { mkdir($dir, 0777, true); }',
+      'file_put_contents($p, $data, LOCK_EX);',
+    ].join(' '),
+    [containerPath, base64]
+  );
+  if (result.code !== 0) {
+    throw new Error(`无法写入容器文件 ${containerPath}: ${result.output}`);
+  }
+  // Docker Desktop for Mac 下 osxfs 同步可能有延迟，执行 sync 帮助刷新
+  runDockerCommand(['exec', containerName, 'sh', '-lc', 'sync']);
+}
+
+export function readContainerFile(containerPath: string): string {
+  const result = runDockerPhpInline(
+    [
+      '$p = $argv[1];',
+      'if (!file_exists($p)) { echo ""; exit(0); }',
+      'echo file_get_contents($p);',
+    ].join(' '),
+    [containerPath]
+  );
+  if (result.code !== 0) {
+    throw new Error(`无法读取容器文件 ${containerPath}: ${result.output}`);
+  }
+  return result.stdout;
+}

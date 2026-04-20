@@ -2,10 +2,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const sitesPath = path.resolve(__dirname, '../../../data/sites.json');
 const authLogPath = path.resolve(__dirname, '../../../data/logs/auth.log');
 const healthCachePath = path.resolve(__dirname, '../../../data/health_cache.json');
+const containerSitesPath = '/var/www/nav/data/sites.json';
+const containerAuthLogPath = '/var/www/nav/data/logs/auth.log';
+const containerHealthCachePath = '/var/www/nav/data/health_cache.json';
 const baseUrl = 'http://127.0.0.1:58080';
 
 test('settings health panel and login logs panel load real rows through UI interactions', async ({ page }) => {
@@ -50,30 +54,32 @@ test('settings health panel and login logs panel load real rows through UI inter
         },
       ],
     });
-    await fs.writeFile(sitesPath, JSON.stringify({ ...sites, groups }, null, 4), 'utf8');
+    const sitesJson = JSON.stringify({ ...sites, groups }, null, 4);
+    writeContainerFile(containerSitesPath, sitesJson);
+    await fs.writeFile(sitesPath, sitesJson, 'utf8').catch(() => undefined);
 
     const logLines = [
       `[2026-04-07 10:00:00] SUCCESS    user=${logUser} ip=127.0.0.1 note=via_settings_test`,
       `[2026-04-07 10:01:00] FAIL       user=${logUser}-fail ip=127.0.0.2 note=wrong_password`,
     ].join('\n');
     const nextAuthLog = `${originalAuthLog.replace(/\s*$/, '')}\n${logLines}\n`.replace(/^\n/, '');
-    await fs.writeFile(authLogPath, nextAuthLog, 'utf8');
-    await fs.writeFile(
-      healthCachePath,
-      JSON.stringify(
-        {
-          [`${baseUrl}/index.php`]: {
-            status: 'up',
-            code: 200,
-            ms: 12,
-            checked_at: Math.floor(Date.now() / 1000),
-          },
+    writeContainerFile(containerAuthLogPath, nextAuthLog);
+    await fs.writeFile(authLogPath, nextAuthLog, 'utf8').catch(() => undefined);
+
+    const healthCacheJson = JSON.stringify(
+      {
+        [`${baseUrl}/index.php`]: {
+          status: 'up',
+          code: 200,
+          ms: 12,
+          checked_at: Math.floor(Date.now() / 1000),
         },
-        null,
-        4
-      ),
-      'utf8'
+      },
+      null,
+      4
     );
+    writeContainerFile(containerHealthCachePath, healthCacheJson);
+    await fs.writeFile(healthCachePath, healthCacheJson, 'utf8').catch(() => undefined);
 
     await loginAsDevAdmin(page);
 
@@ -103,12 +109,16 @@ test('settings health panel and login logs panel load real rows through UI inter
 
     await tracker.assertNoClientErrors();
   } finally {
-    await fs.writeFile(sitesPath, originalSites, 'utf8');
-    await fs.writeFile(authLogPath, originalAuthLog, 'utf8');
+    writeContainerFile(containerSitesPath, originalSites);
+    await fs.writeFile(sitesPath, originalSites, 'utf8').catch(() => undefined);
+    writeContainerFile(containerAuthLogPath, originalAuthLog);
+    await fs.writeFile(authLogPath, originalAuthLog, 'utf8').catch(() => undefined);
     if (hadHealthCache) {
-      await fs.writeFile(healthCachePath, originalHealthCache, 'utf8');
+      writeContainerFile(containerHealthCachePath, originalHealthCache);
+      await fs.writeFile(healthCachePath, originalHealthCache, 'utf8').catch(() => undefined);
     } else {
-      await fs.rm(healthCachePath, { force: true });
+      writeContainerFile(containerHealthCachePath, '{}');
+      await fs.rm(healthCachePath, { force: true }).catch(() => undefined);
     }
   }
 });

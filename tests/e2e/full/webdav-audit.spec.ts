@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile } from '../../helpers/cli';
 
 const webdavAuditLogPath = path.resolve(__dirname, '../../../data/logs/webdav.log');
 
@@ -21,6 +22,8 @@ test('webdav audit page displays logs and supports filtering', async ({ page }) 
 
   await fs.mkdir(path.dirname(webdavAuditLogPath), { recursive: true });
   await fs.writeFile(webdavAuditLogPath, logLines, 'utf8');
+  // Docker Desktop for Mac osxfs 同步延迟：直接写入容器确保 PHP 能立即读到
+  writeContainerFile('/var/www/nav/data/logs/webdav.log', logLines);
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/webdav_audit.php');

@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile } from '../../helpers/cli';
 
 const auditLogPath = path.resolve(__dirname, '../../../data/logs/share_service_audit.log');
 
@@ -21,6 +22,8 @@ test('share service audit page filters paginates and exports', async ({ page }) 
 
   await fs.mkdir(path.dirname(auditLogPath), { recursive: true });
   await fs.writeFile(auditLogPath, logEntries, 'utf8');
+  // Docker Desktop for Mac osxfs 同步延迟：直接写入容器确保 PHP 能立即读到
+  writeContainerFile('/var/www/nav/data/logs/share_service_audit.log', logEntries);
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/share_service_audit.php');

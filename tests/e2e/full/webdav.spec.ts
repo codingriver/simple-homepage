@@ -232,7 +232,8 @@ test('webdav can be configured and serves basic dav operations', async ({ page, 
   await page.locator('input[name="log_user"]').fill(userMain);
   await page.getByRole('button', { name: '筛选' }).click();
   await expect(page.locator('body')).toContainText(userMain);
-  await expect(page.locator('body')).toContainText('put');
+  // Docker Desktop for Mac 下 osxfs 同步可能有延迟，审计日志不会立即出现在页面上
+  await expect.poll(() => page.locator('body').textContent().then(t => t?.includes('put') ?? false), { timeout: 10000 }).toBe(true);
 
   await page.getByRole('link', { name: '打开独立审计页' }).click();
   await expect(page).toHaveURL(/webdav_audit\.php/);

@@ -2,8 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { writeContainerFile } from '../../helpers/cli';
 
 const sshAuditLogPath = path.resolve(__dirname, '../../../data/logs/ssh_audit.log');
+const containerSshAuditLogPath = '/var/www/nav/data/logs/ssh_audit.log';
 
 function makeEntry(ts: number, action: string, hostId: string, user: string, keyword: string) {
   return JSON.stringify({
@@ -25,8 +27,14 @@ test('ssh audit page filters paginates and exports', async ({ page, browser }) =
     makeEntry(ts, 'ssh_key_deploy', 'local', 'ops', `delta-${ts}`),
   ].join('');
 
-  await fs.mkdir(path.dirname(sshAuditLogPath), { recursive: true });
-  await fs.writeFile(sshAuditLogPath, entries, 'utf8');
+  // 容器内写入避免 Docker Desktop bind-mount 同步延迟
+  writeContainerFile(containerSshAuditLogPath, entries);
+  try {
+    await fs.mkdir(path.dirname(sshAuditLogPath), { recursive: true });
+    await fs.writeFile(sshAuditLogPath, entries, 'utf8');
+  } catch {
+    // ignore
+  }
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/ssh_audit.php');
@@ -57,7 +65,12 @@ test('ssh audit page filters paginates and exports', async ({ page, browser }) =
   const manyEntries = Array.from({ length: 55 }).map((_, i) =>
     makeEntry(ts, `action_${i}`, 'local', 'admin', `kw-${i}`)
   ).join('');
-  await fs.writeFile(sshAuditLogPath, manyEntries, 'utf8');
+  writeContainerFile(containerSshAuditLogPath, manyEntries);
+  try {
+    await fs.writeFile(sshAuditLogPath, manyEntries, 'utf8');
+  } catch {
+    // ignore
+  }
   await page.reload();
   await expect(page.locator('tbody tr')).toHaveCount(50);
   await expect(page.getByRole('link', { name: /下一页/ })).toBeVisible();

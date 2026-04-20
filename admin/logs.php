@@ -233,6 +233,10 @@ require_once __DIR__ . '/shared/header.php';
     });
     editor.container.style.background = '#080b10';
     editor.renderer.setScrollMargin(8, 8);
+    // 如果日志数据已在 AJAX 返回后保存到 currentLines，但 editor 当时未初始化，现在补刷
+    if (currentLines && currentLines.length > 0) {
+      applyLinesToEditor();
+    }
   }
 
   function formatBytes(b) {

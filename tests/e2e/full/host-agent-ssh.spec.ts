@@ -15,16 +15,35 @@ async function cleanupHostAgent() {
 }
 
 async function ensureInstalledHostAgent() {
-  const result = runDockerPhpInline(
-    [
-      'require "/var/www/nav/admin/shared/host_agent_lib.php";',
-      '$result = host_agent_install();',
-      'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
-    ].join(' ')
-  );
-  expect(result.code).toBe(0);
-  const payload = JSON.parse(result.stdout);
-  expect(payload.ok).toBe(true);
+  let lastError = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const result = runDockerPhpInline(
+      [
+        'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+        '$result = host_agent_install();',
+        'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+      ].join(' ')
+    );
+    if (result.code === 0) {
+      try {
+        const payload = JSON.parse(result.stdout);
+        if (payload.ok === true) {
+          // 安装成功后短暂等待，让容器状态稳定
+          await new Promise(r => setTimeout(r, 1000));
+          return;
+        }
+        lastError = JSON.stringify(payload);
+      } catch {
+        lastError = 'JSON parse error: stdout=' + result.stdout + ', stderr=' + result.stderr;
+      }
+    } else {
+      lastError = 'exit code ' + result.code + ': ' + result.output;
+    }
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  throw new Error('ensureInstalledHostAgent failed after 3 attempts: ' + lastError);
 }
 
 function generateTestPrivateKey() {
@@ -591,6 +610,8 @@ test('host management advanced tools cover structured ssh fields file ops known_
   await expect(page.locator('.remote-host-row', { hasText: hostNameA })).toBeVisible();
   await expect(page.locator('.remote-host-row', { hasText: hostNameB })).toBeHidden();
   await page.locator('#remote-host-search').fill('');
+  // 等待下拉框加载出目标 option 后再 selectOption，避免 Docker Desktop 环境下偶发超时
+  await expect(page.locator('#remote-host-group-filter')).toContainText(groupName);
   await page.locator('#remote-host-group-filter').selectOption(groupName);
   await expect(page.locator('.remote-host-row', { hasText: hostNameA })).toBeVisible();
   await expect(page.locator('.remote-host-row', { hasText: hostNameB })).toBeHidden();
