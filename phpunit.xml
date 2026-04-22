@@ -15,6 +15,15 @@
         <testsuite name="Subsite">
             <directory>tests/phpunit/Subsite</directory>
         </testsuite>
+        <testsuite name="Public">
+            <directory>tests/phpunit/Public</directory>
+        </testsuite>
+        <testsuite name="Cli">
+            <directory>tests/phpunit/Cli</directory>
+        </testsuite>
+        <testsuite name="Docker">
+            <directory>tests/phpunit/Docker</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>

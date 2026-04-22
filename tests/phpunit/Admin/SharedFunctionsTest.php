@@ -98,4 +98,219 @@ final class SharedFunctionsTest extends TestCase
     {
         $this->assertNull(nav_read_build_info());
     }
+
+    // --- Mock host-agent helpers ---
+    private function startMockHostAgent(): array
+    {
+        $port = (int) (getenv('MOCK_HOST_AGENT_PORT') ?: random_int(40000, 50000));
+        $router = tempnam(sys_get_temp_dir(), 'mock_agent_');
+        file_put_contents($router, '<?php
+            $input = json_decode(file_get_contents("php://input"), true);
+            $path = $input["target_path"] ?? ($input["path"] ?? "");
+            if ($path && str_starts_with($path, "/tmp/")) {
+                if (is_dir($path)) {
+                    $iter = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+                    foreach ($iter as $file) {
+                        $file->isDir() ? @rmdir($file->getRealPath()) : @unlink($file->getRealPath());
+                    }
+                    @rmdir($path);
+                } else {
+                    @unlink($path);
+                }
+            }
+            http_response_code(200);
+            header("Content-Type: application/json");
+            echo json_encode(["ok" => true, "data" => ["ok" => true]]);
+        ');
+
+        $descriptors = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
+        $proc = proc_open(PHP_BINARY . ' -S 127.0.0.1:' . $port . ' ' . escapeshellarg($router), $descriptors, $pipes);
+
+        $started = false;
+        for ($i = 0; $i < 30; $i++) {
+            usleep(100000);
+            $sock = @fsockopen('127.0.0.1', $port);
+            if ($sock) {
+                fclose($sock);
+                $started = true;
+                break;
+            }
+        }
+
+        if (!$started) {
+            proc_terminate($proc);
+            proc_close($proc);
+            unlink($router);
+            $this->fail('Mock host-agent server failed to start');
+        }
+
+        file_put_contents(DATA_DIR . '/host_agent.json', json_encode([
+            'service_url' => 'http://127.0.0.1:' . $port,
+            'token' => 'test',
+        ]));
+
+        return ['proc' => $proc, 'router' => $router, 'port' => $port];
+    }
+
+    private function stopMockHostAgent(array $mock): void
+    {
+        proc_terminate($mock['proc']);
+        proc_close($mock['proc']);
+        @unlink($mock['router']);
+        @unlink(DATA_DIR . '/host_agent.json');
+    }
+
+    public function testTrashMoveCreatesEntry(): void
+    {
+        $mock = $this->startMockHostAgent();
+        $source = DATA_DIR . '/trash_test_source.txt';
+        file_put_contents($source, 'hello');
+        $result = trash_move('local', $source);
+        $this->stopMockHostAgent($mock);
+        @unlink($source);
+
+        $this->assertTrue($result['ok'] ?? false, 'trash_move failed: ' . ($result['msg'] ?? ''));
+        $this->assertNotEmpty($result['entry_id']);
+        $entryDir = TRASH_DIR . '/' . $result['entry_id'];
+        $this->assertDirectoryExists($entryDir);
+        $this->assertFileExists($entryDir . '/meta.json');
+    }
+
+    public function testTrashListReturnsMovedItems(): void
+    {
+        $mock = $this->startMockHostAgent();
+        $source = DATA_DIR . '/trash_test_list.txt';
+        file_put_contents($source, 'world');
+        $result = trash_move('local', $source, 'admin');
+        $this->stopMockHostAgent($mock);
+
+        // Mock doesn't create data dir, create it manually for list test
+        if ($result['ok'] ?? false) {
+            $dataDir = TRASH_DIR . '/' . $result['entry_id'] . '/data';
+            @mkdir($dataDir, 0750, true);
+            file_put_contents($dataDir . '/file.txt', 'world');
+        }
+        @unlink($source);
+
+        $items = trash_list();
+        $found = false;
+        foreach ($items as $item) {
+            if (($item['entry_id'] ?? '') === ($result['entry_id'] ?? '')) {
+                $found = true;
+                $this->assertSame('local', $item['host_id']);
+                $this->assertSame($source, $item['original_path']);
+                $this->assertSame('admin', $item['operator']);
+                break;
+            }
+        }
+        $this->assertTrue($found, 'Trashed item not found in list');
+    }
+
+    public function testTrashRestoreBringsFileBack(): void
+    {
+        $mock = $this->startMockHostAgent();
+        $source = DATA_DIR . '/trash_test_restore.txt';
+        file_put_contents($source, 'restore me');
+        $move = trash_move('local', $source);
+        $this->assertTrue($move['ok'] ?? false);
+
+        // Mock doesn't create data dir, create it manually for restore test
+        $dataDir = TRASH_DIR . '/' . $move['entry_id'] . '/data';
+        @mkdir($dataDir, 0750, true);
+        file_put_contents($dataDir . '/file.txt', 'restored content');
+
+        @unlink($source);
+        $result = trash_restore($move['entry_id']);
+        $this->stopMockHostAgent($mock);
+        @unlink($source);
+
+        $this->assertTrue($result['ok'] ?? false, 'Restore failed: ' . ($result['msg'] ?? ''));
+        $this->assertStringContainsString($source, $result['msg'] ?? '');
+    }
+
+    public function testTrashPermanentDeleteRemovesEverything(): void
+    {
+        $mock = $this->startMockHostAgent();
+        $source = DATA_DIR . '/trash_test_delete.txt';
+        file_put_contents($source, 'delete me');
+        $move = trash_move('local', $source);
+        $this->assertTrue($move['ok'] ?? false);
+
+        $entryId = $move['entry_id'];
+        $dataDir = TRASH_DIR . '/' . $entryId . '/data';
+        @mkdir($dataDir, 0750, true);
+        file_put_contents($dataDir . '/file.txt', 'deleted content');
+
+        $result = trash_permanent_delete($entryId);
+        $this->stopMockHostAgent($mock);
+        @unlink($source);
+
+        $this->assertTrue($result['ok'] ?? false, 'Permanent delete failed: ' . ($result['msg'] ?? ''));
+        $this->assertDirectoryDoesNotExist(TRASH_DIR . '/' . $entryId);
+    }
+
+    public function testTrashAutoCleanRemovesOldEntries(): void
+    {
+        trash_ensure_dir();
+        for ($i = 0; $i < 3; $i++) {
+            $entryId = 'trash_old_' . $i;
+            $entryDir = TRASH_DIR . '/' . $entryId;
+            @mkdir($entryDir, 0750, true);
+            $meta = [
+                'entry_id' => $entryId,
+                'host_id' => 'local',
+                'original_path' => '/tmp/old_' . $i,
+                'deleted_at' => date('Y-m-d H:i:s', time() - (TRASH_RETENTION_DAYS + 1) * 86400),
+                'operator' => '',
+            ];
+            file_put_contents($entryDir . '/meta.json', json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+
+        trash_auto_clean();
+
+        for ($i = 0; $i < 3; $i++) {
+            $entryId = 'trash_old_' . $i;
+            $this->assertDirectoryDoesNotExist(TRASH_DIR . '/' . $entryId);
+        }
+    }
+
+    public function testBackupCleanupDoesNotRemoveWhenUnderLimit(): void
+    {
+        // Create a few backups (under MAX_BACKUPS limit of 20)
+        for ($i = 0; $i < 3; $i++) {
+            backup_create('manual');
+            sleep(1);
+        }
+        $initialCount = count(backup_list());
+        $this->assertGreaterThanOrEqual(3, $initialCount);
+
+        backup_cleanup();
+
+        $afterCount = count(backup_list());
+        $this->assertSame($initialCount, $afterCount, 'backup_cleanup should not delete when under limit');
+    }
+
+    public function testBackupCleanupRemovesOldBackups(): void
+    {
+        // Manually create backup files to simulate excess without waiting
+        $files = [];
+        for ($i = 0; $i < 25; $i++) {
+            $file = BACKUPS_DIR . '/backup_' . date('Ymd_His', time() - $i) . '_manual.json';
+            file_put_contents($file, json_encode(['test' => $i]));
+            $files[] = $file;
+        }
+
+        $initialCount = count(backup_list());
+        $this->assertGreaterThanOrEqual(25, $initialCount);
+
+        backup_cleanup();
+
+        $afterCount = count(backup_list());
+        $this->assertLessThanOrEqual(20, $afterCount);
+
+        // Cleanup remaining test files
+        foreach (glob(BACKUPS_DIR . '/backup_*.json') ?: [] as $f) {
+            @unlink($f);
+        }
+    }
 }

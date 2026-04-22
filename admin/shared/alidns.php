@@ -6,34 +6,40 @@ require_once __DIR__ . '/../../shared/auth.php';
 
 define('DNS_CONFIG_FILE', DATA_DIR . '/dns_config.json');
 
-function dns_config_defaults(): array {
-    return [
-        'access_key_id'     => '',
-        'access_key_secret' => '',
-        'domain_name'       => '',
-        'schedule_enabled'  => false,
-        'schedule_cron'     => '0 * * * *',
-        'last_sync_at'      => '',
-    ];
+if (!function_exists('dns_config_defaults')) {
+    function dns_config_defaults(): array {
+        return [
+            'access_key_id'     => '',
+            'access_key_secret' => '',
+            'domain_name'       => '',
+            'schedule_enabled'  => false,
+            'schedule_cron'     => '0 * * * *',
+            'last_sync_at'      => '',
+        ];
+    }
 }
 
-function load_dns_config(): array {
-    $defaults = dns_config_defaults();
-    if (!file_exists(DNS_CONFIG_FILE)) {
-        return $defaults;
+if (!function_exists('load_dns_config')) {
+    function load_dns_config(): array {
+        $defaults = dns_config_defaults();
+        if (!file_exists(DNS_CONFIG_FILE)) {
+            return $defaults;
+        }
+        $raw = json_decode(file_get_contents(DNS_CONFIG_FILE), true);
+        if (!is_array($raw)) {
+            return $defaults;
+        }
+        return $raw + $defaults;
     }
-    $raw = json_decode(file_get_contents(DNS_CONFIG_FILE), true);
-    if (!is_array($raw)) {
-        return $defaults;
-    }
-    return $raw + $defaults;
 }
 
-function save_dns_config(array $cfg): void {
-    $cfg = $cfg + dns_config_defaults();
-    file_put_contents(DNS_CONFIG_FILE,
-        json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        LOCK_EX);
+if (!function_exists('save_dns_config')) {
+    function save_dns_config(array $cfg): void {
+        $cfg = $cfg + dns_config_defaults();
+        file_put_contents(DNS_CONFIG_FILE,
+            json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
+    }
 }
 
 function alidns_percent_encode(string $str): string {

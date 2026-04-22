@@ -31,10 +31,13 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     },
-    {
-      name: 'mobile-chrome',
-      use: { ...devices['Pixel 7'], channel: 'chrome' },
-    },
+    ...(process.env.MOBILE || process.env.PLAYWRIGHT_PROJECTS === 'all'
+      ? [
+          {
+            name: 'mobile-chrome',
+            use: { ...devices['Pixel 7'], channel: 'chrome' },
+          },
+        ]
+      : []),
   ],
-  /* 默认执行全部 projects；可通过 --project=chromium 单独指定桌面端 */
 });

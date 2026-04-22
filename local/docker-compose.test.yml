@@ -11,7 +11,7 @@ services:
       CI: "1"
       npm_config_registry: https://registry.npmmirror.com
     command: >-
-      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:full:chromium"
+      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e"
     depends_on:
       - nav
 
@@ -27,7 +27,7 @@ services:
       CI: "1"
       npm_config_registry: https://registry.npmmirror.com
     command: >-
-      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:full:mobile"
+      sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:mobile"
     depends_on:
       - nav
 

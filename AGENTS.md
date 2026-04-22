@@ -37,6 +37,8 @@
 | `composer.json` | PHP 依赖管理；PHP >= 8.2；PHPUnit ^11.0 为开发依赖；`shared/` 和 `admin/shared/` 加入 classmap autoload |
 | `package.json` | npm 脚本定义 E2E/性能测试命令；开发依赖仅 `@playwright/test`、`@lhci/cli`、`typescript` |
 | `playwright.config.ts` | Playwright 配置：`testDir: './tests/e2e/full'`，`workers: 1`，`fullyParallel: false`，Projects: `chromium`（桌面端）和 `mobile-chrome`（Pixel 7），CI 时 `retries: 1` |
+| `tsconfig.json` | TypeScript 配置：`target: ES2022`，`module: commonjs`，`strict: true`，供 Playwright 测试和配置脚本使用 |
+| `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data` |
 | `phpunit.xml` | PHPUnit 配置：三个测试套件 `Shared` / `Admin` / `Subsite`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
 | `Dockerfile` | 多阶段构建：`php:8.2-fpm-bookworm` + Nginx + Supervisor + Cron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
@@ -55,13 +57,14 @@
 
 ```text
 public/          # 前台入口
-  index.php      # 首页（880 行）：分组卡片、搜索过滤、Tab 切换、最近访问、Cmd+K 命令面板、PWA
+  index.php      # 首页：分组卡片、搜索过滤、Tab 切换、最近访问、Cmd+K 命令面板、PWA
   login.php      # 登录页：CSRF、IP 锁定、记住我、开发模式提示
   setup.php      # 安装向导：首次部署引导、生成 Nginx 配置示例、创建管理员
   logout.php     # 退出登录（清除 Cookie）
   bg.php         # 背景图安全输出（防路径遍历）
   favicon.php    # Favicon 代理抓取（SSRF 防护、缓存 7 天、魔数校验）
   webdav.php     # WebDAV 服务器（OPTIONS/PROPFIND/GET/PUT/DELETE/MKCOL/MOVE/COPY）
+  notify_probe.php # 通知探针（用于健康检查/通知通道可用性探测）
   sw.js          # Service Worker（PWA 缓存策略）
   gesture-guard.js # 移动端手势拦截（防止边缘滑动返回）
   manifest.webmanifest # PWA 清单
@@ -72,26 +75,38 @@ public/          # 前台入口
     verify.php   # Nginx auth_request 鉴权端点（返回 200 + X-Auth-User/X-Auth-Role 或 401）
 
 admin/           # 后台管理页面和 AJAX API
-  *.php          # 后台页面（sites.php、groups.php、nginx.php、dns.php、ddns.php、settings.php、users.php 等）
-  *_ajax.php     # AJAX 端点（ddns_ajax.php、settings_ajax.php、file_api.php、docker_api.php、host_api.php 等）
+  *.php          # 后台页面（共 39 个，按功能分组如下）
+    站点与分组：sites.php、groups.php
+    用户与认证：users.php、sessions.php、login_logs.php
+    系统与设置：settings.php、configs.php、notifications.php
+    网络与代理：nginx.php、dns.php、ddns.php
+    宿主机与 Docker：hosts.php、host_runtime.php、docker_hosts.php、manifests.php、packages.php
+    文件与审计：files.php、file_audit.php、ssh_audit.php、share_service_audit.php
+    任务与计划：scheduled_tasks.php、tasks.php、task_templates.php
+    备份与日志：backups.php、logs.php、logs_api.php
+    健康与证书：health_check.php、expiry.php
+    WebDAV：webdav.php、webdav_shares.php、webdav_audit.php
+    调试：debug.php、index.php（后台首页）
+  *_ajax.php / *_api.php  # AJAX 端点（ddns_ajax.php、settings_ajax.php、file_api.php、docker_api.php、host_api.php、sessions_api.php 等）
   api/           # 后台专用 API（task_status.php、task_log.php）
   shared/        # 后台共享库
-    functions.php      # 后台主函数库（2027 行）：站点/配置读写、CSRF、备份恢复、健康检查、Nginx 代理管理、审计日志、回收站
+    functions.php      # 后台主函数库：站点/配置读写、CSRF、备份恢复、健康检查、Nginx 代理管理、审计日志、回收站
     header.php         # 后台页面模板头（权限验证、侧边栏导航、Flash Toast、待生效代理警告）
     footer.php         # 后台页面模板尾（关闭标签、暴露 window._csrf）
-    host_agent_lib.php # Host-Agent HTTP API 客户端（1326 行）：重试、故障转移、~100 个端点包装器
-    admin.css          # 后台统一暗色主题（571 行，Obsidian Terminal 风格）
+    host_agent_lib.php # Host-Agent HTTP API 客户端：重试、故障转移、~100 个端点包装器
+    admin.css          # 后台统一暗色主题（Obsidian Terminal 风格）
     file_manager_lib.php # 文件管理器业务逻辑
+    dns_lib.php / dns_api_lib.php / ddns_lib.php / cron_lib.php 等 # 各业务领域函数库
   assets/        # 静态资源：Ace Editor（本地）、SortableJS（CDN）
 
 shared/          # 核心共享库（前后台共用）
-  auth.php           # 核心认证库（1417 行）：JWT-like Token、Cookie、用户管理、IP 锁定、CSRF、会话撤销、权限系统
+  auth.php           # 核心认证库：JWT-like Token、Cookie、用户管理、IP 锁定、CSRF、会话撤销、权限系统
   http_client.php    # 带 SSRF 防护的 HTTP 客户端（curl 优先，fallback 到 file_get_contents）
-  notify_runtime.php # 统一通知运行时（352 行）：Telegram/Feishu/DingTalk/WeCom/Webhook，事件过滤与冷却
+  notify_runtime.php # 统一通知运行时：Telegram/Feishu/DingTalk/WeCom/Webhook，事件过滤与冷却
   request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
 
 cli/             # CLI 脚本
-  host_agent.php           # Host-Agent 服务端（7114 行）：HTTP 服务循环、SSH/文件系统/Docker/终端/进程/服务/网络/包管理/配置/清单/共享服务
+  host_agent.php           # Host-Agent 服务端：HTTP 服务循环、SSH/文件系统/Docker/终端/进程/服务/网络/包管理/配置/清单/共享服务
   host_agent_docker_proxy.php # Host-Agent Docker 代理桥接
   run_scheduled_task.php   # 计划任务执行器（硬超时 3600s、PID 锁、僵尸锁清理）
   ddns_sync.php            # DDNS 同步
@@ -115,7 +130,7 @@ data/            # 持久化数据目录（必须挂载到宿主机）
   backups/ / logs/ / tasks/ / favicon_cache/ / bg/ / nginx/ / host-agent-sim-root/
 
 tests/
-  e2e/full/      # Playwright E2E 测试（159 个 spec 文件，213+ 条测试）
+  e2e/full/      # Playwright E2E 测试（171 个 spec 文件，覆盖所有主要功能模块）
   phpunit/       # PHPUnit 单元测试（9 个测试类，Shared/Admin/Subsite 三个套件）
   helpers/       # auth.ts（登录/登出）、fixtures.ts（扩展 base test）、data.ts（resetVolatileAppData）、cli.ts（Docker CLI 封装）
   fixtures/      # 测试固件（import-valid.json、import-invalid.json）
@@ -268,7 +283,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 ### Playwright E2E
 
 - **测试目录**: `tests/e2e/full/`
-- **规模**: 159 个 spec 文件，213+ 条测试
+- **规模**: 171 个 spec 文件，覆盖所有主要功能模块
 - **项目配置**: `playwright.config.ts`
   - `workers: 1`，`fullyParallel: false`（串行执行，避免状态冲突）
   - 默认 projects: `chromium`（桌面端）、`mobile-chrome`（移动端 Pixel 7）
@@ -291,7 +306,11 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - **包含源码**: `shared/`、`admin/shared/`
 - **Bootstrap**: `tests/phpunit/bootstrap.php`（创建临时 `DATA_DIR`，测试结束后自动清理）
 - **隔离方式**: 每个测试类的 `setUp()` 中手动 `unlink()` 相关 JSON 文件，确保零残留。
-- **当前覆盖**: 9 个测试类，涵盖 Token 生成验证、密码哈希、用户生命周期、IP 锁定、通知渠道 CRUD、备份创建/恢复、Nginx 配置生成、API Token、审计日志等。
+- **当前覆盖**: 9 个测试类
+  - `Shared` 套件（4 个）：`AuthTest`、`NotifyTest`、`RequestTimingTest`、`SessionManagementTest`
+  - `Admin` 套件（5 个）：`ApiTokenTest`、`AuditLogTest`、`HealthCheckTest`、`SharedFunctionsTest`、`ThemeConfigTest`
+  - `Subsite` 套件：当前暂无测试类
+  - 涵盖范围：Token 生成验证、密码哈希、用户生命周期、IP 锁定、通知渠道 CRUD、备份创建/恢复、Nginx 配置生成、API Token、审计日志、主题配置等。
 
 ### Lighthouse 性能测试
 
@@ -366,7 +385,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 ## 关键调用链（Host-Agent / 文件系统 / SSH / Docker）
 
-本项目的“本机文件系统”和“本机 SSH 管理”均不直接由 Web 页面操作，而是统一走 `host-agent` 桥接：
+本项目的"本机文件系统"和"本机 SSH 管理"均不直接由 Web 页面操作，而是统一走 `host-agent` 桥接：
 
 ```text
 admin/files.php
@@ -401,6 +420,19 @@ admin/docker_hosts.php
 - **P1**: `public/index.php` 体积过大（880+ 行），承担职责过多；`admin/shared/functions.php` 中的 `admin_run_command()` 缺少超时控制。
 - **P1**: Webhook HTTP 请求逻辑存在重复代码，未统一收敛到 `shared/http_client.php`。
 - **P2**: 缺少统一异常处理层；配置读取缺少统一抽象；权限粒度较粗；测试层对 `shared/auth.php`、`shared/notify_runtime.php`、`shared/request_timing.php` 缺少底层单元测试。
+
+---
+
+## 参考文档
+
+| 文档 | 位置 | 内容 |
+|------|------|------|
+| PHP 开发注意事项 | `docs/PHP开发注意事项.md` | HTTP Header 顺序、Session、CSRF、XSS、SSRF、文件安全、Nginx 死锁、JSON 存储、密码安全、PRG 模式等 |
+| 测试用例编写规范 | `docs/测试用例编写规范.md` | 界面测试维度清单（A~R）、Playwright 约束、选择器稳定性、断言层次、数据隔离、spec 拆分标准 |
+| 项目问题分析与设计缺陷 | `docs/项目问题分析与设计缺陷.md` | 已知 P0/P1/P2 级问题与风险点 |
+| 技术架构与实现原理 | `docs/技术架构与实现原理.md` | 系统架构、数据流、模块关系 |
+| Docker 部署文档 | `docs/Docker部署文档.md` | 生产部署步骤与参数说明 |
+| Full-E2E 测试教程 | `docs/Full-E2E测试教程-本地环境.md` / `docs/Full-E2E测试教程-Docker环境.md` | E2E 测试环境搭建指南 |
 
 ---
 
