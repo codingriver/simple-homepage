@@ -505,6 +505,31 @@ function trash_move(string $hostId, string $path, string $operator = ''): array 
     ];
     file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
 
+    // simulate 模式下 host-agent 路径映射与真实 trash 目录不一致，直接本地操作
+    $isSimulate = strtolower(trim((string)getenv('HOST_AGENT_INSTALL_MODE'))) === 'simulate';
+    if ($isSimulate) {
+        $source = '/var/www/nav/data/host-agent-sim-root' . $path;
+        $target = $dataDir;
+        if (!file_exists($source)) {
+            @unlink($metaPath);
+            @rmdir($dataDir);
+            @rmdir($entryDir);
+            return ['ok' => false, 'msg' => '源文件或目录不存在'];
+        }
+        $parent = dirname($target);
+        if (!is_dir($parent)) {
+            @mkdir($parent, 0755, true);
+        }
+        $ok = @rename($source, $target);
+        if (!$ok) {
+            @unlink($metaPath);
+            @rmdir($dataDir);
+            @rmdir($entryDir);
+            return ['ok' => false, 'msg' => '移动到回收站失败'];
+        }
+        return ['ok' => true, 'msg' => '已移至回收站', 'entry_id' => $entryId];
+    }
+
     // 通过 host-agent 将文件/目录移动到回收站
     $result = host_agent_fs_move(['type' => 'local'], $path, $dataDir);
     if (empty($result['ok'])) {
@@ -555,6 +580,25 @@ function trash_restore(string $entryId): array {
     $dataDir = trash_data_path($entryId);
     if (!file_exists($dataDir)) {
         return ['ok' => false, 'msg' => '回收站数据已丢失'];
+    }
+
+    $isSimulate = strtolower(trim((string)getenv('HOST_AGENT_INSTALL_MODE'))) === 'simulate';
+    if ($isSimulate) {
+        $source = $dataDir;
+        $target = '/var/www/nav/data/host-agent-sim-root' . $originalPath;
+        $parent = dirname($target);
+        if (!is_dir($parent)) {
+            @mkdir($parent, 0755, true);
+        }
+        $ok = @rename($source, $target);
+        if (!$ok) {
+            return ['ok' => false, 'msg' => '恢复失败'];
+        }
+        @unlink($metaPath);
+        @rmdir(dirname($metaPath));
+        $entryDir = dirname($metaPath);
+        @rmdir($entryDir);
+        return ['ok' => true, 'msg' => '已恢复到 ' . $originalPath];
     }
 
     $result = host_agent_fs_move(['type' => 'local'], $dataDir, $originalPath);

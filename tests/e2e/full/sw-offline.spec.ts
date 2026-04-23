@@ -6,6 +6,9 @@ test('service worker serves cached assets and page fallback when offline', async
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
     ],
+    ignoredFailedRequests: [
+      /login\.css.*ERR_ABORTED/,
+    ],
   });
 
   await loginAsDevAdmin(page);

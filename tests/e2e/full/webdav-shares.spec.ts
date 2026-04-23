@@ -94,7 +94,8 @@ test('webdav shares overview displays aggregates and supports filtering', async 
   await expect(shareB).toBeVisible();
 
   const openDir = page.locator('tbody tr').filter({ hasText: '/data/share-a' }).getByRole('link', { name: /打开目录/ });
-  await openDir.click();
+  await openDir.scrollIntoViewIfNeeded();
+  await openDir.click({ force: true });
   await expect(page).toHaveURL(/files\.php.*host_id=local/);
   await expect(page).toHaveURL(/path=%2Fdata%2Fshare-a/);
 

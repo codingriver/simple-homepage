@@ -25,7 +25,9 @@ test('settings persist all core fields and support background upload clear and h
   await page.locator('input[name="cookie_domain"]').fill('');
   await page.locator('select[name="card_layout"]').selectOption('compact');
   await page.locator('select[name="card_direction"]').selectOption('row');
+  await page.locator('select[name="card_size"]').selectOption('custom');
   await page.locator('input[name="card_size_custom"]').fill('180');
+  await page.locator('select[name="card_height"]').selectOption('custom');
   await page.locator('input[name="card_height_custom"]').fill('120');
   await page.locator('input[name="bg_color"]').fill('#112233');
   await page.locator('input[name="bg_image"]').setInputFiles({ name: 'bg.png', mimeType: 'image/png', buffer: onePixelPng });
@@ -56,4 +58,11 @@ test('settings persist all core fields and support background upload clear and h
   await expect(page.locator('body')).toContainText('设置已保存');
 
   await tracker.assertNoClientErrors();
+
+  // 恢复 card_size 为默认值，避免污染后续测试
+  await page.goto('/admin/settings.php');
+  await page.locator('select[name="card_size"]').selectOption('140');
+  await page.locator('select[name="card_height"]').selectOption('0');
+  await page.getByRole('button', { name: /保存设置/ }).click();
+  await expect(page.locator('body')).toContainText('设置已保存');
 });

@@ -240,7 +240,7 @@ test('files page advanced workflow covers rename clipboard batch search preview 
       );
       expect(result.code).toBe(0);
       return result.stdout.trim();
-    })
+    }, { timeout: 15000 })
     .toBe('1');
 
   await page.locator('.fm-item-check[value="' + renamedA + '"]').check();

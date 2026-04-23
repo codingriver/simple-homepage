@@ -1186,6 +1186,9 @@ function cron_validate_schedule(string $line): bool {
     if ($line === '') {
         return false;
     }
+    if (preg_match('/[\r\n]/', $line)) {
+        return false;
+    }
     $parts = preg_split('/\s+/', $line);
     return count($parts) >= 5 && $parts[0] !== '' && $parts[1] !== '' && $parts[2] !== '' && $parts[3] !== '' && $parts[4] !== '';
 }
@@ -1207,6 +1210,7 @@ function cron_regenerate(): array {
             continue;
         }
         $sched = trim((string)($t['schedule'] ?? ''));
+        $sched = preg_replace('/\s+/', ' ', $sched);
         if (!cron_validate_schedule($sched)) {
             continue;
         }

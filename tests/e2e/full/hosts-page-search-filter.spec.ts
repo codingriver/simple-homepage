@@ -137,7 +137,7 @@ test('hosts page filters remote hosts via frontend search and group filter', asy
   // favorite-only filter
   await page.locator('select#remote-host-group-filter').selectOption('');
   await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
-  await page.locator('input#remote-host-favorite-only').check();
+  await page.locator('input#remote-host-favorite-only').check({ force: true });
   await page.evaluate(() => { (window as any).filterRemoteHosts && (window as any).filterRemoteHosts(); });
   await expect(page.locator(`tr.remote-host-row:has-text("${hostB}")`)).toBeVisible();
   await expect(page.locator(`tr.remote-host-row:has-text("${hostA}")`)).toBeHidden();

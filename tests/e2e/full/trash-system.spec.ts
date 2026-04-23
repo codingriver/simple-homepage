@@ -1,6 +1,37 @@
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
-import { runDockerPhpInline } from '../../helpers/cli';
+import { runDockerPhpInline, runDockerShell } from '../../helpers/cli';
+
+async function ensureInstalledHostAgent() {
+  let lastError = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const result = runDockerPhpInline(
+      [
+        'require "/var/www/nav/admin/shared/host_agent_lib.php";',
+        '$result = host_agent_install();',
+        'echo json_encode($result, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);',
+      ].join(' ')
+    );
+    if (result.code === 0) {
+      try {
+        const payload = JSON.parse(result.stdout);
+        if (payload.ok === true) {
+          await new Promise(r => setTimeout(r, 1000));
+          return;
+        }
+        lastError = JSON.stringify(payload);
+      } catch {
+        lastError = 'JSON parse error: stdout=' + result.stdout + ', stderr=' + result.stderr;
+      }
+    } else {
+      lastError = 'exit code ' + result.code + ': ' + result.output;
+    }
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  throw new Error('ensureInstalledHostAgent failed after 3 attempts: ' + lastError);
+}
 
 const containerTrashDir = '/var/www/nav/data/trash';
 const simulateRoot = '/var/www/nav/data/host-agent-sim-root';
@@ -48,6 +79,7 @@ test('trash move list restore and permanent delete workflow', async ({ page }) =
   const fileName = `trash-file-${ts}.txt`;
   const filePath = `${dirPath}/${fileName}`;
 
+  await ensureInstalledHostAgent();
   await cleanupTrashAndTestFiles('/trash-test-');
 
   // Seed test file in simulate root via host-agent fs write
@@ -67,7 +99,9 @@ test('trash move list restore and permanent delete workflow', async ({ page }) =
   // Navigate to the test directory
   await page.locator('#fm-path').fill(dirPath);
   await page.locator('#fm-path').press('Enter');
-  await expect(page.locator('#fm-table tbody')).toContainText(fileName);
+  await expect
+    .poll(async () => page.locator('#fm-table tbody').textContent())
+    .toContain(fileName);
 
   // Delete the file (should go to trash)
   page.once('dialog', (dialog) => dialog.accept());

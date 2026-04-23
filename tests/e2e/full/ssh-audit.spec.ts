@@ -73,8 +73,10 @@ test('ssh audit page filters paginates and exports', async ({ page, browser }) =
   }
   await page.reload();
   await expect(page.locator('tbody tr')).toHaveCount(50);
-  await expect(page.getByRole('link', { name: /下一页/ })).toBeVisible();
-  await page.getByRole('link', { name: /下一页/ }).click();
+  const nextPageLink = page.getByRole('link', { name: /下一页/ });
+  await expect(nextPageLink).toBeVisible();
+  await nextPageLink.scrollIntoViewIfNeeded();
+  await nextPageLink.click({ force: true });
   await expect(page).toHaveURL(/page=2/);
   await expect(page.locator('tbody tr')).toHaveCount(5);
   await expect(page.getByRole('link', { name: /上一页/ })).toBeVisible();

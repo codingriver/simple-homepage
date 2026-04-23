@@ -11,11 +11,12 @@ if (!is_dir($dir)) {
 }
 
 $raw = (string)file_get_contents('php://input');
+$bodyParsed = json_decode($raw, true);
 $line = json_encode([
     'time' => date('Y-m-d H:i:s'),
     'method' => $_SERVER['REQUEST_METHOD'] ?? 'GET',
     'query' => $_GET,
-    'body' => $raw,
+    'body' => $bodyParsed !== null ? $bodyParsed : $raw,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 @file_put_contents($logFile, $line . "\n", FILE_APPEND | LOCK_EX);
 

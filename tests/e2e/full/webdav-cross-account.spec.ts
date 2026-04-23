@@ -11,19 +11,18 @@ test('webdav COPY and MOVE are blocked across different accounts', async ({ page
   await expect(page.locator('body')).toContainText('WebDAV');
 
   // Account A
-  await page.getByRole('button', { name: /添加账户/ }).click();
-  await page.locator('#acc_username').fill('acc_a_' + Date.now());
-  await page.locator('#acc_password').fill('pass123456');
-  await page.locator('#acc_root').fill('/var/www/nav/data/webdav_a');
-  await page.getByRole('button', { name: /保存/ }).click();
+  await page.locator('input[name="username"]').fill('acc_a_' + Date.now());
+  await page.locator('input[name="password"]').fill('pass123456');
+  await page.locator('input[name="root"]').fill('/var/www/nav/data/webdav_a');
+  await page.getByRole('button', { name: /保存 WebDAV 账号/ }).click();
   await expect(page.locator('body')).toContainText('已保存');
 
   // Account B
-  await page.getByRole('button', { name: /添加账户/ }).click();
-  await page.locator('#acc_username').fill('acc_b_' + Date.now());
-  await page.locator('#acc_password').fill('pass123456');
-  await page.locator('#acc_root').fill('/var/www/nav/data/webdav_b');
-  await page.getByRole('button', { name: /保存/ }).click();
+  await page.goto('/admin/webdav.php');
+  await page.locator('input[name="username"]').fill('acc_b_' + Date.now());
+  await page.locator('input[name="password"]').fill('pass123456');
+  await page.locator('input[name="root"]').fill('/var/www/nav/data/webdav_b');
+  await page.getByRole('button', { name: /保存 WebDAV 账号/ }).click();
   await expect(page.locator('body')).toContainText('已保存');
 
   // Enable WebDAV if needed and test cross-account COPY

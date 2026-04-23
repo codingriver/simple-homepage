@@ -573,15 +573,20 @@ test('host management advanced tools cover structured ssh fields file ops known_
 
   await page.locator('#known-hosts-editor').fill(knownHostLine);
   await page.getByRole('button', { name: /保存 known_hosts/ }).click({ force: true });
+  await expect(page.locator('body')).toContainText(/known_hosts 已保存|known_hosts 保存失败|文件已保存/);
 
-  const knownHostsResult = runDockerPhpInline(
-    [
-      '$path = "/var/www/nav/data/host-agent-sim-root/root/.ssh/known_hosts";',
-      'echo file_exists($path) ? file_get_contents($path) : "";',
-    ].join(' ')
-  );
-  expect(knownHostsResult.code).toBe(0);
-  expect(knownHostsResult.stdout).toContain(knownHostLine);
+  await expect
+    .poll(() => {
+      const knownHostsResult = runDockerPhpInline(
+        [
+          '$path = "/var/www/nav/data/host-agent-sim-root/root/.ssh/known_hosts";',
+          'echo file_exists($path) ? file_get_contents($path) : "";',
+        ].join(' ')
+      );
+      expect(knownHostsResult.code).toBe(0);
+      return knownHostsResult.stdout;
+    })
+    .toContain(knownHostLine);
 
   const seedHosts = runDockerPhpInline(
     [

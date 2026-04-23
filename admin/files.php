@@ -1149,12 +1149,12 @@ async function loadTrash() {
   emptyMsg.style.display = 'none';
   tbody.innerHTML = items.map(function(item) {
     return '<tr>'
-      + '<td style="font-family:var(--mono);font-size:12px">' + escHtml(item.original_path || '') + '</td>'
-      + '<td>' + escHtml(item.deleted_at || '') + '</td>'
-      + '<td>' + escHtml(item.operator || '') + '</td>'
+      + '<td style="font-family:var(--mono);font-size:12px">' + escapeHtml(item.original_path || '') + '</td>'
+      + '<td>' + escapeHtml(item.deleted_at || '') + '</td>'
+      + '<td>' + escapeHtml(item.operator || '') + '</td>'
       + '<td>'
-      + '<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 8px" onclick="restoreTrashItem(\'' + escHtml(item.entry_id) + '\')">恢复</button> '
-      + '<button type="button" class="btn btn-danger" style="font-size:12px;padding:4px 8px" onclick="deleteTrashItem(\'' + escHtml(item.entry_id) + '\')">永久删除</button>'
+      + '<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 8px" onclick="restoreTrashItem(\'' + escapeHtml(item.entry_id) + '\')">恢复</button> '
+      + '<button type="button" class="btn btn-danger" style="font-size:12px;padding:4px 8px" onclick="deleteTrashItem(\'' + escapeHtml(item.entry_id) + '\')">永久删除</button>'
       + '</td>'
       + '</tr>';
   }).join('');

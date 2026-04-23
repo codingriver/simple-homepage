@@ -31,6 +31,22 @@ export async function resetVolatileAppData(): Promise<void> {
     'host_agent.json': '{}',
   };
 
+  // 重置 config.json 中易被测试污染的字段，保留其他全局配置
+  try {
+    const configPath = path.join(dataDir, 'config.json');
+    const configRaw = await fs.readFile(configPath, 'utf8').catch(() => '{}');
+    const config = JSON.parse(configRaw);
+    delete config.card_size;
+    delete config.card_height;
+    delete config.card_size_custom;
+    delete config.card_height_custom;
+    const configContent = JSON.stringify(config, null, 2);
+    await fs.writeFile(configPath, configContent, { mode: 0o644 });
+    writeContainerFile('/var/www/nav/data/config.json', configContent);
+  } catch {
+    // ignore
+  }
+
   // 优先在容器内写入关键 JSON / 日志文件，避免 Docker Desktop for Mac 的 bind-mount 同步延迟
   // 导致容器内 PHP 读取到旧内容或空内容。
   for (const [f, content] of Object.entries(jsonFilesToReset)) {

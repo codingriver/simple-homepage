@@ -34,7 +34,7 @@ test('homepage favorites pinned tab persistence and search empty state', async (
   await page.locator('#fi_gid').selectOption(gid);
   await page.locator('#fi_type').selectOption('external');
   await page.locator('#fi_url').fill('https://example.com/fav');
-  await page.locator('#fi_favorite').check();
+  await page.locator('#fi_favorite').check({ force: true });
   await submitVisibleModal(page);
 
   // Create pinned site
@@ -44,7 +44,7 @@ test('homepage favorites pinned tab persistence and search empty state', async (
   await page.locator('#fi_gid').selectOption(gid);
   await page.locator('#fi_type').selectOption('external');
   await page.locator('#fi_url').fill('https://example.com/pin');
-  await page.locator('#fi_pinned').check();
+  await page.locator('#fi_pinned').check({ force: true });
   await submitVisibleModal(page);
 
   // Create normal site

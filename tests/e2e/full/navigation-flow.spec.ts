@@ -7,6 +7,9 @@ test('admin can navigate through core admin pages and return to homepage', async
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
     ],
+    ignoredFailedRequests: [
+      /sortablejs.*ERR_ABORTED/,
+    ],
   });
 
   await loginAsDevAdmin(page);

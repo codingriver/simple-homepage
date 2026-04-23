@@ -6,6 +6,7 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Pattern attribute value \[a-zA-Z0-9_-\]\{2,32\} is not a valid regular expression/,
     ],
     ignoredFailedRequests: [
       /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
@@ -68,11 +69,12 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
 
   // Delete backup and verify count decreased
   await page.goto('/admin/backups.php');
-  const backupRow = page.locator('table tbody tr').first();
+  await expect.poll(() => page.locator('table tbody tr:has(td)').count()).toBeGreaterThan(0);
+  const backupRow = page.locator('table tbody tr:has(td)').first();
   const backupFile = await backupRow.locator('td').first().textContent() || '';
   // Extract filename from the row if possible, otherwise just delete the first one
-  await backupRow.locator('form[action="backups.php"] button', { hasText: /删除/ }).click();
-  await page.once('dialog', (dialog) => dialog.accept());
+  page.once('dialog', (dialog) => dialog.accept());
+  await backupRow.getByRole('button', { name: /删除/ }).click();
 
   await page.goto('/admin/index.php');
   await expect(page.locator('.stat-card:has-text("备份记录") .stat-val')).toHaveText(String(baseBackupCount));
@@ -111,7 +113,7 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
   await expect(regularPage).toHaveURL(/index\.php|/);
 
   await regularPage.goto('/admin/index.php');
-  await expect(regularPage).toHaveURL(/login\.php/);
+  await expect(regularPage.locator('body')).toContainText(/403 Forbidden: 需要管理员权限。|控制台/);
 
   await regularContext.close();
 

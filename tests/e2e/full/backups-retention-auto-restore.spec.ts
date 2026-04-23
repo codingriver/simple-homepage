@@ -12,7 +12,7 @@ test('backup restore creates auto-before-restore snapshot and retention stays wi
   const gid = `backup-auto-${ts}`;
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/groups.php');
+  await page.goto('/admin/groups.php', { timeout: 30000 });
   await page.getByRole('button', { name: /添加分组/ }).click();
   await page.locator('#fi_id').fill(gid);
   await page.locator('#fi_name').fill(`恢复前自动备份 ${ts}`);

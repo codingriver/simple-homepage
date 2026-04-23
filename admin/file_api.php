@@ -392,7 +392,9 @@ if ($action === 'audit_export') {
 }
 
 if ($action === 'trash_list') {
-    file_api_send(['ok' => true, 'data' => ['ok' => true, 'items' => trash_list()]]);
+    http_response_code(200);
+    echo json_encode(['ok' => true, 'data' => ['ok' => true, 'items' => trash_list()]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }
 
 if ($action === 'trash_restore') {

@@ -6,7 +6,7 @@ test('manifest.webmanifest contains all required fields', async ({ page }) => {
 
   const response = await page.request.get('http://127.0.0.1:58080/manifest.webmanifest');
   expect(response.status()).toBe(200);
-  expect(response.headers()['content-type']).toContain('application/json');
+  expect(response.headers()['content-type']).toMatch(/application\/json|application\/manifest\+json/);
 
   const manifest = await response.json();
   expect(manifest.name).toBeTruthy();
