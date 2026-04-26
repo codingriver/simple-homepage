@@ -207,10 +207,12 @@ function host_agent_host_shell(string $script, ?string $stdin = null): array {
     $mode = (string)(getenv('HOST_AGENT_MODE') ?: 'host');
     if ($mode === 'simulate') {
         // simulate 模式下不进入宿主机 namespace，直接在容器内执行
-        return host_agent_proc_run(['sh', '-lc', $script], $stdin);
+        // 使用 -c 而非 -lc，避免加载用户 profile 中的错误配置（如无效 alias）
+        return host_agent_proc_run(['sh', '-c', $script], $stdin);
     }
+    // 使用 -c 而非 -lc，避免宿主机 /root/.profile 中的错误配置干扰系统命令执行
     return host_agent_proc_run(
-        ['/usr/bin/nsenter', '-t', '1', '-m', '-u', '-i', '-n', '-p', 'sh', '-lc', $script],
+        ['/usr/bin/nsenter', '-t', '1', '-m', '-u', '-i', '-n', '-p', 'sh', '-c', $script],
         $stdin
     );
 }
@@ -222,22 +224,48 @@ function host_agent_parse_query_params(string $target): array {
     return is_array($params) ? $params : [];
 }
 
+function host_agent_normalize_path_dots(string $path): string {
+    $parts = explode('/', $path);
+    $resolved = [];
+    foreach ($parts as $part) {
+        if ($part === '' || $part === '.') {
+            continue;
+        }
+        if ($part === '..') {
+            array_pop($resolved);
+        } else {
+            $resolved[] = $part;
+        }
+    }
+    return '/' . implode('/', $resolved);
+}
+
 function host_agent_safe_local_path(string $root, string $path): array {
     $root = rtrim($root, '/');
     $relative = '/' . ltrim(trim($path), '/');
     $candidate = $root . $relative;
     $normalized = preg_replace('#/+#', '/', $candidate);
+    // 手动规范化 . 和 ..，防止路径遍历；不解析符号链接（realpath 在跨 mount namespace 时不可靠）
+    $normalized = host_agent_normalize_path_dots($normalized);
+
     $dir = dirname($normalized);
+    $base = basename($normalized);
     if (!is_dir($dir)) {
         $probe = $dir;
         while ($probe !== '/' && !is_dir($probe)) {
             $probe = dirname($probe);
         }
-        $realDir = realpath($probe);
-        $normalized = ($realDir ?: $probe) . substr($normalized, strlen($probe));
+        $realDir = @realpath($probe);
+        if ($realDir !== false && strpos($realDir, $root) === 0) {
+            $normalized = $realDir . substr($normalized, strlen($probe));
+        }
     } else {
-        $normalized = (string)realpath($dir) . '/' . basename($normalized);
+        $realDir = @realpath($dir);
+        if ($realDir !== false && strpos($realDir, $root) === 0) {
+            $normalized = $realDir . '/' . $base;
+        }
     }
+
     if (strpos($normalized, $root) !== 0) {
         return ['ok' => false, 'msg' => '非法路径'];
     }
@@ -254,7 +282,8 @@ function host_agent_local_display_path(string $root, string $actualPath): string
 }
 
 function host_agent_host_service_manager(): string {
-    $result = host_agent_host_shell('if command -v systemctl >/dev/null 2>&1; then echo systemd; elif command -v service >/dev/null 2>&1; then echo service; else echo unknown; fi');
+    // 检测 systemd：systemctl 存在且 /run/systemd/system 目录存在（避免容器内误报）
+    $result = host_agent_host_shell('if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then echo systemd; elif command -v service >/dev/null 2>&1; then echo service; else echo unknown; fi');
     return trim($result['stdout']) !== '' ? trim($result['stdout']) : 'unknown';
 }
 
@@ -310,7 +339,10 @@ function host_agent_live_ssh_status(string $root, string $mode): array {
     } elseif ($manager === 'service') {
         $active = host_agent_host_shell('service ' . escapeshellarg($service) . ' status 2>&1 || true');
         $text = strtolower(trim($active['stdout'] . "\n" . $active['stderr']));
-        $running = str_contains($text, 'running') || str_contains($text, 'started') || str_contains($text, 'active');
+        $running = (str_contains($text, 'running') || str_contains($text, 'started') || str_contains($text, 'active'))
+            && !str_contains($text, 'not running')
+            && !str_contains($text, 'not active')
+            && !str_contains($text, 'stopped');
         $details = trim($active['stdout'] . "\n" . $active['stderr']);
     } else {
         $details = '未检测到 systemd / service 管理器';
@@ -380,6 +412,13 @@ function host_agent_ssh_service_action(string $root, string $mode, string $actio
     }
 
     $status = host_agent_live_ssh_status($root, $mode);
+    if (empty($status['installed'])) {
+        return [
+            'ok' => false,
+            'msg' => 'SSH 服务未安装，请先点击「安装 SSH 服务」后再执行 ' . $action . ' 操作',
+            'status' => $status,
+        ];
+    }
     $manager = (string)($status['service_manager'] ?? 'unknown');
     $service = (string)($status['service_name'] ?? 'ssh');
     if ($manager === 'systemd') {
@@ -390,11 +429,31 @@ function host_agent_ssh_service_action(string $root, string $mode, string $actio
         return ['ok' => false, 'msg' => '未检测到可用的 SSH 服务管理器'];
     }
 
+    $afterStatus = host_agent_live_ssh_status($root, $mode);
+    $commandFailed = !$result['ok'];
+    $stateMismatch = false;
+    if (!$commandFailed && ($action === 'start' || $action === 'restart')) {
+        $stateMismatch = empty($afterStatus['running']);
+    } elseif (!$commandFailed && $action === 'stop') {
+        $stateMismatch = !empty($afterStatus['running']);
+    }
+
+    if ($commandFailed || $stateMismatch) {
+        $output = trim($result['stdout'] . "\n" . $result['stderr']);
+        $hint = $stateMismatch ? '（命令返回成功，但服务状态未改变）' : '';
+        return [
+            'ok' => false,
+            'msg' => 'SSH 服务 ' . $action . ' 失败' . $hint . '：' . ($output !== '' ? $output : '执行失败'),
+            'command_output' => $output,
+            'status' => $afterStatus,
+        ];
+    }
+
     return [
-        'ok' => $result['ok'],
-        'msg' => $result['ok'] ? ('SSH 服务已执行 ' . $action) : trim($result['stderr'] ?: $result['stdout'] ?: '执行失败'),
+        'ok' => true,
+        'msg' => 'SSH 服务已执行 ' . $action,
         'command_output' => trim($result['stdout'] . "\n" . $result['stderr']),
-        'status' => host_agent_live_ssh_status($root, $mode),
+        'status' => $afterStatus,
     ];
 }
 
@@ -578,22 +637,33 @@ function host_agent_ssh_enable_toggle(string $root, string $mode, bool $enabled)
     }
 
     $status = host_agent_live_ssh_status($root, $mode);
+    if (empty($status['installed'])) {
+        return [
+            'ok' => false,
+            'msg' => 'SSH 服务未安装，无法设置开机启动。请先点击「安装 SSH 服务」',
+            'status' => $status,
+        ];
+    }
     $manager = (string)($status['service_manager'] ?? 'unknown');
     $service = (string)($status['service_name'] ?? 'ssh');
     if ($manager === 'systemd') {
         $result = host_agent_host_shell('systemctl ' . ($enabled ? 'enable' : 'disable') . ' ' . escapeshellarg($service . '.service') . ' 2>&1');
     } elseif ($manager === 'service') {
         $cmd = $enabled
-            ? 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d ' . escapeshellarg($service) . ' defaults; elif command -v chkconfig >/dev/null 2>&1; then chkconfig ' . escapeshellarg($service) . ' on; else exit 1; fi'
-            : 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d ' . escapeshellarg($service) . ' disable; elif command -v chkconfig >/dev/null 2>&1; then chkconfig ' . escapeshellarg($service) . ' off; else exit 1; fi';
+            ? 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d ' . escapeshellarg($service) . ' defaults; elif command -v chkconfig >/dev/null 2>&1; then chkconfig ' . escapeshellarg($service) . ' on; else echo "update-rc.d/chkconfig not available"; exit 1; fi'
+            : 'if command -v update-rc.d >/dev/null 2>&1; then update-rc.d ' . escapeshellarg($service) . ' disable; elif command -v chkconfig >/dev/null 2>&1; then chkconfig ' . escapeshellarg($service) . ' off; else echo "update-rc.d/chkconfig not available"; exit 1; fi';
         $result = host_agent_host_shell($cmd . ' 2>&1');
     } else {
         return ['ok' => false, 'msg' => '未检测到支持自启管理的服务管理器'];
     }
 
+    $errorOutput = trim($result['stderr'] ?: $result['stdout'] ?: '操作失败');
+    if (str_contains(strtolower($errorOutput), 'cannot execute: required file not found')) {
+        $errorOutput = '当前环境缺少自启管理所需的依赖（如 Perl），无法设置 SSH 开机启动。SSH 服务本身可正常手动启停。';
+    }
     return [
         'ok' => $result['ok'],
-        'msg' => $result['ok'] ? ('SSH 已' . ($enabled ? '启用' : '禁用') . '开机启动') : trim($result['stderr'] ?: $result['stdout'] ?: '操作失败'),
+        'msg' => $result['ok'] ? ('SSH 已' . ($enabled ? '启用' : '禁用') . '开机启动') : $errorOutput,
         'status' => host_agent_live_ssh_status($root, $mode),
     ];
 }
@@ -623,14 +693,46 @@ function host_agent_install_ssh_service(string $root, string $mode): array {
         return ['ok' => false, 'msg' => '未识别宿主机包管理器，无法自动安装 openssh-server'];
     }
 
-    if ($result['ok']) {
+    // mac Docker Desktop / 精简环境兼容：修复不完整的 openssh-server 安装
+    $fixupScript = '
+        # 创建 privilege separation 用户（Docker Desktop VM 等精简环境可能缺失）
+        if ! id sshd >/dev/null 2>&1; then
+            useradd -r -s /usr/sbin/nologin -d /run/sshd sshd 2>/dev/null || adduser --system --shell /usr/sbin/nologin --home /run/sshd --no-create-home --group sshd 2>/dev/null || true
+        fi
+        # 确保 /run/sshd 目录存在
+        mkdir -p /run/sshd && chmod 0755 /run/sshd
+        # 生成 host keys（若缺失）
+        if command -v ssh-keygen >/dev/null 2>&1; then
+            ssh-keygen -A 2>/dev/null || true
+        fi
+        # 补充 Perl（Docker Desktop VM 上 update-rc.d 依赖 Perl 但可能缺失）
+        if [ -f /usr/sbin/update-rc.d ] && [ ! -x /usr/bin/perl ]; then
+            if command -v apt-get >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y perl-base 2>/dev/null || true
+            fi
+        fi
+        # 尝试修复 dpkg 配置（Docker Desktop VM 上 postinst 可能因缺少工具而失败）
+        if command -v dpkg >/dev/null 2>&1; then
+            dpkg --configure -a 2>/dev/null || true
+        fi
+    ';
+    $fixup = host_agent_host_shell($fixupScript);
+
+    $hasSshd = host_agent_detect_sshd_binary($root, $mode) !== '';
+    if ($hasSshd) {
         host_agent_ssh_enable_toggle($root, $mode, true);
         host_agent_ssh_service_action($root, $mode, 'start');
+        return [
+            'ok' => true,
+            'msg' => 'SSH 服务已安装并尝试启动',
+            'output' => trim($result['stdout'] . "\n" . $result['stderr'] . "\n" . $fixup['stdout'] . "\n" . $fixup['stderr']),
+        ];
     }
+
     return [
-        'ok' => $result['ok'],
-        'msg' => $result['ok'] ? 'SSH 服务已安装并尝试启动' : trim($result['stderr'] ?: $result['stdout'] ?: '安装失败'),
-        'output' => trim($result['stdout'] . "\n" . $result['stderr']),
+        'ok' => false,
+        'msg' => trim($result['stderr'] ?: $result['stdout'] ?: '安装失败'),
+        'output' => trim($result['stdout'] . "\n" . $result['stderr'] . "\n" . $fixup['stdout'] . "\n" . $fixup['stderr']),
     ];
 }
 
@@ -3025,12 +3127,33 @@ function host_agent_local_file_list(string $root, string $path): array {
             continue;
         }
         $full = $target . '/' . $name;
+        $stat = @stat($full);
+        $mode = $stat ? sprintf('%04o', $stat['mode'] & 07777) : '';
+        $owner = '';
+        $group = '';
+        if ($stat) {
+            if (function_exists('posix_getpwuid')) {
+                $pw = posix_getpwuid($stat['uid']);
+                $owner = ($pw['name'] ?? '') . ' (' . $stat['uid'] . ')';
+            } else {
+                $owner = (string)$stat['uid'];
+            }
+            if (function_exists('posix_getgrgid')) {
+                $gr = posix_getgrgid($stat['gid']);
+                $group = ($gr['name'] ?? '') . ' (' . $stat['gid'] . ')';
+            } else {
+                $group = (string)$stat['gid'];
+            }
+        }
         $items[] = [
             'name' => $name,
             'path' => host_agent_local_display_path($root, $full),
             'type' => is_dir($full) ? 'dir' : 'file',
             'size' => is_file($full) ? filesize($full) : 0,
             'mtime' => date('Y-m-d H:i:s', filemtime($full) ?: time()),
+            'mode' => $mode,
+            'owner' => $owner,
+            'group' => $group,
         ];
     }
     usort($items, static function (array $a, array $b): int {
@@ -3356,7 +3479,7 @@ function host_agent_local_file_stat(string $root, string $path, string $mode = '
         'owner' => $owner,
         'group' => $group,
         'is_dir' => is_dir($target),
-        'size' => is_file($target) ? filesize($target) : 0,
+        'size' => is_file($target) ? filesize($target) : (int)trim((string)(shell_exec('du -sb ' . escapeshellarg($target) . ' 2>/dev/null | awk \'{print $1}\'') ?: '0')),
     ];
 }
 
@@ -3608,7 +3731,7 @@ function host_agent_local_extract(string $root, string $path, string $destinatio
 }
 
 function host_agent_remote_file_list(array $target, string $path): array {
-    $script = 'set -e; cd ' . escapeshellarg($path) . ' 2>/dev/null || exit 12; for item in * .*; do [ "$item" = "." ] && continue; [ "$item" = ".." ] && continue; if [ -d "$item" ]; then t=dir; else t=file; fi; size=$(wc -c < "$item" 2>/dev/null || echo 0); mtime=$(date -r "$item" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo ""); printf "%s\t%s\t%s\t%s\n" "$item" "$t" "$size" "$mtime"; done';
+    $script = 'set -e; cd ' . escapeshellarg($path) . ' 2>/dev/null || exit 12; for item in * .*; do [ "$item" = "." ] && continue; [ "$item" = ".." ] && continue; if [ -d "$item" ]; then t=dir; else t=file; fi; size=$(wc -c < "$item" 2>/dev/null || echo 0); mtime=$(date -r "$item" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo ""); mode=$(stat -c "%a" "$item" 2>/dev/null || stat -f "%Lp" "$item" 2>/dev/null || echo ""); owner=$(stat -c "%U (%u)" "$item" 2>/dev/null || stat -f "%Su (%u)" "$item" 2>/dev/null || echo ""); group=$(stat -c "%G (%g)" "$item" 2>/dev/null || stat -f "%Sg (%g)" "$item" 2>/dev/null || echo ""); printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$item" "$t" "$size" "$mtime" "$mode" "$owner" "$group"; done';
     $result = host_agent_remote_exec($target, 'sh -lc ' . escapeshellarg($script));
     if (!$result['ok'] && $result['code'] === 12) {
         return ['ok' => false, 'msg' => '远程目录不存在'];
@@ -3621,20 +3744,23 @@ function host_agent_remote_file_list(array $target, string $path): array {
         if ($line === '') {
             continue;
         }
-        [$name, $type, $size, $mtime] = array_pad(explode("\t", $line), 4, '');
+        [$name, $type, $size, $mtime, $mode, $owner, $group] = array_pad(explode("\t", $line), 7, '');
         $items[] = [
             'name' => $name,
             'path' => rtrim($path, '/') . '/' . $name,
             'type' => $type,
             'size' => (int)$size,
             'mtime' => $mtime,
+            'mode' => $mode,
+            'owner' => $owner,
+            'group' => $group,
         ];
     }
     return ['ok' => true, 'cwd' => $path, 'items' => $items];
 }
 
 function host_agent_remote_file_read(array $target, string $path): array {
-    $result = host_agent_remote_exec($target, 'sh -lc ' . escapeshellarg('base64 -w0 ' . escapeshellarg($path) . ' 2>/dev/null || base64 ' . escapeshellarg($path)));
+    $result = host_agent_remote_exec($target, 'sh -lc ' . escapeshellarg('base64 < ' . escapeshellarg($path)));
     if (!$result['ok']) {
         return ['ok' => false, 'msg' => trim($result['stderr'] ?: $result['stdout'] ?: '远程文件读取失败')];
     }
@@ -3646,7 +3772,7 @@ function host_agent_remote_file_read(array $target, string $path): array {
 }
 
 function host_agent_remote_file_write(array $target, string $path, string $content): array {
-    $script = 'dir=$(dirname ' . escapeshellarg($path) . '); mkdir -p "$dir"; base64 -d > ' . escapeshellarg($path);
+    $script = 'dir=$(dirname ' . escapeshellarg($path) . '); mkdir -p "$dir"; { base64 -d 2>/dev/null || base64 -D; } > ' . escapeshellarg($path);
     $result = host_agent_remote_exec($target, 'sh -lc ' . escapeshellarg($script), base64_encode($content));
     if (!$result['ok']) {
         return ['ok' => false, 'msg' => trim($result['stderr'] ?: $result['stdout'] ?: '远程文件保存失败')];
@@ -3948,7 +4074,7 @@ function host_agent_remote_ssh_config_read(array $target): array {
         return $status;
     }
     $path = (string)($status['config_path'] ?? '/etc/ssh/sshd_config');
-    $script = 'if [ -f ' . escapeshellarg($path) . ' ]; then base64 -w0 ' . escapeshellarg($path) . ' 2>/dev/null || base64 ' . escapeshellarg($path) . '; else printf ""; fi';
+    $script = 'if [ -f ' . escapeshellarg($path) . ' ]; then base64 < ' . escapeshellarg($path) . '; else printf ""; fi';
     $result = host_agent_remote_exec($target, 'sh -lc ' . escapeshellarg($script));
     if (!$result['ok']) {
         return ['ok' => false, 'msg' => trim($result['stderr'] ?: $result['stdout'] ?: '远程 SSH 配置读取失败')];
@@ -3968,7 +4094,7 @@ function host_agent_remote_ssh_validate(array $target, string $content): array {
     }
     $script = host_agent_remote_ssh_context_script() . <<<'SH'
 tmp=$(mktemp /tmp/host-agent-sshd-config.XXXXXX)
-if ! base64 -d > "$tmp"; then
+if ! { base64 -d 2>/dev/null || base64 -D; } > "$tmp"; then
   rm -f "$tmp"
   echo 'SSH 配置内容解码失败'
   exit 13
@@ -4011,7 +4137,7 @@ function host_agent_remote_ssh_config_save(array $target, string $content): arra
         . ' && cat "$tmp" > ' . escapeshellarg($path);
     $script = host_agent_remote_ssh_context_script() . "\n"
         . "tmp=\$(mktemp /tmp/host-agent-sshd-config.XXXXXX) || exit 1\n"
-        . "if ! base64 -d > \"\$tmp\"; then\n"
+        . "if ! { base64 -d 2>/dev/null || base64 -D; } > \"\$tmp\"; then\n"
         . "  rm -f \"\$tmp\"\n"
         . "  echo 'SSH 配置内容解码失败'\n"
         . "  exit 13\n"
@@ -4552,7 +4678,7 @@ function host_agent_remote_exec_command(array $target, string $command): array {
 function host_agent_runtime_shell(string $mode, string $script, ?string $stdin = null): array {
     return $mode === 'host'
         ? host_agent_host_shell($script, $stdin)
-        : host_agent_proc_run(['sh', '-lc', $script], $stdin);
+        : host_agent_proc_run(['sh', '-c', $script], $stdin);
 }
 
 function host_agent_docker_socket_path(): string {

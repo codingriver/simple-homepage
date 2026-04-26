@@ -13,7 +13,12 @@ function host_agent_docker_socket_path(): string {
 
 function host_agent_install_mode(): string {
     $mode = strtolower(trim((string)getenv('HOST_AGENT_INSTALL_MODE')));
-    return in_array($mode, ['host', 'simulate'], true) ? $mode : 'host';
+    if (in_array($mode, ['host', 'simulate'], true)) {
+        return $mode;
+    }
+    // 开发环境未显式指定时默认 simulate，避免误操作宿主机
+    $devMode = strtolower(trim((string)getenv('NAV_DEV_MODE')));
+    return $devMode === '1' ? 'simulate' : 'host';
 }
 
 function host_agent_default_url(string $container_name): string {
@@ -296,6 +301,34 @@ function host_agent_detect_self_container(): array {
         'data_mount_source' => $dataMountSource,
         'app_mount_source' => $appMountSource,
     ];
+}
+
+function host_agent_detect_dev_mount_source(): string {
+    $mountinfo = @file_get_contents('/proc/self/mountinfo');
+    if ($mountinfo === false) {
+        return '';
+    }
+    foreach (explode("\n", $mountinfo) as $line) {
+        $parts = preg_split('/\s+/', trim($line));
+        if (count($parts) < 5) {
+            continue;
+        }
+        // mountinfo 格式: id parentid maj:min root mountpoint opt...
+        $mountpoint = $parts[4] ?? '';
+        if ($mountpoint === '/var/www/nav') {
+            // 格式: ... mountpoint options [optional-fields...] - fstype source super-options
+            // 找到 "-" 分隔符后的第三个字段就是 source（宿主机侧路径）
+            $dashIndex = array_search('-', $parts, true);
+            if ($dashIndex !== false && isset($parts[$dashIndex + 3])) {
+                $source = trim($parts[$dashIndex + 3]);
+                // 过滤掉非路径值（如 fuse 驱动的参数）
+                if ($source !== '' && ($source[0] === '/' || preg_match('#^[A-Za-z]:[/\\]#', $source))) {
+                    return $source;
+                }
+            }
+        }
+    }
+    return '';
 }
 
 function host_agent_container_name(?string $base_name = null): string {
@@ -913,6 +946,7 @@ function host_agent_status_summary(): array {
         $service_url = host_agent_default_url($container_name);
     }
 
+    $selfInfo = host_agent_detect_self_container();
     $summary = [
         'ok' => true,
         'docker_socket_path' => host_agent_docker_socket_path(),
@@ -929,6 +963,7 @@ function host_agent_status_summary(): array {
         'status' => 'not_installed',
         'message' => '',
         'state' => $state,
+        'app_mount_source' => $selfInfo['ok'] ? ($selfInfo['app_mount_source'] ?? '') : '',
     ];
 
     if (!$summary['docker_socket_mounted']) {
@@ -1009,14 +1044,37 @@ function host_agent_docker_start_fallback(string $container_name): bool {
     return strpos($response, 'HTTP/1.1 204') !== false || strpos($response, 'HTTP/1.1 304') !== false;
 }
 
+function host_agent_container_mode(string $container_name): string {
+    $inspect = host_agent_docker_request('GET', '/containers/' . rawurlencode($container_name) . '/json');
+    if (!$inspect['ok'] || !is_array($inspect['json'])) {
+        return '';
+    }
+    foreach ((array)($inspect['json']['Config']['Env'] ?? []) as $env) {
+        if (str_starts_with((string)$env, 'HOST_AGENT_MODE=')) {
+            return substr((string)$env, strlen('HOST_AGENT_MODE='));
+        }
+    }
+    return '';
+}
+
 function host_agent_install(): array {
     $status = host_agent_status_summary();
     if (!$status['docker_accessible']) {
         return ['ok' => false, 'msg' => $status['message'] . ' ' . $status['docker_mount_hint']];
     }
 
+    $container_name = (string)$status['container_name'];
+    $expectedMode = host_agent_install_mode();
+
     if ($status['healthy']) {
-        return ['ok' => true, 'msg' => 'host-agent 已经安装并正常运行。安装完成后请从当前应用容器移除 docker.sock 挂载；后续只有升级或重装 host-agent 时才需要再次挂回。'];
+        $actualMode = host_agent_container_mode($container_name);
+        if ($actualMode !== '' && $actualMode !== $expectedMode) {
+            // 运行模式与预期不一致，强制重建
+            host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/stop?t=10');
+            host_agent_docker_request('DELETE', '/containers/' . rawurlencode($container_name) . '?force=1');
+        } else {
+            return ['ok' => true, 'msg' => 'host-agent 已经安装并正常运行。安装完成后请从当前应用容器移除 docker.sock 挂载；后续只有升级或重装 host-agent 时才需要再次挂回。'];
+        }
     }
 
     $self = host_agent_detect_self_container();
@@ -1024,11 +1082,11 @@ function host_agent_install(): array {
         return ['ok' => false, 'msg' => (string)$self['msg']];
     }
 
-    $container_name = (string)$status['container_name'];
+    $wasInstalledButStopped = $status['installed'] && !$status['running'];
     $state = host_agent_load_state();
     $tokenLost = $status['installed'] && trim((string)($state['token'] ?? '')) === '';
     $needCreate = false;
-    if ($status['installed'] && !$status['running']) {
+    if ($wasInstalledButStopped) {
         $start = host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/start');
         if (!$start['ok'] && $start['status'] !== 304) {
             // Fallback: Docker Desktop for Mac 下 curl + unix socket 对 start 可能超时，使用 stream_socket_client
@@ -1136,6 +1194,12 @@ function host_agent_install(): array {
         usleep(300000);
         $probe = host_agent_probe($service_url, $token);
         if ($probe['ok']) {
+            if ($wasInstalledButStopped && !$needCreate) {
+                return [
+                    'ok' => true,
+                    'msg' => 'host-agent 已启动并通过健康检查。',
+                ];
+            }
             return [
                 'ok' => true,
                 'msg' => 'host-agent 已安装并通过健康检查。当前后台的一键安装能力依赖 docker.sock；请在确认 host-agent 功能正常后，从当前应用容器移除 docker.sock 挂载，后续只有升级或重装 host-agent 时才需要再次挂回。',
@@ -1144,6 +1208,12 @@ function host_agent_install(): array {
         $probe_error = $probe['error'] ?: ('HTTP ' . $probe['status']);
     }
 
+    if ($wasInstalledButStopped && !$needCreate) {
+        return [
+            'ok' => false,
+            'msg' => 'host-agent 容器已启动，但健康检查未通过：' . $probe_error,
+        ];
+    }
     return [
         'ok' => false,
         'msg' => 'host-agent 容器已创建，但健康检查未通过：' . $probe_error,
@@ -1180,6 +1250,33 @@ function host_agent_restart(): array {
         return ['ok' => true, 'msg' => 'host-agent 已重启。'];
     }
     return ['ok' => false, 'msg' => '重启 host-agent 失败：' . ($restart['error'] ?: $restart['body'])];
+}
+
+function host_agent_uninstall(): array {
+    $status = host_agent_status_summary();
+    if (!$status['docker_accessible']) {
+        return ['ok' => false, 'msg' => $status['message'] . ' ' . $status['docker_mount_hint']];
+    }
+    if (!$status['installed']) {
+        return ['ok' => false, 'msg' => 'host-agent 尚未安装，无需卸载。'];
+    }
+    $container_name = (string)$status['container_name'];
+    // 先停止
+    host_agent_docker_request('POST', '/containers/' . rawurlencode($container_name) . '/stop?t=30');
+    // 再强制删除
+    $delete = host_agent_docker_request('DELETE', '/containers/' . rawurlencode($container_name) . '?force=1');
+    if ($delete['ok'] || $delete['status'] === 404) {
+        return ['ok' => true, 'msg' => 'host-agent 已卸载。'];
+    }
+    return ['ok' => false, 'msg' => '卸载 host-agent 失败：' . ($delete['error'] ?: $delete['body'])];
+}
+
+function host_agent_reinstall(): array {
+    $uninstall = host_agent_uninstall();
+    if (!$uninstall['ok']) {
+        return $uninstall;
+    }
+    return host_agent_install();
 }
 
 // ============================================================

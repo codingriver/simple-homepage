@@ -10,8 +10,8 @@ services:
     environment:
       # 开发模式：启用内置测试管理员 qatest / qatest2026（生产 compose 勿设置）
       NAV_DEV_MODE: "1"
-      # 开发/测试环境：允许在设置页演示 host-agent 一键安装，但默认走 simulate，避免真的改宿主机
-      HOST_AGENT_INSTALL_MODE: "simulate"
+      # 开发/测试环境：允许在设置页演示 host-agent 一键安装
+      HOST_AGENT_INSTALL_MODE: "host"
 
     volumes:
       # 开发模式：挂载整个项目代码，修改 PHP/CSS/JS 后可直接生效

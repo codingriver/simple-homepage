@@ -276,6 +276,409 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - 任务结果写入 `scheduled_tasks.json` 时必须使用 **`flock(LOCK_EX)`** 保护，防止并发结果覆盖。
 - 任务执行锁文件必须记录 PID，并支持**僵尸锁自动清理**（OOM/SIGKILL 场景）。
 
+### 10. Ace Editor 作为项目默认文本编辑器
+
+- **Ace Editor 是项目默认的多行文本编辑器**。所有涉及多行文本输入/编辑的场景，**内容预期超过 5 行时**，必须使用 Ace Editor 弹窗打开；5 行及以内的短文本可直接使用原生 `<textarea>`，无需强制接入 Ace Editor。
+- **统一入口：所有后台页面调用文本编辑器时，必须使用 `admin/shared/ace_editor_modal.php` 提供的 `NavAceEditor` 接口**。禁止各页面自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML。页面只需在加载 `ace.js` 和 `ext-searchbox.js` 后引入 `admin/shared/ace_editor_modal.php`，然后调用 `NavAceEditor.open({...})` 即可。
+- **判断标准**：按字段的业务语义判断（如 SSH 配置文件、Nginx 配置、计划任务脚本、JSON/YAML 导入等必然超过 5 行）；若无法确定，默认走 Ace Editor 弹窗。
+- **统一资源引用**：`<script src="assets/ace/ace.js"></script>`，`admin/assets/ace/` 目录已包含 ace.js、ext-searchbox.js、mode-nginx.js、theme-tomorrow_night.js 等核心文件。
+- **统一基础配置**：
+  - 默认主题：`ace/theme/tomorrow_night`
+  - Tab 大小：2，使用 soft tabs
+  - 默认开启自动换行
+  - 字号：13–14px
+  - 关闭 print margin、autocompletion、snippets
+- **弹窗交互规范**：
+  - 点击「打开编辑器」按钮后弹窗展示 Ace Editor
+  - 弹窗内提供语言模式切换、主题切换、字号调整、查找(Ctrl+F)、跳转行号(Ctrl+G)、自动换行开关
+  - 支持沉浸模式（全屏编辑器）
+  - 编辑完成后将内容同步回隐藏的 `<textarea>` 或表单字段，再由表单提交
+- **右下角按钮区域统一配置接口**：
+  - 按钮区域分为 **左侧**（脏标记 + 辅助操作）和 **右侧**（主操作按钮），通过统一接口配置，禁止各页面硬编码按钮 HTML。
+  - 按钮配置格式：
+    ```javascript
+    NavAceEditor.open({
+      // ... 其他配置
+      buttons: {
+        left: [
+          { type: 'dirty' },                       // 自动脏标记，无需手动管理
+          { text: '检查语法', class: 'btn-secondary', action: 'syntax', visible: canSyntax }
+        ],
+        right: [
+          { text: '关闭', class: 'btn-secondary', action: 'close' },
+          { text: '保存', class: 'btn-primary', action: 'save' },
+          { text: '保存并 Reload', class: 'btn-primary', action: 'save_reload' },
+          { text: '删除', class: 'btn-danger', action: 'delete', visible: canDelete }
+        ]
+      },
+      onAction: function(action, value) {
+        if (action === 'save') { /* 处理保存 */ }
+        if (action === 'close') { NavAceEditor.close(); }
+      }
+    });
+    ```
+  - **接口能力说明**：
+    1. **`type: 'dirty'`**：自动监听编辑器内容变化，显示「未修改 / 有未保存修改」状态，无需页面手动实现。
+    2. **`text`**：按钮显示文本。
+    3. **`class`**：按钮样式类，支持 `btn-primary`（主操作，蓝色）、`btn-secondary`（次要操作，灰色）、`btn-danger`（危险操作，红色）以及项目其他标准按钮类。
+    4. **`action`**：按钮标识符，点击后触发 `onAction(action, currentValue)` 回调。保留关键字：`save`（Ctrl-S 自动绑定）、`close`（Esc/关闭弹窗时触发）。
+    5. **`visible`**：布尔值或返回布尔值的函数，控制按钮是否渲染（用于权限控制，如「删除」仅管理员可见）。
+    6. **`onAction`**：统一回调接口，所有按钮点击（含快捷键触发的保存）都通过此回调分发，页面在此处理业务逻辑（AJAX 提交、表单提交、关闭弹窗等）。
+    7. **左侧按钮**：通常放置脏标记、语法检查、预览等辅助操作；右侧按钮放置保存、关闭、删除等主操作。两侧按钮各自按配置顺序从左到右排列。
+  - **各页面典型按钮组合示例**：
+    - **纯编辑保存**（如 SSH 配置）：左侧 `[dirty]`，右侧 `[关闭, 保存]`
+    - **编辑 + 语法检查**（如 Nginx 配置）：左侧 `[dirty, 检查语法]`，右侧 `[关闭, 保存, 保存并 Reload]`
+    - **文件管理**（如 files.php）：左侧 `[dirty]`，右侧 `[关闭, 下载, 删除, 保存]`
+    - **只读查看**（如 logs.php）：左侧 `[]`，右侧 `[关闭]`
+- **参考实现**：`admin/files.php` 中的文件管理器弹窗编辑器（`fm-editor-modal`）和 `admin/nginx.php` 中的 Nginx 配置编辑器弹窗。
+- **待改造清单**（当前仍使用原生 `<textarea>`，需逐步替换为 Ace Editor 弹窗）：
+  - `hosts.php`：SSH 配置编辑（2 处）、私钥内容、authorized_keys、known_hosts、文件内容编辑
+  - `scheduled_tasks.php`：计划任务命令脚本
+  - `settings.php`：自定义 CSS、文件系统允许根目录
+  - `dns.php`：DNS JSON 批量导入
+  - `manifests.php`：Manifest YAML/JSON 编辑
+  - `configs.php`：系统配置编辑
+- **保持现状（≤5 行短文本，无需改造）**：
+  - `sites.php`：站点备注（3 行）
+  - `webdav.php`：IP 白名单
+
+#### 10.1 NavAceEditor 统一封装接口完整规范
+
+**设计原则**：各页面接入 Ace Editor 时，**禁止自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML**。全部通过 `NavAceEditor` 全局对象调用统一接口完成。
+
+---
+
+##### 一、全局对象 `NavAceEditor`
+
+```javascript
+// 全局单例，所有页面共用同一套 Ace Editor 实例和弹窗 DOM
+var NavAceEditor = {
+  editor: null,      // ace.edit() 返回的编辑器实例
+  modal: null,       // 弹窗 DOM 元素
+  config: {},        // 当前打开时的配置快照
+  initialValue: '',  // 打开时的初始内容（用于脏标记对比）
+  dirty: false,      // 当前脏状态
+};
+```
+
+---
+
+##### 二、方法清单
+
+| 方法 | 返回值 | 说明 |
+|------|--------|------|
+| `NavAceEditor.init(options?)` | `void` | **懒加载初始化**。首次调用时创建 Ace Editor 实例并渲染弹窗 DOM；重复调用无操作。通常在页面加载后静默调用，或在首次 `open()` 时自动触发。 |
+| `NavAceEditor.open(options)` | `void` | **打开弹窗**。根据 `options` 配置渲染标题、内容、按钮、工具栏，然后显示弹窗并聚焦编辑器。 |
+| `NavAceEditor.close()` | `void` | **关闭弹窗**。隐藏弹窗、退出沉浸模式、触发 `onClose` 回调。若内容已修改且未保存，弹出 `beforeunload` 风格确认框（可通过 `confirmOnClose: false` 关闭）。 |
+| `NavAceEditor.getValue()` | `string` | 获取当前编辑器内容。 |
+| `NavAceEditor.setValue(text, mode?)` | `void` | 设置编辑器内容，可选同时切换语言模式。自动重置脏标记为「未修改」。 |
+| `NavAceEditor.isDirty()` | `boolean` | 判断当前内容是否与打开时的初始内容不同。 |
+| `NavAceEditor.markClean()` | `void` | 将当前内容设为新的「基准内容」，脏标记重置为「未修改」。通常在保存成功后调用。 |
+| `NavAceEditor.setMode(mode)` | `void` | 动态切换语言模式（如 `nginx`、`json`、`sh`、`php`、`yaml`、`css` 等）。 |
+| `NavAceEditor.setTheme(theme)` | `void` | 动态切换主题，并持久化到 `localStorage`。 |
+| `NavAceEditor.setFontSize(px)` | `void` | 动态切换字号（如 `13`、`14`、`16`），并持久化到 `localStorage`。 |
+| `NavAceEditor.setWrapMode(on)` | `void` | 动态开关自动换行，并持久化到 `localStorage`。 |
+| `NavAceEditor.focus()` | `void` | 将焦点移入编辑器。 |
+| `NavAceEditor.resize()` | `void` | 触发编辑器重新计算尺寸（弹窗动画、窗口大小变化后自动调用，页面通常无需手动调用）。 |
+| `NavAceEditor.setButtonDisabled(action, disabled)` | `void` | 动态启用/禁用指定 `action` 的按钮（如保存提交中禁用「保存」按钮防止重复提交）。 |
+| `NavAceEditor.setButtonVisible(action, visible)` | `void` | 动态显示/隐藏指定 `action` 的按钮。 |
+
+---
+
+##### 三、`NavAceEditor.open(options)` 完整配置项
+
+```javascript
+NavAceEditor.open({
+  // ━━ 弹窗基础 ━━
+  title: '文本编辑器',           // 弹窗标题，显示在顶部标题栏
+  value: '',                    // 编辑器初始内容（字符串）
+  placeholder: '',              // 占位提示文本（编辑器为空时显示）
+  readOnly: false,              // 是否只读。true 时隐藏保存按钮、禁用编辑、不显示脏标记
+  confirmOnClose: true,         // 关闭弹窗时，若内容有未保存修改，是否弹出确认提示
+
+  // ━━ 编辑器配置 ━━
+  mode: 'text',                 // 语言模式：text / nginx / json / yaml / sh / php / css / javascript / markdown / xml / sql / ini
+  theme: 'tomorrow_night',      // 主题：tomorrow_night / monokai / github_dark / dracula
+  fontSize: 14,                 // 字号：12 ~ 20
+  wrapMode: true,               // 是否自动换行
+  tabSize: 2,                   // Tab 宽度（通常固定为 2，不建议页面覆盖）
+  useSoftTabs: true,            // 是否使用空格代替 Tab（通常固定为 true）
+  showPrintMargin: false,       // 是否显示打印边距线（通常固定为 false）
+  useWorker: false,             // 是否启用 Ace Worker（通常固定为 false，避免大文件卡顿）
+
+  // ━━ 按钮配置 ━━
+  buttons: {
+    left:  [],                  // 左侧按钮数组（辅助操作）
+    right: []                   // 右侧按钮数组（主操作）
+  },
+
+  // ━━ 回调函数 ━━
+  onAction: function(action, value) {},   // 按钮点击/快捷键统一回调
+  onChange: function(value, dirty) {},    // 内容变化回调（每次输入触发）
+  onClose: function() {},                 // 弹窗关闭回调（无论是否保存都触发）
+  onInit: function(editor) {}             // 编辑器初始化完成回调（首次 init 时触发一次）
+});
+```
+
+---
+
+##### 四、按钮配置项（`buttons.left[i]` / `buttons.right[i]`）
+
+```javascript
+{
+  // 方式一：特殊类型按钮（目前仅支持脏标记）
+  type: 'dirty',                // 设置为脏标记后，其他字段无效
+
+  // 方式二：普通操作按钮
+  text: '保存',                 // 按钮显示文本
+  action: 'save',               // 按钮动作标识符，点击后传递给 onAction(action, value)
+  class: 'btn-primary',         // 按钮样式类。支持：btn-primary / btn-secondary / btn-danger / btn-success / btn-warning 以及项目其他标准按钮类
+  visible: true,                // 是否渲染。支持 boolean 或返回 boolean 的函数 () => canWrite
+  disabled: false               // 是否禁用。支持 boolean 或返回 boolean 的函数 () => isSaving
+}
+```
+
+**按钮配置项详细说明**：
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `type` | `string` | 否 | — | 特殊类型。目前仅 `'dirty'`：自动监听内容变化，显示「未修改 / 有未保存修改」。设置 `type` 后忽略 `text`/`action`/`class` 等字段。 |
+| `text` | `string` | 是* | — | 按钮显示文本（`*type='dirty' 时不需要`）。 |
+| `action` | `string` | 是* | — | 按钮动作标识符（`*type='dirty' 时不需要`）。点击后调用 `onAction(action, NavAceEditor.getValue())`。保留关键字：`save`（自动绑定 Ctrl-S）、`close`（自动绑定 Esc 和弹窗关闭）。 |
+| `class` | `string` | 否 | `btn-secondary` | 按钮样式类。常用：`btn-primary`（主操作，高亮）、`btn-secondary`（次要操作）、`btn-danger`（危险操作，如删除）。支持项目中任意有效的按钮 CSS 类。 |
+| `visible` | `boolean \| function` | 否 | `true` | 控制按钮是否渲染。`false` 时不渲染该按钮；支持传入函数动态判断，如 `visible: () => canDelete`。 |
+| `disabled` | `boolean \| function` | 否 | `false` | 控制按钮是否禁用（置灰不可点击）。支持布尔值或函数，如 `disabled: () => isSubmitting`。 |
+
+---
+
+##### 五、内置自动行为（页面无需手动处理）
+
+| 行为 | 触发条件 | 说明 |
+|------|---------|------|
+| **Ctrl-S 保存** | 按下 Ctrl+S（Win）/ Cmd+S（Mac） | 自动触发 `onAction('save', value)`。若 `buttons.right` 中不存在 `action: 'save'` 的按钮，则该快捷键不生效。 |
+| **Esc 关闭弹窗** | 按下 Esc 键 | 自动触发 `onAction('close', value)` 然后关闭弹窗。若 `buttons.right` 中不存在 `action: 'close'` 的按钮，则直接关闭弹窗。 |
+| **Ctrl-F 查找** | 按下 Ctrl+F | Ace 内置查找框（需加载 `ext-searchbox.js`）。 |
+| **Ctrl-G 跳转行号** | 按下 Ctrl+G | Ace 内置跳转到指定行（需加载 `ext-searchbox.js`）。 |
+| **沉浸模式快捷键** | 无（通过工具栏 checkbox 切换） | 勾选「沉浸模式」后隐藏标题栏和工具栏，编辑器占满弹窗。显示「退出沉浸模式」按钮。 |
+| **脏标记自动更新** | 编辑器内容变化时 | 若配置了 `{ type: 'dirty' }`，自动对比当前值与 `initialValue`，显示「未修改」或「有未保存修改」。 |
+| **关闭前确认** | 点击关闭 / 按 Esc / 点击蒙层 | 若 `confirmOnClose: true` 且 `isDirty()` 为 true，弹出浏览器确认框防止误关。 |
+| **localStorage 持久化** | 用户切换主题/字号/换行 | 自动将用户偏好写入 `localStorage`，下次打开弹窗时恢复。key 为 `nav-ace-theme`、`nav-ace-fontsize`、`nav-ace-wrap`。 |
+| **弹窗打开时自动聚焦** | `open()` 被调用后 | 弹窗显示完成后自动将光标移入编辑器。 |
+| **窗口大小变化自适应** | 浏览器 resize | 自动调用 `editor.resize()`，无需页面处理。 |
+
+---
+
+##### 六、生命周期
+
+```
+页面加载
+  → NavAceEditor.init()         // 可选：页面可提前初始化，也可由首次 open() 自动触发
+       → 创建 Ace 实例（若不存在）
+       → 渲染弹窗 DOM（若不存在）
+       → 绑定工具栏事件、快捷键、窗口 resize 监听
+       → 从 localStorage 恢复用户偏好（主题、字号、换行）
+       → 触发 onInit(editor)
+
+用户点击「打开编辑器」
+  → NavAceEditor.open(options)
+       → 根据 options 渲染标题、按钮、工具栏状态
+       → 设置编辑器内容、语言模式
+       → 记录 initialValue（脏标记基准）
+       → 显示弹窗
+       → 聚焦编辑器
+
+用户编辑内容
+  → Ace 'change' 事件
+       → 自动更新 dirty 状态
+       → 触发 onChange(value, dirty)
+
+用户点击按钮 / 快捷键
+  → 识别 action
+       → 触发 onAction(action, value)
+       → 页面在回调中处理业务（AJAX / Form 提交 / 关闭弹窗等）
+
+用户关闭弹窗
+  → NavAceEditor.close()
+       → 若有未保存修改且 confirmOnClose: true，弹出确认
+       → 隐藏弹窗、退出沉浸模式
+       → 触发 onClose()
+```
+
+---
+
+##### 七、完整接入示例
+
+**场景 1：SSH 配置编辑（AJAX 读写）**
+
+```javascript
+// 页面只需一个「打开编辑器」按钮
+function openSshEditor() {
+  NavAceEditor.open({
+    title: '编辑 SSH 配置',
+    mode: 'sh',
+    value: document.getElementById('ssh-config-hidden').value,
+    buttons: {
+      left:  [{ type: 'dirty' }],
+      right: [
+        { text: '关闭', class: 'btn-secondary', action: 'close' },
+        { text: '保存', class: 'btn-primary', action: 'save' }
+      ]
+    },
+    onAction: function(action, value) {
+      if (action === 'save') {
+        fetch('/admin/hosts.php', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          body: new URLSearchParams({ action: 'save_ssh_config', ssh_config: value, _csrf: window._csrf })
+        }).then(r => r.json()).then(data => {
+          if (data.ok) {
+            NavAceEditor.markClean();
+            showToast('SSH 配置已保存', 'success');
+          } else {
+            showToast(data.msg || '保存失败', 'error');
+          }
+        });
+      }
+      if (action === 'close') {
+        NavAceEditor.close();
+      }
+    }
+  });
+}
+```
+
+**场景 2：Nginx 配置编辑（Form 桥接）**
+
+```javascript
+function openNginxEditor(targetContent) {
+  NavAceEditor.open({
+    title: '编辑 Nginx 配置',
+    mode: 'nginx',
+    value: targetContent,
+    buttons: {
+      left:  [
+        { type: 'dirty' },
+        { text: '检查语法', class: 'btn-secondary', action: 'syntax' }
+      ],
+      right: [
+        { text: '关闭', class: 'btn-secondary', action: 'close' },
+        { text: '保存', class: 'btn-secondary', action: 'save' },
+        { text: '保存并 Reload', class: 'btn-primary', action: 'save_reload' }
+      ]
+    },
+    onAction: function(action, value) {
+      if (action === 'close') {
+        NavAceEditor.close();
+        return;
+      }
+      // 将内容同步回隐藏的 textarea，然后提交表单
+      document.getElementById('nginx-editor-content').value = value;
+      document.getElementById('nginx-editor-action').value = action;
+      document.getElementById('nginx-editor-form').submit();
+    }
+  });
+}
+```
+
+**场景 3：计划任务脚本（有权限控制 + 提交中禁用按钮）**
+
+```javascript
+function openTaskEditor(initialScript) {
+  NavAceEditor.open({
+    title: '编辑计划任务脚本',
+    mode: 'sh',
+    value: initialScript,
+    buttons: {
+      left:  [{ type: 'dirty' }],
+      right: [
+        { text: '关闭', class: 'btn-secondary', action: 'close' },
+        { text: '保存', class: 'btn-primary', action: 'save', disabled: false }
+      ]
+    },
+    onAction: function(action, value) {
+      if (action === 'save') {
+        NavAceEditor.setButtonDisabled('save', true);   // 禁用保存按钮防止重复提交
+        fetch('/admin/scheduled_tasks_ajax.php', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          body: new URLSearchParams({ action: 'update_command', command: value, _csrf: window._csrf })
+        }).then(r => r.json()).then(data => {
+          NavAceEditor.setButtonDisabled('save', false); // 恢复保存按钮
+          if (data.ok) {
+            NavAceEditor.markClean();
+            showToast('脚本已保存', 'success');
+          } else {
+            showToast(data.msg || '保存失败', 'error');
+          }
+        });
+      }
+      if (action === 'close') {
+        NavAceEditor.close();
+      }
+    }
+  });
+}
+```
+
+**场景 4：日志查看（只读）**
+
+```javascript
+function openLogViewer(logContent, logName) {
+  NavAceEditor.open({
+    title: '日志查看 · ' + logName,
+    mode: 'text',
+    value: logContent,
+    readOnly: true,
+    wrapMode: true,
+    buttons: {
+      left:  [],
+      right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
+    },
+    onAction: function(action) {
+      if (action === 'close') NavAceEditor.close();
+    }
+  });
+}
+```
+
+---
+
+##### 八、与现有三个页面的对照
+
+| 功能点 | files.php 现状 | nginx.php 现状 | logs.php 现状 | 统一接口后 |
+|--------|---------------|---------------|--------------|-----------|
+| 编辑器初始化 | 独立 20+ 行 | 独立 15+ 行 | 独立 15+ 行 | `NavAceEditor.init()` 一行 |
+| 弹窗 open | `openFileEditor()` 内联 | `openEditorModal()` 内联 | 非弹窗 | `NavAceEditor.open({...})` |
+| 弹窗 close | `closeFmEditorModal()` 内联 | `closeEditorModal()` 内联 | — | `NavAceEditor.close()` |
+| 脏标记 | `syncAceDirty()` 内联 | `sync()` 内联 | 不需要 | `{ type: 'dirty' }` 自动 |
+| 主题切换 | 独立事件监听 + localStorage | 独立事件监听 + localStorage | 无 | 工具栏自动处理 |
+| 字号切换 | 独立事件监听 + localStorage | 独立事件监听 + localStorage | 无 | 工具栏自动处理 |
+| 换行切换 | 独立事件监听 | 独立事件监听 | 无 | 工具栏自动处理 |
+| 沉浸模式 | `applyFocusMode()` 内联 | `applyFocusMode()` 内联 | 无 | 工具栏自动处理 |
+| 按钮 HTML | 硬编码在页面 | 硬编码在页面 | 无 | `buttons: { left, right }` 配置 |
+| Ctrl-S | `saveFile()` 回调 | 模拟点击 Save 按钮 | 无 | `onAction('save', value)` 自动 |
+| Esc | `closeFmEditorModal()` | `closeEditorModal()` | 无 | `onAction('close', value)` 自动 |
+| beforeunload | ❌ | ✅ | ❌ | `confirmOnClose: true` 配置 |
+
+---
+
+##### 九、实现文件规划
+
+| 文件 | 说明 |
+|------|------|
+| `admin/shared/ace_editor_modal.php` | 包含弹窗 HTML 模板 + `NavAceEditor` JS 实现。各页面通过 `require __DIR__ . '/shared/ace_editor_modal.php'` 引入。 |
+| `admin/shared/admin.css` | 已包含 `.ngx-modal`、`.ngx-editor-*` 等样式，无需新增 CSS。`nginx.php` 中的内联重复 CSS 应删除。 |
+| `admin/assets/ace/ace.js` | 已有本地资源。 |
+| `admin/assets/ace/ext-searchbox.js` | 已有本地资源（查找/跳转功能依赖）。 |
+
+---
+
+#### 10.2 改造优先级建议
+
+1. **P0（先封装）**：实现 `admin/shared/ace_editor_modal.php` 统一接口，将 `files.php`、`nginx.php`、`logs.php` 迁移到统一接口，验证稳定性。
+2. **P1（再迁移）**：改造 `hosts.php`（5 处多行文本）、`scheduled_tasks.php`、`manifests.php`。
+3. **P2（最后）**：改造 `settings.php`（2 处）、`dns.php`、`configs.php`。`sites.php` 和 `webdav.php` 保持 `<textarea>` 不变。
+
 ---
 
 ## 测试策略

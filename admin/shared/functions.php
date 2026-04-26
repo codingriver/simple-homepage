@@ -156,9 +156,11 @@ function admin_run_command(string $command, int $timeoutSeconds = 60): array {
     $startAt = microtime(true);
     $sigtermAt = null;
     $killAfter = 5;
+    $capturedExitCode = null;
     while (true) {
         $status = proc_get_status($proc);
         if (!($status['running'] ?? false)) {
+            $capturedExitCode = (int)($status['exitcode'] ?? 0);
             break;
         }
         $elapsed = microtime(true) - $startAt;
@@ -177,6 +179,7 @@ function admin_run_command(string $command, int $timeoutSeconds = 60): array {
                 for ($i = 0; $i < 20; $i++) {
                     $status = proc_get_status($proc);
                     if (!($status['running'] ?? false)) {
+                        $capturedExitCode = (int)($status['exitcode'] ?? 0);
                         break 2;
                     }
                     usleep(100000);
@@ -212,12 +215,16 @@ function admin_run_command(string $command, int $timeoutSeconds = 60): array {
     }
     fclose($pipes[1]);
     fclose($pipes[2]);
-    $exitCode = 0;
-    $status = proc_get_status($proc);
-    if ($status['running'] ?? false) {
-        $exitCode = 1;
+    if ($capturedExitCode !== null) {
+        $exitCode = $capturedExitCode;
     } else {
-        $exitCode = (int)($status['exitcode'] ?? 0);
+        $exitCode = 0;
+        $status = proc_get_status($proc);
+        if ($status['running'] ?? false) {
+            $exitCode = 1;
+        } else {
+            $exitCode = (int)($status['exitcode'] ?? 0);
+        }
     }
     proc_close($proc);
     $output = trim($stdout . ($stderr ? "\n" . $stderr : ''));
@@ -1378,6 +1385,10 @@ function nginx_apply_proxy_conf(bool $reload = false): array {
     $old_conf         = file_exists($conf_path) ? @file_get_contents($conf_path) : null;
     $old_domain_conf  = file_exists($domain_conf_path) ? @file_get_contents($domain_conf_path) : null;
 
+    $params_paths         = nginx_proxy_params_file_paths();
+    $old_params_simple    = file_exists($params_paths['simple']) ? @file_get_contents($params_paths['simple']) : null;
+    $old_params_full      = file_exists($params_paths['full'])   ? @file_get_contents($params_paths['full'])   : null;
+
     $gen = nginx_generate_proxy_conf();
     if (!$gen['ok']) {
         return ['ok' => false, 'msg' => $gen['msg']];
@@ -1398,11 +1409,17 @@ function nginx_apply_proxy_conf(bool $reload = false): array {
         if ($old_domain_conf !== null) {
             @file_put_contents($domain_conf_path, $old_domain_conf, LOCK_EX);
         }
+        if ($old_params_simple !== null) {
+            @file_put_contents($params_paths['simple'], $old_params_simple, LOCK_EX);
+        }
+        if ($old_params_full !== null) {
+            @file_put_contents($params_paths['full'], $old_params_full, LOCK_EX);
+        }
         $rollback_rel = nginx_reload();
         if ($rollback_rel['ok']) {
             return ['ok' => false, 'msg' => 'Reload 失败，已自动回滚到上一次可用配置：' . $rel['msg']];
         }
-        return ['ok' => false, 'msg' => 'Reload 失败，且自动回滚后恢复失败，请手动检查 Nginx：' . $rel['msg']];
+        return ['ok' => false, 'msg' => 'Reload 失败，且自动回滚后恢复失败，请手动检查 Nginx：' . $rollback_rel['msg']];
     }
 
     return ['ok' => false, 'msg' => 'Reload 失败，且不存在可回滚的旧配置：' . $rel['msg']];
@@ -1576,8 +1593,6 @@ function nginx_default_proxy_params_full_template(): string {
         'proxy_set_header                X-Forwarded-Port                $server_port;',
         'proxy_set_header                Authorization                   $http_authorization;',
         'proxy_set_header                Cookie                          $http_cookie;',
-        'proxy_pass_request_headers      on;',
-        'proxy_pass_request_body         on;',
         'proxy_request_buffering         off;',
         'proxy_buffering                 off;',
         'proxy_connect_timeout           86400s;',

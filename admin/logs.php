@@ -133,13 +133,6 @@ require_once __DIR__ . '/shared/header.php';
   position: relative;
   min-height: 400px;
 }
-#logEditor {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
 .logs-empty {
   position: absolute;
   top: 0;
@@ -198,46 +191,22 @@ require_once __DIR__ . '/shared/header.php';
 
     <div class="logs-editor-wrap">
       <div class="logs-empty" id="logEmpty">请在左侧选择一个日志文件</div>
-      <div id="logEditor" style="display:none"></div>
       <button class="btn btn-secondary btn-sm logs-load-more" id="loadMoreBtn" onclick="loadMore()">⬆️ 加载更早</button>
     </div>
   </main>
 </div>
 
+<script src="assets/ace/ace.js"></script>
+<script src="assets/ace/ext-searchbox.js"></script>
+<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
 <script>
 (function(){
-  var editor = null;
   var sources = {};
   var currentKey = null;
   var currentLines = []; // 原始行数组
   var loadedOffset = 0;
   var loadedLimit = 500;
   var isLoading = false;
-
-  function initAce() {
-    if (editor) return;
-    if (typeof ace === 'undefined') {
-      setTimeout(initAce, 100);
-      return;
-    }
-    editor = ace.edit('logEditor', {
-      theme: 'ace/theme/tomorrow_night',
-      mode: 'ace/mode/text',
-      readOnly: true,
-      wrap: true,
-      showPrintMargin: false,
-      highlightActiveLine: false,
-      showGutter: true,
-      fontSize: 13,
-      fontFamily: 'ui-monospace, "SF Mono", Consolas, "JetBrains Mono", monospace'
-    });
-    editor.container.style.background = '#080b10';
-    editor.renderer.setScrollMargin(8, 8);
-    // 如果日志数据已在 AJAX 返回后保存到 currentLines，但 editor 当时未初始化，现在补刷
-    if (currentLines && currentLines.length > 0) {
-      applyLinesToEditor();
-    }
-  }
 
   function formatBytes(b) {
     if (b === 0) return '0 B';
@@ -274,6 +243,31 @@ require_once __DIR__ . '/shared/header.php';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
+  function buildLogText() {
+    var kw = (document.getElementById('logKeyword').value || '').trim().toLowerCase();
+    var displayLines = currentLines;
+    if (kw) {
+      displayLines = currentLines.filter(function(line) {
+        return line.toLowerCase().indexOf(kw) !== -1;
+      });
+    }
+    return { text: displayLines.join('\n'), filtered: kw !== '', displayCount: displayLines.length };
+  }
+
+  function updateEditorContent() {
+    var result = buildLogText();
+    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
+      NavAceEditor.setValue(result.text);
+      if (result.filtered) {
+        setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
+      }
+    }
+    document.getElementById('loadMoreBtn').style.display = (loadedOffset > 0) ? 'block' : 'none';
+    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setButtonVisible) {
+      NavAceEditor.setButtonVisible('load_more', loadedOffset > 0);
+    }
+  }
+
   window.selectLog = function(key) {
     if (isLoading) return;
     currentKey = key;
@@ -291,11 +285,30 @@ require_once __DIR__ . '/shared/header.php';
 
     document.getElementById('btnDownload').style.display = s.exists ? 'inline-flex' : 'none';
     document.getElementById('btnClear').style.display = (s.exists && s.clearable) ? 'inline-flex' : 'none';
-
     document.getElementById('logEmpty').style.display = 'none';
-    document.getElementById('logEditor').style.display = '';
-    initAce();
-    editor && editor.setValue('加载中…', -1);
+
+    NavAceEditor.open({
+      title: '日志查看 · ' + s.label,
+      mode: 'text',
+      value: '加载中…',
+      readOnly: true,
+      wrapMode: true,
+      buttons: {
+        left: [
+          { text: '⬆️ 加载更早', class: 'btn-secondary', action: 'load_more', visible: function() { return loadedOffset > 0; } }
+        ],
+        right: [
+          { text: '关闭', class: 'btn-secondary', action: 'close' }
+        ]
+      },
+      onAction: function(action) {
+        if (action === 'close') {
+          NavAceEditor.close();
+        } else if (action === 'load_more') {
+          loadMore();
+        }
+      }
+    });
 
     loadLogChunk(key, 'tail', loadedLimit);
   };
@@ -316,7 +329,9 @@ require_once __DIR__ . '/shared/header.php';
         isLoading = false;
         if (!d.ok) {
           setStatus('加载失败');
-          editor && editor.setValue('加载失败：' + (d.msg || ''), -1);
+          if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
+            NavAceEditor.setValue('加载失败：' + (d.msg || ''));
+          }
           return;
         }
         var lines = d.lines || [];
@@ -327,18 +342,19 @@ require_once __DIR__ . '/shared/header.php';
           currentLines = lines.concat(currentLines);
           loadedOffset = d.offset;
         }
-        applyLinesToEditor();
+        updateEditorContent();
         setStatus('已加载 ' + currentLines.length + ' / ' + d.total_lines + ' 行');
-        document.getElementById('loadMoreBtn').style.display = (loadedOffset > 0) ? 'block' : 'none';
         // 如果是 prepend，保持滚动位置在新增内容底部
-        if (direction === 'forward' && lines.length > 0) {
-          editor && editor.gotoLine(lines.length + 1, 0, false);
+        if (direction === 'forward' && lines.length > 0 && typeof NavAceEditor !== 'undefined' && NavAceEditor.gotoLine) {
+          NavAceEditor.gotoLine(lines.length + 1, 0, false);
         }
       })
       .catch(function(){
         isLoading = false;
         setStatus('请求异常');
-        editor && editor.setValue('请求异常', -1);
+        if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
+          NavAceEditor.setValue('请求异常');
+        }
       });
   }
 
@@ -355,25 +371,8 @@ require_once __DIR__ . '/shared/header.php';
     loadLogChunk(currentKey, 'forward', limit);
   };
 
-  function applyLinesToEditor() {
-    if (!editor) return;
-    var kw = (document.getElementById('logKeyword').value || '').trim().toLowerCase();
-    var displayLines = currentLines;
-    if (kw) {
-      displayLines = currentLines.filter(function(line) {
-        return line.toLowerCase().indexOf(kw) !== -1;
-      });
-    }
-    var text = displayLines.join('\n');
-    editor.setValue(text, -1);
-    editor.scrollToLine(0, false, false);
-    if (kw) {
-      setStatus('过滤后 ' + displayLines.length + ' / ' + currentLines.length + ' 行');
-    }
-  }
-
   window.filterLog = function() {
-    applyLinesToEditor();
+    updateEditorContent();
   };
 
   window.clearCurrentLog = function() {
@@ -432,33 +431,5 @@ require_once __DIR__ . '/shared/header.php';
 })();
 </script>
 <script>window.DEBUG_CSRF = <?= json_encode(csrf_token()) ?>;</script>
-
-<!-- Ace Editor -->
-<script>
-(function(){
-  var cdnBase = 'https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.0/';
-  var localBase = '/assets/ace/';
-  function loadScript(src, onload, onerror) {
-    var s = document.createElement('script');
-    s.src = src;
-    s.onload = onload;
-    s.onerror = onerror;
-    document.body.appendChild(s);
-  }
-  loadScript(cdnBase + 'ace.min.js', function(){
-    loadScript(cdnBase + 'theme-tomorrow_night.min.js', function(){}, function(){
-      loadScript(localBase + 'theme-tomorrow_night.min.js', function(){});
-    });
-    loadScript(cdnBase + 'mode-text.min.js', function(){}, function(){
-      loadScript(localBase + 'mode-text.min.js', function(){});
-    });
-  }, function(){
-    loadScript(localBase + 'ace.min.js', function(){
-      loadScript(localBase + 'theme-tomorrow_night.min.js', function(){});
-      loadScript(localBase + 'mode-text.min.js', function(){});
-    });
-  });
-})();
-</script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

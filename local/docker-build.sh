@@ -121,6 +121,7 @@ docker_container_is_dev_mode() {
   mount_lines="$(docker container inspect --format '{{range .Mounts}}{{println .Source "|" .Destination}}{{end}}' "$name" 2>/dev/null || true)"
 
   grep -Fqx "NAV_DEV_MODE=1" <<<"$env_lines" &&
+    grep -Fqx "HOST_AGENT_INSTALL_MODE=simulate" <<<"$env_lines" &&
     grep -Fqx "$PROJECT_DIR|/var/www/nav" <<<"$mount_lines" &&
     grep -Fqx "$SCRIPT_DIR/php-dev.ini|/usr/local/etc/php/conf.d/98-nav-dev.ini" <<<"$mount_lines"
 }

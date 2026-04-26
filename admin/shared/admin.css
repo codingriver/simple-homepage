@@ -569,3 +569,57 @@ details summary:hover { color: var(--ac); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ac); }
+
+/* ── ngx-modal 通用弹窗（Ace Editor / 文件系统配置 复用） ── */
+.ngx-modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(8,10,14,.78); backdrop-filter: blur(4px);
+  z-index: 980; align-items: center; justify-content: center; padding: 8px;
+}
+.ngx-modal.open { display: flex; }
+.ngx-modal-card {
+  width: min(1680px, 99vw); height: min(96vh, 1080px);
+  background: var(--sf); border: 1px solid var(--bd2); border-radius: 10px;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0,0,0,.45);
+}
+.ngx-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--bd); min-height: 30px;
+}
+.ngx-modal-title { font-size: 12px; color: var(--ac); font-family: var(--mono); line-height: 1.1; }
+.ngx-close-btn { padding: 3px 10px !important; min-height: 24px; line-height: 1.1; font-size: 12px; }
+.ngx-modal-body {
+  padding: 6px 8px 8px; display: flex; flex-direction: column;
+  min-height: 0; height: 100%;
+}
+.ngx-editor-toolbar {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  margin-bottom: 6px; line-height: 1.1;
+}
+.ngx-editor-toolbar .btn { padding: 4px 10px; min-height: 26px; line-height: 1.1; font-size: 12px; }
+.ngx-editor-toolbar label {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; line-height: 1.1; color: var(--tx2);
+}
+.ngx-editor-toolbar select { height: 24px; padding: 0 6px; }
+.ngx-editor-main {
+  width: 100%; flex: 1 1 auto; min-height: 0;
+  border: 1px solid var(--bd2); border-radius: 8px; overflow: hidden;
+}
+.ngx-editor-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--bd);
+}
+.ngx-editor-actions-left, .ngx-editor-actions-right {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+}
+.ngx-editor-actions .btn { padding: 5px 12px; min-height: 28px; line-height: 1.1; font-size: 12px; }
+.ngx-editor-actions .btn-primary { padding: 5px 14px; }
+.ngx-modal-card.focus-mode .ngx-modal-head { display: none; }
+.ngx-modal-card.focus-mode .ngx-editor-toolbar { display: none; }
+.ngx-modal-card.focus-mode .ngx-modal-body { padding: 4px 6px 6px; }
+.ngx-modal-card.focus-mode .ngx-editor-main { border-radius: 6px; }
+.ngx-focus-exit-btn { display: none; }
+.ngx-modal-card.focus-mode .ngx-focus-exit-btn { display: inline-flex; }

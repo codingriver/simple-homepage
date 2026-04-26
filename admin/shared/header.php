@@ -46,7 +46,8 @@ $nav_items = [
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
-    ['file' => 'hosts.php',    'icon' => '🖥', 'label' => '主机管理'],
+    ['file' => 'hosts.php',    'icon' => '🔐', 'label' => 'SSH 配置'],
+    ['file' => 'terminal.php', 'icon' => '💻', 'label' => '终端'],
     ['file' => 'host_runtime.php', 'icon' => '🧰', 'label' => '宿主机运维'],
     ['file' => 'docker_hosts.php', 'icon' => '🐳', 'label' => 'Docker 管理'],
     ['file' => 'packages.php', 'icon' => '📦', 'label' => '软件包管理'],
@@ -72,6 +73,9 @@ $nav_items = array_values(array_filter($nav_items, static function(array $item):
     }
     if (($item['file'] ?? '') === 'hosts.php') {
         return auth_user_has_permission('ssh.view');
+    }
+    if (($item['file'] ?? '') === 'terminal.php') {
+        return auth_user_has_permission('ssh.terminal');
     }
     if (($item['file'] ?? '') === 'host_runtime.php') {
         return auth_user_has_permission('ssh.view');
