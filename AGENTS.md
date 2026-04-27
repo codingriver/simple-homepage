@@ -87,15 +87,13 @@ admin/           # 后台管理页面和 AJAX API
     健康与证书：health_check.php、expiry.php
     WebDAV：webdav.php、webdav_shares.php、webdav_audit.php
     调试：debug.php、index.php（后台首页）
-  *_ajax.php / *_api.php  # AJAX 端点（ddns_ajax.php、settings_ajax.php、file_api.php、docker_api.php、host_api.php、sessions_api.php 等）
+  *_ajax.php / *_api.php  # AJAX 端点（ddns_ajax.php、settings_ajax.php、sessions_api.php 等）
   api/           # 后台专用 API（task_status.php、task_log.php）
   shared/        # 后台共享库
     functions.php      # 后台主函数库：站点/配置读写、CSRF、备份恢复、健康检查、Nginx 代理管理、审计日志、回收站
     header.php         # 后台页面模板头（权限验证、侧边栏导航、Flash Toast、待生效代理警告）
     footer.php         # 后台页面模板尾（关闭标签、暴露 window._csrf）
-    host_agent_lib.php # Host-Agent HTTP API 客户端：重试、故障转移、~100 个端点包装器
     admin.css          # 后台统一暗色主题（Obsidian Terminal 风格）
-    file_manager_lib.php # 文件管理器业务逻辑
     dns_lib.php / dns_api_lib.php / ddns_lib.php / cron_lib.php 等 # 各业务领域函数库
   assets/        # 静态资源：Ace Editor（本地）、SortableJS（CDN）
 
@@ -106,8 +104,6 @@ shared/          # 核心共享库（前后台共用）
   request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
 
 cli/             # CLI 脚本
-  host_agent.php           # Host-Agent 服务端：HTTP 服务循环、SSH/文件系统/Docker/终端/进程/服务/网络/包管理/配置/清单/共享服务
-  host_agent_docker_proxy.php # Host-Agent Docker 代理桥接
   run_scheduled_task.php   # 计划任务执行器（硬超时 3600s、PID 锁、僵尸锁清理）
   ddns_sync.php            # DDNS 同步
   alidns_sync.php          # 阿里云 DNS 同步
@@ -119,15 +115,15 @@ python/          # Python 辅助脚本
   dns_core.py    # DNS 核心逻辑
 
 docker/          # Docker 构建配置
-  nginx.conf / nginx-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh / host-agent-docker
+  nginx.conf / nginx-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh
 
 nginx-conf/      # Nginx 配置模板
   proxy-params-simple.conf / proxy-params-full.conf / subsite.conf / nav.conf
 
 data/            # 持久化数据目录（必须挂载到宿主机）
   config.json / sites.json / users.json / scheduled_tasks.json / dns_config.json / ddns_tasks.json
-  notifications.json / ip_locks.json / sessions.json / auth_secret.key / host_agent.json
-  backups/ / logs/ / tasks/ / favicon_cache/ / bg/ / nginx/ / host-agent-sim-root/
+  notifications.json / ip_locks.json / sessions.json / auth_secret.key
+  backups/ / logs/ / tasks/ / favicon_cache/ / bg/ / nginx/
 
 tests/
   e2e/full/      # Playwright E2E 测试（171 个 spec 文件，覆盖所有主要功能模块）
@@ -756,7 +752,6 @@ function openLogViewer(logContent, logName) {
 - `favicon_cache/` — 自动抓取的 favicon 缓存
 - `bg/` — 背景图上传目录
 - `nginx/` — Nginx 代理参数模板
-- `host-agent-sim-root/` — Host-Agent simulate 模式模拟根目录
 
 ### 环境变量
 
@@ -777,41 +772,13 @@ function openLogViewer(logContent, logName) {
 
 1. **认证机制**: 使用 JWT-like Token（HMAC-SHA256），Cookie `HttpOnly` + `SameSite=Lax`，支持会话级撤销（`data/sessions.json`）。
 2. **IP 锁定**: 登录失败超过限制后自动锁定 IP（默认 5 次失败锁定 15 分钟）。
-3. **Host-Agent 模式**: 开发/测试环境强烈建议使用 `simulate` 模式，避免误改宿主机 SSH 配置和系统文件。
-4. **docker.sock 挂载**: 仅在一键安装/升级 `host-agent` 时临时挂载，完成后建议移除。
+3. **docker.sock 挂载**: 仅在需要 Docker 管理功能时临时挂载，完成后建议移除。
 5. **密钥管理**: `AUTH_SECRET_KEY` 优先从环境变量读取，否则自动生成并保存到 `data/auth_secret.key`（权限 600）。
 6. **SSRF 防护**: 所有根据用户输入发起外部 HTTP 请求的代码必须经过目标地址安全校验（禁止内网、回环地址）。
 7. **Cookie 安全降级**: 代码内置自动降级逻辑——用 IP 访问时自动设置 `secure=false, domain=空`，保证内网 IP 访问始终可登录。
 8. **无人值守安装安全**: 使用 `ADMIN`/`PASSWORD` 环境变量完成首次安装后，应用会自动删除 `data/.initial_admin.json`。生产环境不应长期保留明文密码。
 
 ---
-
-## 关键调用链（Host-Agent / 文件系统 / SSH / Docker）
-
-本项目的"本机文件系统"和"本机 SSH 管理"均不直接由 Web 页面操作，而是统一走 `host-agent` 桥接：
-
-```text
-admin/files.php
-  -> admin/file_api.php
-  -> admin/shared/file_manager_lib.php
-  -> admin/shared/host_agent_lib.php
-  -> host-agent HTTP API
-  -> cli/host_agent.php
-```
-
-Docker 管理也走同一条 host-agent 桥接：
-
-```text
-admin/docker_hosts.php
-  -> admin/docker_api.php
-  -> admin/shared/host_agent_lib.php
-  -> host-agent HTTP API
-  -> cli/host_agent_docker_proxy.php（或 cli/host_agent.php 中的 Docker 逻辑）
-```
-
-`host-agent` 有两种运行模式：
-- **simulate**: 操作落在 `data/host-agent-sim-root/` 下的模拟目录，不会修改真实宿主机。开发/测试默认使用此模式。
-- **host**: 以特权容器运行，挂载宿主机根目录到 `/hostfs`，直接操作宿主机文件和 SSH 服务。
 
 ---
 

@@ -28,7 +28,6 @@ export async function resetVolatileAppData(): Promise<void> {
     'file_recent.json': '[]',
     'ip_locks.json': '{}',
     'webdav_accounts.json': '{}',
-    'host_agent.json': '{}',
   };
 
   // 重置 config.json 中易被测试污染的字段，保留其他全局配置

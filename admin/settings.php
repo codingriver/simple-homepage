@@ -6,7 +6,6 @@
 // ── 所有需要在 HTML 之前输出的操作（文件下载/导出）──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
-    require_once __DIR__ . '/shared/host_agent_lib.php';
 
     $current_admin = auth_get_current_user();
     if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
@@ -168,45 +167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit_log('clear_ddns_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
             flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条 DDNS 任务，并同步清理日志与系统调度器');
             header('Location: settings.php'); exit;
-        }
-
-        if ($action === 'host_agent_install') {
-            $result = host_agent_install();
-            audit_log('host_agent_install', ['ok' => $result['ok']]);
-            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 安装失败'));
-            header('Location: settings.php#host-agent'); exit;
-        }
-
-        if ($action === 'host_agent_stop') {
-            require_once __DIR__ . '/shared/host_agent_lib.php';
-            $result = host_agent_stop();
-            audit_log('host_agent_stop', ['ok' => $result['ok']]);
-            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 停止失败'));
-            header('Location: settings.php#host-agent'); exit;
-        }
-
-        if ($action === 'host_agent_restart') {
-            require_once __DIR__ . '/shared/host_agent_lib.php';
-            $result = host_agent_restart();
-            audit_log('host_agent_restart', ['ok' => $result['ok']]);
-            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 重启失败'));
-            header('Location: settings.php#host-agent'); exit;
-        }
-
-        if ($action === 'host_agent_uninstall') {
-            require_once __DIR__ . '/shared/host_agent_lib.php';
-            $result = host_agent_uninstall();
-            audit_log('host_agent_uninstall', ['ok' => $result['ok']]);
-            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 卸载失败'));
-            header('Location: settings.php#host-agent'); exit;
-        }
-
-        if ($action === 'host_agent_reinstall') {
-            require_once __DIR__ . '/shared/host_agent_lib.php';
-            $result = host_agent_reinstall();
-            audit_log('host_agent_reinstall', ['ok' => $result['ok']]);
-            flash_set($result['ok'] ? 'success' : 'error', (string)($result['msg'] ?? 'host-agent 重装失败'));
-            header('Location: settings.php#host-agent'); exit;
         }
 
         // ── Nginx 写入 + reload（带预检与失败回滚）──
@@ -445,12 +405,6 @@ require_once __DIR__ . '/shared/header.php';
 
 $cfg = auth_get_config();
 
-// 服务端预加载 host-agent 状态，避免初始按钮文字与 AJAX 更新不一致
-$host_agent_status = [];
-if (file_exists(__DIR__ . '/shared/host_agent_lib.php')) {
-    require_once __DIR__ . '/shared/host_agent_lib.php';
-    $host_agent_status = host_agent_status_summary();
-}
 ?>
 
 <!-- 基础设置 -->
@@ -524,10 +478,10 @@ if (file_exists(__DIR__ . '/shared/host_agent_lib.php')) {
       </div>
       <div class="form-group" style="grid-column:1/-1">
         <label>文件系统访问白名单根目录</label>
-        <textarea name="fs_allowed_roots" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:13px;outline:none;font-family:monospace" placeholder="留空表示不限制（推荐 host-agent simulate 模式使用）&#10;每行一个绝对路径，例如：&#10;/var/www/nav/data&#10;/etc/nginx&#10;/var/log"><?= htmlspecialchars(implode("\n", (array)($cfg['fs_allowed_roots'] ?? []))) ?></textarea>
+        <textarea name="fs_allowed_roots" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:13px;outline:none;font-family:monospace" placeholder="留空表示不限制（默认）&#10;每行一个绝对路径，例如：&#10;/var/www/nav/data&#10;/etc/nginx&#10;/var/log"><?= htmlspecialchars(implode("\n", (array)($cfg['fs_allowed_roots'] ?? []))) ?></textarea>
         <div class="form-hint" style="margin-top:6px">
           <b>留空</b>：不限制文件管理器的访问范围（默认）。<br>
-          <b>填写路径</b>：仅允许访问以这些路径开头的目录和文件。仅对 <b>host-agent host 模式</b> 生效，用于限制宿主机文件访问范围。simulate 模式下本身已有沙箱隔离。<br>
+          <b>填写路径</b>：仅允许访问以这些路径开头的目录和文件。<br>
           <span style="color:#ff6b6b">⚠️ 限制过严可能导致文件管理器无法正常访问常用目录。</span>
         </div>
       </div>
@@ -664,73 +618,6 @@ if (file_exists(__DIR__ . '/shared/host_agent_lib.php')) {
       <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
     </form>
   </div>
-</div>
-
-<div class="card" id="host-agent">
-  <div class="card-title">🧩 Host-Agent
-    <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">宿主机能力桥接</span>
-  </div>
-  <div id="host-agent-banner" class="form-hint" style="margin-bottom:12px">
-    正在检测 docker.sock 挂载和 host-agent 运行状态...
-  </div>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px">
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
-      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">安装模式</div>
-      <div id="host-agent-mode" style="font-size:14px;font-weight:700;color:var(--tx)">待检测</div>
-      <div class="form-hint" style="margin-top:8px">默认不强制启用。只有你主动给当前应用容器临时挂载 <code>/var/run/docker.sock</code> 时，后台才会允许一键安装独立的 <code>host-agent</code> 容器；确认正常后建议移除该挂载。</div>
-    </div>
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
-      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">运行状态</div>
-      <div id="host-agent-status-text" style="font-size:14px;font-weight:700;color:var(--tx)">待检测</div>
-      <div id="host-agent-container-name" class="form-hint" style="margin-top:8px;font-family:var(--mono)"></div>
-    </div>
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;min-width:220px;flex:1">
-      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">服务入口</div>
-      <div id="host-agent-service-url" style="font-size:13px;font-family:var(--mono);word-break:break-all;color:var(--tx)">待检测</div>
-      <div class="form-hint" style="margin-top:8px">后续本机文件管理、终端、本机 SSH 配置修改与服务控制都将优先通过 host-agent 处理，不再依赖 SSH 连接宿主机。</div>
-    </div>
-  </div>
-<?php
-// 服务端预渲染 host-agent 按钮初始状态，避免 JS 加载前显示错误文字
-$ha_installed = !empty($host_agent_status['installed']);
-$ha_running   = !empty($host_agent_status['running']);
-$ha_healthy   = !empty($host_agent_status['healthy']);
-$ha_can_access = !empty($host_agent_status['docker_accessible']);
-$ha_install_btn_text = $ha_installed ? ($ha_running ? '✓ 已运行' : '▶ 启动 Host-Agent') : '🚀 一键安装 Host-Agent';
-$ha_install_btn_disabled = $ha_can_access && $ha_installed && $ha_running;
-$ha_stop_btn_disabled = !($ha_can_access && $ha_installed && $ha_running);
-$ha_ctrl_btn_disabled = !($ha_can_access && $ha_installed);
-?>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-    <form method="POST" id="host-agent-install-form" style="display:inline" onsubmit="return confirmHostAgentInstall()">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="host_agent_install">
-      <button class="btn btn-primary" id="host-agent-install-btn" type="submit"<?= $ha_install_btn_disabled ? ' disabled' : '' ?>><?= htmlspecialchars($ha_install_btn_text) ?></button>
-    </form>
-    <form method="POST" id="host-agent-stop-form" style="display:inline" onsubmit="return confirmHostAgentStop()">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="host_agent_stop">
-      <button class="btn btn-danger" id="host-agent-stop-btn" type="submit"<?= $ha_stop_btn_disabled ? ' disabled style="opacity:.55;cursor:not-allowed"' : '' ?>>⏹ 停止</button>
-    </form>
-    <form method="POST" id="host-agent-restart-form" style="display:inline" onsubmit="return confirmHostAgentRestart()">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="host_agent_restart">
-      <button class="btn btn-secondary" id="host-agent-restart-btn" type="submit"<?= $ha_ctrl_btn_disabled ? ' disabled style="opacity:.55;cursor:not-allowed"' : '' ?>>↺ 重启</button>
-    </form>
-    <form method="POST" id="host-agent-reinstall-form" style="display:inline" onsubmit="return confirmHostAgentReinstall()">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="host_agent_reinstall">
-      <button class="btn btn-warning" id="host-agent-reinstall-btn" type="submit"<?= $ha_ctrl_btn_disabled ? ' disabled style="opacity:.55;cursor:not-allowed"' : '' ?>>🔃 重装</button>
-    </form>
-    <form method="POST" id="host-agent-uninstall-form" style="display:inline" onsubmit="return confirmHostAgentUninstall()">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="host_agent_uninstall">
-      <button class="btn btn-danger" id="host-agent-uninstall-btn" type="submit"<?= $ha_ctrl_btn_disabled ? ' disabled style="opacity:.55;cursor:not-allowed"' : '' ?>>🗑 卸载</button>
-    </form>
-    <button type="button" class="btn btn-secondary" id="host-agent-refresh-btn" onclick="loadHostAgentStatus(true)">🔄 刷新状态</button>
-  </div>
-  <div id="host-agent-socket-note" class="form-hint"></div>
-  <pre id="host-agent-compose-snippet" style="margin-top:10px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;font-size:12px;display:none;overflow:auto"></pre>
 </div>
 
 <script>
@@ -1239,153 +1126,6 @@ function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-var HOST_AGENT_STATUS = null;
-
-function updateHostAgentUi(data) {
-    HOST_AGENT_STATUS = data || {};
-    var banner = document.getElementById('host-agent-banner');
-    var mode = document.getElementById('host-agent-mode');
-    var status = document.getElementById('host-agent-status-text');
-    var name = document.getElementById('host-agent-container-name');
-    var url = document.getElementById('host-agent-service-url');
-    var note = document.getElementById('host-agent-socket-note');
-    var snippet = document.getElementById('host-agent-compose-snippet');
-    var installBtn = document.getElementById('host-agent-install-btn');
-    var stopBtn = document.getElementById('host-agent-stop-btn');
-    var restartBtn = document.getElementById('host-agent-restart-btn');
-    var reinstallBtn = document.getElementById('host-agent-reinstall-btn');
-    var uninstallBtn = document.getElementById('host-agent-uninstall-btn');
-    if (!banner || !mode || !status || !name || !url || !note || !snippet || !installBtn) return;
-
-    mode.textContent = data.install_mode === 'simulate' ? 'simulate（开发/测试安全模式）' : 'host（宿主机真实安装模式）';
-    status.textContent = data.healthy ? '已运行并健康' : (data.running ? '已运行，等待健康检查' : (data.installed ? '已安装未运行' : '未安装'));
-    var mountHint = '';
-    if (data.app_mount_source) {
-        mountHint = '\n源码挂载：' + data.app_mount_source + ' → /var/www/nav（host-agent 将使用最新代码）';
-    } else if (data.install_mode === 'simulate' || (data.docker_socket_mounted && !data.app_mount_source)) {
-        mountHint = '\n源码挂载：未检测到（host-agent 将使用镜像内置代码，重装后才能更新）';
-    }
-    name.textContent = '容器名：' + (data.container_name || '-') + mountHint;
-    url.textContent = data.service_url || '-';
-    banner.className = data.healthy ? 'alert alert-success' : (data.docker_socket_mounted ? 'alert alert-info' : 'alert alert-warn');
-    banner.textContent = data.message || '未获取到 host-agent 状态。';
-
-    var canAccess = !!data.docker_accessible;
-    var installed = !!data.installed;
-    var running = !!data.running;
-
-    installBtn.textContent = installed ? (running ? '✓ 已运行' : '▶ 启动 Host-Agent') : '🚀 一键安装 Host-Agent';
-
-    if (!canAccess) {
-        note.textContent = data.docker_mount_hint || '';
-        snippet.style.display = 'block';
-        snippet.textContent = 'docker-compose.yml 临时挂载示例：\n'
-            + 'services:\n'
-            + '  simple-homepage:\n'
-            + '    volumes:\n'
-            + '      - ./data:/var/www/nav/data\n'
-            + '      # 仅在后台一键安装 / 升级 host-agent 时临时挂载\n'
-            + '      - ' + (data.docker_socket_path || '/var/run/docker.sock') + ':' + (data.docker_socket_path || '/var/run/docker.sock') + '\n';
-        installBtn.disabled = true;
-        if (stopBtn) { stopBtn.disabled = true; stopBtn.style.opacity = '.55'; stopBtn.style.cursor = 'not-allowed'; }
-        if (restartBtn) { restartBtn.disabled = true; restartBtn.style.opacity = '.55'; restartBtn.style.cursor = 'not-allowed'; }
-        if (reinstallBtn) { reinstallBtn.disabled = true; reinstallBtn.style.opacity = '.55'; reinstallBtn.style.cursor = 'not-allowed'; }
-        if (uninstallBtn) { uninstallBtn.disabled = true; uninstallBtn.style.opacity = '.55'; uninstallBtn.style.cursor = 'not-allowed'; }
-    } else {
-        note.textContent = '已检测到可用 docker.sock。安装完成并确认功能正常后，请从当前应用容器移除该挂载；后续只有升级或重装 host-agent 时才需要再次挂回。';
-        snippet.style.display = 'none';
-        installBtn.disabled = installed && running;
-        if (stopBtn) { stopBtn.disabled = !(installed && running); stopBtn.style.opacity = (installed && running) ? '' : '.55'; stopBtn.style.cursor = (installed && running) ? '' : 'not-allowed'; }
-        if (restartBtn) { restartBtn.disabled = !installed; restartBtn.style.opacity = installed ? '' : '.55'; restartBtn.style.cursor = installed ? '' : 'not-allowed'; }
-        if (reinstallBtn) { reinstallBtn.disabled = !installed; reinstallBtn.style.opacity = installed ? '' : '.55'; reinstallBtn.style.cursor = installed ? '' : 'not-allowed'; }
-        if (uninstallBtn) { uninstallBtn.disabled = !installed; uninstallBtn.style.opacity = installed ? '' : '.55'; uninstallBtn.style.cursor = installed ? '' : 'not-allowed'; }
-    }
-}
-
-function loadHostAgentStatus(force) {
-    if (window.__hostAgentLoaded && !force) return;
-    window.__hostAgentLoaded = true;
-    fetch('settings_ajax.php?action=host_agent_status', {
-        credentials: 'same-origin',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.json(); })
-      .then(updateHostAgentUi)
-      .catch(function(err){
-          updateHostAgentUi({
-              docker_socket_mounted: false,
-              docker_socket_path: '/var/run/docker.sock',
-              install_mode: 'host',
-              installed: false,
-              running: false,
-              healthy: false,
-              container_name: 'host-agent',
-              service_url: '-',
-              message: 'host-agent 状态检测失败：' + (err && err.message ? err.message : 'unknown error'),
-              docker_mount_hint: '请先检查当前容器是否挂载了 docker.sock，并确保后台容器对该 socket 拥有读写权限。'
-          });
-      });
-}
-
-function confirmHostAgentInstall() {
-    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
-        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法一键安装 host-agent。');
-        return false;
-    }
-    var installed = HOST_AGENT_STATUS.installed;
-    if (installed) {
-        return confirm('确认启动 host-agent？\n\nhost-agent 容器已存在，点击后将启动该容器。');
-    }
-    return confirm('确认一键安装 host-agent？\n\n1. 后台会通过 docker.sock 创建一个独立的 host-agent 容器\n2. 安装完成后请先确认 host-agent 功能正常\n3. 验证通过后请从当前应用容器移除 docker.sock 挂载\n4. 后续只有升级或重装 host-agent 时才需要再次挂回');
-}
-
-function confirmHostAgentStop() {
-    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
-        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法停止 host-agent。');
-        return false;
-    }
-    if (!HOST_AGENT_STATUS.installed || !HOST_AGENT_STATUS.running) {
-        alert('host-agent 当前未在运行，无需停止。');
-        return false;
-    }
-    return confirm('确认停止 host-agent？\n\n停止后本机文件管理、终端、SSH 服务控制等功能将不可用。');
-}
-
-function confirmHostAgentRestart() {
-    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
-        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法重启 host-agent。');
-        return false;
-    }
-    if (!HOST_AGENT_STATUS.installed) {
-        alert('host-agent 尚未安装，无法重启。');
-        return false;
-    }
-    return confirm('确认重启 host-agent？');
-}
-
-function confirmHostAgentReinstall() {
-    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
-        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法重装 host-agent。');
-        return false;
-    }
-    if (!HOST_AGENT_STATUS.installed) {
-        alert('host-agent 尚未安装，请直接执行一键安装。');
-        return false;
-    }
-    return confirm('确认重装 host-agent？\n\n1. 后台会先卸载现有 host-agent 容器\n2. 然后重新创建并启动新的 host-agent 容器\n3. 重装后容器会加载当前最新代码');
-}
-
-function confirmHostAgentUninstall() {
-    if (!HOST_AGENT_STATUS || !HOST_AGENT_STATUS.docker_accessible) {
-        alert('当前容器尚未具备可用的 docker.sock 访问能力，无法卸载 host-agent。');
-        return false;
-    }
-    if (!HOST_AGENT_STATUS.installed) {
-        alert('host-agent 尚未安装，无需卸载。');
-        return false;
-    }
-    return confirm('确认卸载 host-agent？\n\n卸载后本机文件管理、终端、SSH 服务控制等功能将不可用。');
-}
-
 // ── 惰性：登录日志、Nginx sudo 检测（进入视口或锚点时再请求，首屏不读日志、不 exec）──
 (function initSettingsLazy() {
     var logsLoaded = false;
@@ -1461,7 +1201,6 @@ function confirmHostAgentUninstall() {
         if (nginx) loadNginxSudoOnce();
     }
     if (location.hash === '#nginx') loadNginxSudoOnce();
-    loadHostAgentStatus(false);
 })();
 </script>
 

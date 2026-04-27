@@ -54,7 +54,7 @@ $items = webdav_shares_summary();
             <?php endforeach; ?>
           </td>
           <td style="white-space:nowrap">
-            <a class="btn btn-sm btn-secondary" href="files.php?host_id=local&path=<?= urlencode((string)($item['root'] ?? '/')) ?>">打开目录</a>
+
           </td>
         </tr>
         <?php endforeach; ?>

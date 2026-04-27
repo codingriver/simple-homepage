@@ -89,7 +89,7 @@ docker compose version    # Docker Compose version v2.x.x
 | **工具** | tzdata | Debian 仓库 | `apt-get install tzdata` | 时区数据库 |
 | **工具** | bash | Debian 仓库 | `apt-get install bash` | 启动脚本依赖 |
 | **工具** | cron | Debian 仓库 | 计划任务调度 | 容器内自动运行 |
-| **工具** | openssh-client | Debian 仓库 | SSH 连接与密钥管理 | host-agent 依赖 |
+| **工具** | openssh-client | Debian 仓库 | SSH 连接与密钥管理 | 可选 |
 
 ### 1.2 内置配置文件
 
@@ -242,7 +242,7 @@ docker run -d \
 | `NAME` | `导航中心` | 无人值守安装：站点名称 |
 | `DOMAIN` | 空 | 无人值守安装：导航站域名 |
 | `NAV_DEV_MODE` | 空 | 开发模式，启用内置测试管理员 `qatest` |
-| `HOST_AGENT_INSTALL_MODE` | `host` | host-agent 安装模式：`host` 或 `simulate` |
+
 | `AUTH_SECRET_KEY` | 空 | 可选，显式指定认证密钥 |
 | `NAV_REQUEST_TIMING` | `1` | 请求耗时日志开关，设为 `0` 关闭 |
 
@@ -427,7 +427,7 @@ docker compose down -v
 □ .env 文件已加入 .gitignore，不提交到版本控制
 □ 定期备份 data/ 目录
 □ 容器内 Web / PHP-FPM / Nginx 进程以 navwww 身份运行
-□ host-agent 日常运行不挂载 docker.sock
+□ docker.sock 仅在需要时临时挂载
 □ Cookie Secure 模式已按实际访问协议配置
 ```
 

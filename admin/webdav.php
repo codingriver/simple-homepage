@@ -179,7 +179,7 @@ $editAccountRelations = $editAccount ? webdav_accounts_for_local_path(webdav_dis
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">保存 WebDAV 账号</button>
           <?php if ($editAccount): ?><a href="webdav.php" class="btn btn-secondary">取消编辑</a><?php endif; ?>
-          <?php if ($editAccount): ?><a href="files.php?host_id=local&path=<?= urlencode(webdav_display_local_root((string)($editAccount['root'] ?? '/'))) ?>" class="btn btn-secondary">打开文件系统目录</a><?php endif; ?>
+
         </div>
       </form>
       <?php if ($editAccount): ?>
@@ -209,8 +209,7 @@ $editAccountRelations = $editAccount ? webdav_accounts_for_local_path(webdav_dis
             <tr>
               <td style="font-weight:700"><?= htmlspecialchars((string)$account['username']) ?></td>
               <td style="font-family:var(--mono);font-size:12px">
-                <?= htmlspecialchars((string)$account['root']) ?><br>
-                <a href="files.php?host_id=local&path=<?= urlencode(webdav_display_local_root((string)($account['root'] ?? '/'))) ?>" style="font-family:inherit">打开目录</a>
+                <?= htmlspecialchars((string)$account['root']) ?>
               </td>
               <td><?= !empty($account['readonly']) ? '只读' : '读写' ?></td>
               <td style="font-size:12px;color:var(--tx2)">

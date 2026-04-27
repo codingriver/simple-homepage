@@ -30,15 +30,7 @@ function webdav_normalize_path(string $path): string {
 }
 
 function webdav_display_local_root(string $root): string {
-    $normalized = webdav_normalize_path($root);
-    $simulatePrefix = '/var/www/nav/data/host-agent-sim-root';
-    if (str_starts_with($normalized, $simulatePrefix . '/')) {
-        return webdav_normalize_path(substr($normalized, strlen($simulatePrefix)));
-    }
-    if ($normalized === $simulatePrefix) {
-        return '/';
-    }
-    return $normalized;
+    return webdav_normalize_path($root);
 }
 
 function webdav_read_accounts_file(): array {

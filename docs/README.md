@@ -16,9 +16,6 @@
 
 | 文档 | 说明 |
 |------|------|
-| [host-agent-package-manager.md](./host-agent-package-manager.md) | 软件包管理：9 种包管理器抽象、28 个包别名映射、安装/卸载/搜索/升级 |
-| [host-agent-config-manager.md](./host-agent-config-manager.md) | 配置管理：6 种服务配置、原子操作（备份→写入→校验→回滚→重载） |
-| [host-agent-manifest.md](./host-agent-manifest.md) | 声明式管理：Manifest DSL、预演(dry-run)/应用(apply)、包/服务/配置/用户状态对齐 |
 | [Docker宿主管理模块需求与设计文档.md](./Docker宿主管理模块需求与设计文档.md) | Docker 容器管理设计 |
 | [宿主机运维模块需求与设计文档.md](./宿主机运维模块需求与设计文档.md) | 宿主机运维功能设计 |
 | [文件系统模块需求与设计文档.md](./文件系统模块需求与设计文档.md) | 文件系统管理设计 |

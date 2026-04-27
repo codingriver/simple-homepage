@@ -39,7 +39,6 @@
 - [快速上手指南](#快速上手指南)
 - [自动创建管理员](#自动创建管理员)
 - [升级方法](#升级方法)
-- [Host-Agent 说明](#host-agent-说明)
 - [常用命令](#常用命令)
 - [数据保存在哪里](#数据保存在哪里)
 - [默认端口修改](#默认端口修改)
@@ -91,8 +90,6 @@
 - DNS 解析管理（阿里云 DNS、Cloudflare）
 - DDNS 动态解析，支持多 IP 来源与 fallback
 - 计划任务管理，支持立即执行、持续写日志、日志查看
-- 后台支持检测并一键安装 `host-agent`
-- 主机管理页可查看和管理本机 SSH 服务、进程、服务、网络、用户
 - 计划任务统一工作目录固定为 `data/tasks`
 - 每个计划任务的脚本会落地保存为 `data/tasks/<脚本文件名>.sh`
 - 计划任务脚本和运行日志都落地在 `data/tasks/`
@@ -168,9 +165,7 @@ services:
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里
       - ./data:/var/www/nav/data
-      # 可选：只在后台一键安装 / 升级 host-agent 时临时挂载
-      # 确认 host-agent 正常后建议移除
-      - /var/run/docker.sock:/var/run/docker.sock
+      # - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:
       disable: true
@@ -362,41 +357,6 @@ docker compose up -d
 > ```
 
 ---
-
-## Host-Agent 说明
-
-如果你要在后台里使用"宿主机能力桥接"相关功能（如文件系统、SSH 管理、进程/服务/网络查看），需要安装 `host-agent`。
-
-### 安装步骤
-
-1. 先临时在 `docker-compose.yml` 中取消 `docker.sock` 挂载的注释：
-
-```yaml
-volumes:
-  - ./data:/var/www/nav/data
-  - /var/run/docker.sock:/var/run/docker.sock
-```
-
-2. 重新启动容器：
-
-```bash
-docker compose up -d
-```
-
-3. 进入后台 **系统设置 → Host-Agent**，点击"一键安装"
-
-4. 确认 `host-agent` 状态正常后，**建议把这行挂载删掉**，重新执行 `docker compose up -d`
-
-> 平时运行更干净，只有安装、升级、重装 `host-agent` 时才需要重新挂载。
-
-### 运行模式
-
-| 模式 | 说明 | 适用场景 |
-|------|------|----------|
-| `host` | 真实宿主机模式，可操作真实系统文件和 SSH | 生产环境 |
-| `simulate` | 模拟模式，操作落在数据目录下的模拟根目录，不碰真实宿主机 | 开发/测试（默认） |
-
-开发/测试环境强烈建议使用 `simulate` 模式，避免误改宿主机 SSH 配置和系统文件。
 
 ---
 

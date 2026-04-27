@@ -67,10 +67,8 @@ COPY docker/php-fpm.conf     /usr/local/etc/php-fpm.d/nav.conf
 COPY docker/php-custom.ini   /usr/local/etc/php/conf.d/99-nav-custom.ini
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/entrypoint.sh    /entrypoint.sh
-COPY docker/host-agent-docker /usr/local/bin/host-agent-docker
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/host-agent-docker && \
-    ln -sf /usr/local/bin/host-agent-docker /usr/local/bin/nav-host-agent-docker
+RUN chmod +x /entrypoint.sh
 
 # ── 构建元数据（GitHub Actions 传入；本地 docker build 未传则为 unknown）──
 ARG GIT_COMMIT=unknown
@@ -110,8 +108,7 @@ RUN mkdir -p \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/bin/crontab' >> /etc/sudoers.d/nav-nginx && \
-    echo 'navwww ALL=(ALL) NOPASSWD: /usr/local/bin/host-agent-docker *' >> /etc/sudoers.d/nav-nginx && \
-    echo 'navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-host-agent-docker *' >> /etc/sudoers.d/nav-nginx && \
+
     chmod 440 /etc/sudoers.d/nav-nginx && \
     # 创建空的反代配置文件
     touch /etc/nginx/conf.d/nav-proxy.conf \
