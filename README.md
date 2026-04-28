@@ -12,9 +12,6 @@
 - ⏰ 计划任务（带日志、定时执行）
 - 💾 配置备份与恢复
 - 🔧 调试工具（日志、PHP 错误开关）
-- 🖥️ Host-Agent 一键安装入口
-- 📂 文件系统管理
-- 🐳 Docker 宿主管理
 - 🌐 WebDAV 服务端
 - 📢 Webhook 通知
 
@@ -80,8 +77,6 @@
 - **Nginx 反代**：后台一键生成配置并 Reload
 - **备份恢复**：导出、导入、手动备份、自动备份、恢复
 - **调试工具**：日志查看、Cookie 清理、PHP 错误显示切换
-- **文件系统**：本机 + 远程主机文件浏览、编辑、上传、下载、压缩解压
-- **Docker 管理**：容器、镜像、卷、网络查看与操作
 - **WebDAV**：Basic Auth + 配额 + 审计
 - **通知中心**：Telegram、飞书、钉钉、企业微信、自定义 Webhook
 
@@ -305,8 +300,6 @@ http://192.168.1.10:58080
 | DDNS | DDNS 管理 | 公网 IP 变动时自动更新域名解析 |
 | DNS | DNS 管理 | 管理阿里云/Cloudflare 的解析记录 |
 | 计划任务 | 计划任务 | 定时执行脚本，如自动清理、签到 |
-| 文件管理 | 文件系统 | 浏览器里直接浏览/编辑/上传宿主机文件 |
-| Docker 管理 | Docker 宿主 | 查看和管理本机容器、镜像、卷 |
 | 通知 | 通知中心 | 登录、任务失败时推送到微信/钉钉/TG |
 
 ---
@@ -656,26 +649,6 @@ ports:
    ```bash
    docker exec simple-homepage php /var/www/nav/manage_users.php reset
    ```
-
----
-
-### Q8: Host-Agent 一键安装失败
-
-**排查：**
-
-1. 确认 `docker-compose.yml` 中挂载了 `docker.sock`：
-   ```yaml
-   - /var/run/docker.sock:/var/run/docker.sock
-   ```
-
-2. 确认容器内有权限访问 docker.sock：
-   ```bash
-   docker exec simple-homepage ls -la /var/run/docker.sock
-   ```
-
-3. 查看后台提示的具体错误信息，通常是网络问题或宿主机 Docker 版本不兼容。
-
-4. 安装成功后，**建议移除 `docker.sock` 挂载**，避免长期暴露 Docker API。
 
 ---
 
