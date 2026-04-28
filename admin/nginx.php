@@ -20,6 +20,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   require_once __DIR__ . '/shared/functions.php';
   csrf_check();
   $action = trim((string)($_POST['action'] ?? ''));
+
+  // ── 下载 Nginx 代理配置 ──
+  if ($action === 'gen_nginx') {
+      $cfg        = load_config();
+      $sites_data = load_sites();
+      $domain     = $cfg['nav_domain'] ?? 'nav.yourdomain.com';
+      $lines      = ['# Nginx 代理配置 — 由导航站自动生成于 ' . date('Y-m-d H:i:s'), ''];
+      foreach ($sites_data['groups'] as $grp) {
+          foreach ($grp['sites'] ?? [] as $s) {
+              if (($s['type'] ?? '') !== 'proxy') continue;
+              $target = $s['proxy_target'] ?? '';
+              $name   = $s['name'] ?? $s['id'];
+              if (($s['proxy_mode'] ?? 'path') === 'path') {
+                  $slug = $s['slug'] ?? $s['id'];
+                  $lines[] = "# {$name}";
+                  $lines[] = "location /p/{$slug}/ {";
+                  $lines[] = "    proxy_pass {$target}/;";
+                  $lines[] = "    proxy_set_header Host \$host;";
+                  $lines[] = "    proxy_set_header X-Real-IP \$remote_addr;";
+                  $lines[] = "}";
+                  $lines[] = '';
+              } else {
+                  $pd = $s['proxy_domain'] ?? '';
+                  if (!$pd) continue;
+                  $lines[] = "# {$name} (子域名模式)";
+                  $lines[] = 'server {';
+                  $lines[] = "    listen 443 ssl http2;";
+                  $lines[] = "    server_name {$pd};";
+                  $lines[] = "    location / { proxy_pass {$target}; }";
+                  $lines[] = '}';
+                  $lines[] = '';
+              }
+          }
+      }
+      $content = implode("\n", $lines);
+      header('Content-Type: text/plain; charset=utf-8');
+      header('Content-Disposition: attachment; filename="nav_proxy_' . date('Ymd_His') . '.conf"');
+      header('Content-Length: ' . strlen($content));
+      echo $content; exit;
+  }
+
+  // ── 自动生成代理配置并写入 + reload ──
+  if ($action === 'nginx_apply' || $action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
+      $do_reload = ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload');
+      $result = nginx_apply_proxy_conf($do_reload);
+
+      if (!$result['ok']) {
+          flash_set('error', $result['msg']);
+          header('Location: nginx.php#proxy'); exit;
+      }
+
+      if ($do_reload) {
+          nginx_mark_applied();
+      }
+      audit_log('nginx_apply', ['reload' => $do_reload, 'ok' => $result['ok']]);
+      flash_set('success', $result['msg']);
+      $redirect = ($action === 'nginx_apply_and_reload') ? 'nginx.php' : 'nginx.php#proxy';
+      header('Location: ' . $redirect); exit;
+  }
+
+  // ── 保存反代参数模式 ──
+  if ($action === 'save_proxy_params_mode') {
+      $cfg = load_config();
+      $cfg['proxy_params_mode'] = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+      save_config($cfg);
+      audit_log('save_proxy_params_mode', ['mode' => $cfg['proxy_params_mode']]);
+      flash_set('success', '反代参数模式已保存');
+      header('Location: nginx.php#proxy'); exit;
+  }
+
   $ptarget = trim((string)($_POST['target'] ?? 'main'));
   if (!isset($targets[$ptarget])) {
     flash_set('error', '未知配置目标');
@@ -140,6 +210,117 @@ $editorError = (string)($currentEditor['error'] ?? '');
     <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--tm)">Nginx 可执行路径</div><div style="margin-top:4px;font-family:var(--mono)"><?= htmlspecialchars($cap['nginx_bin']) ?></div></div>
     <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--tm)">语法检查能力</div><div style="margin-top:4px;color:<?= $cap['ok'] ? 'var(--green)' : 'var(--yellow)' ?>"><?= htmlspecialchars($cap['msg']) ?></div></div>
   </div>
+</div>
+
+<?php
+$proxy_conf_path = nginx_proxy_conf_path();
+$conf_exists     = file_exists($proxy_conf_path);
+$conf_mtime      = $conf_exists ? date('Y-m-d H:i:s', filemtime($proxy_conf_path)) : null;
+$proxy_count = 0;
+foreach (load_sites()['groups'] ?? [] as $g)
+    foreach ($g['sites'] ?? [] as $s)
+        if (($s['type'] ?? '') === 'proxy') $proxy_count++;
+?>
+
+<div class="card" id="proxy">
+  <div class="card-title">🔀 Nginx 代理配置生成
+    <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">基于站点数据自动生成</span>
+  </div>
+
+  <!-- Reload 执行环境：首屏不 exec，进入本区域时异步检测 -->
+  <div id="nginx-sudo-banner" style="min-height:0"></div>
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:18px">
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;flex:1;min-width:200px">
+      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">配置文件</div>
+      <div style="font-size:13px;font-family:monospace"><?= htmlspecialchars($proxy_conf_path) ?></div>
+      <div style="margin-top:6px">
+        <?php if ($conf_exists): ?>
+        <span class="badge badge-green">已生成</span>
+        <span style="font-size:11px;color:var(--tm);margin-left:6px">上次更新：<?= $conf_mtime ?></span>
+        <?php else: ?>
+        <span class="badge badge-gray">未生成</span>
+        <?php endif; ?>
+      </div>
+    </div>
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;min-width:120px">
+      <div style="font-size:11px;color:var(--tm);margin-bottom:4px">Proxy 站点数</div>
+      <div style="font-size:28px;font-weight:700;color:var(--ac2)"><?= $proxy_count ?></div>
+    </div>
+  </div>
+
+  <!-- 反代参数模式选择 -->
+  <?php $ppm = $cfg['proxy_params_mode'] ?? 'simple'; ?>
+  <div style="margin-bottom:16px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 18px">
+    <div style="font-size:12px;color:var(--tm);margin-bottom:10px;font-weight:600">📦 反代参数模板</div>
+    <form method="POST" id="proxy-params-mode-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save_proxy_params_mode">
+      <label data-ppm-card="simple" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
+        <input type="radio" name="proxy_params_mode" value="simple" <?= $ppm==='simple'?'checked':'' ?> id="ppm_simple" style="margin-top:2px;accent-color:var(--ac)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（14 条参数 · 超时 60s）</span></div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">HTTP/1.1、WebSocket 升级、Host / IP / Proto 透传、连接 10s + 读写 60s 超时、基础缓冲。<br>适合普通 Web 应用，<b>默认推荐</b>，小白首选。</div>
+        </div>
+      </label>
+      <label data-ppm-card="full" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
+        <input type="radio" name="proxy_params_mode" value="full" <?= $ppm==='full'?'checked':'' ?> id="ppm_full" style="margin-top:2px;accent-color:var(--ac)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（60+ 条参数 · 超时 86400s）</span></div>
+          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">WebSocket 全头透传、断点续传、Cookie / Auth / CORS 透传、流媒体无缓冲、无限超时（86400s）、全量响应头直通。<br>适合视频流、大文件、SSH 隧道、长连接等复杂场景。</div>
+        </div>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:8px;align-self:center">
+        <button type="submit" class="btn btn-primary" style="white-space:nowrap">💾 保存模式</button>
+        <?php if ($proxy_count > 0): ?>
+        <span style="font-size:11px;color:var(--tm);text-align:center">保存后需 Reload<br>才能生效</span>
+        <?php endif; ?>
+      </div>
+    </form>
+    <div class="form-hint" style="margin-top:8px">
+      切换模式后需点击下方「生成配置并 Reload Nginx」重新生成配置文件才会生效。<?php if ($proxy_count > 0): ?> <span style="color:#fbbf24">当前有 <?= $proxy_count ?> 个代理站点，切换后请及时 Reload。</span><?php endif; ?>
+    </div>
+  </div>
+
+  <!-- 操作按钮 -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <form method="POST" id="nginx-reload-form" style="display:inline"><?= csrf_field() ?>
+      <input type="hidden" name="action" value="nginx_reload">
+      <button class="btn btn-primary" id="nginx-reload-btn">
+        🔄 生成配置并 Reload Nginx
+      </button>
+    </form>
+    <form method="POST" style="display:inline"><?= csrf_field() ?>
+      <input type="hidden" name="action" value="nginx_apply">
+      <button class="btn btn-secondary">📝 仅生成配置文件（不 reload）</button>
+    </form>
+    <form method="POST" style="display:inline"><?= csrf_field() ?>
+      <input type="hidden" name="action" value="gen_nginx">
+      <button class="btn btn-secondary">⬇ 下载配置文件</button>
+    </form>
+  </div>
+
+  <!-- 配置文件预览 -->
+  <?php if ($conf_exists): ?>
+  <details style="margin-top:4px">
+    <summary style="cursor:pointer;font-size:13px;color:var(--tm);user-select:none">
+      查看当前配置文件内容 ▸
+    </summary>
+    <pre style="margin-top:10px;background:var(--bg);border:1px solid var(--bd);
+border-radius:8px;padding:14px;font-size:11px;font-family:monospace;color:#a5f3a5;
+overflow-x:auto;max-height:300px;overflow-y:auto"><?=
+      htmlspecialchars(@file_get_contents($proxy_conf_path) ?: '（读取失败）')
+    ?></pre>
+  </details>
+  <?php endif; ?>
+
+  <div class="alert alert-info" style="margin-top:16px">
+    ℹ️ 点击「生成配置并 Reload」将自动写入
+    <code style="font-size:11px">/etc/nginx/conf.d/nav-proxy.conf</code>
+    并执行 Nginx 语法检测与 Reload。
+    语法检测失败时会中止 reload 并显示错误信息。
+  </div>
+  <div id="nginx-reload-note" class="form-hint" style="margin-top:10px">按钮始终可点击；环境检测未通过时，提交后会显示明确错误原因。</div>
 </div>
 
 <div class="card" id="nginx-nav-card">
@@ -323,6 +504,113 @@ $editorError = (string)($currentEditor['error'] ?? '');
   });
 
   renderTarget(currentTarget, currentTab);
+})();
+
+// ── 反代参数模式选择卡片联动 ──
+function selectPPM(val) {
+    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
+    radios.forEach(function(radio) {
+        if (val) {
+            radio.checked = radio.value === val;
+        }
+        var card = radio.closest('[data-ppm-card]');
+        if (!card) return;
+        var isSelected = !!radio.checked;
+        card.style.borderColor = isSelected ? 'var(--ac)' : 'var(--bd)';
+        card.style.background  = isSelected ? 'rgba(99,179,237,.08)' : 'var(--sf)';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
+    radios.forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            selectPPM();
+        });
+        var card = radio.closest('[data-ppm-card]');
+        if (!card) return;
+        card.addEventListener('click', function() {
+            radio.checked = true;
+            selectPPM();
+        });
+    });
+    selectPPM();
+});
+
+// ── Nginx 代理配置生成环境检测 ──
+(function initNginxLazy() {
+    var nginxReloadForm = document.getElementById('nginx-reload-form');
+    var nginxReloadBtn = document.getElementById('nginx-reload-btn');
+    var nginxReloadNote = document.getElementById('nginx-reload-note');
+    var nginxSubmitting = false;
+
+    function setNginxReloadUi(state, note) {
+        if (nginxReloadBtn) {
+            if (state === 'submitting') {
+                nginxReloadBtn.disabled = true;
+                nginxReloadBtn.textContent = '处理中...';
+            } else {
+                nginxReloadBtn.disabled = false;
+                nginxReloadBtn.textContent = '🔄 生成配置并 Reload Nginx';
+            }
+        }
+        if (nginxReloadNote && note) {
+            nginxReloadNote.textContent = note;
+        }
+    }
+
+    if (nginxReloadForm) {
+        nginxReloadForm.addEventListener('submit', function() {
+            if (nginxSubmitting) return false;
+            nginxSubmitting = true;
+            setNginxReloadUi('submitting', '正在生成配置并触发 Nginx Reload，请稍候...');
+        });
+    }
+
+    var nginxLoaded = false;
+    function loadNginxSudoOnce() {
+        if (nginxLoaded) return;
+        nginxLoaded = true;
+        var el = document.getElementById('nginx-sudo-banner');
+        if (!el) return;
+        setNginxReloadUi('checking', '正在检测 Nginx reload 运行环境...');
+        fetch('settings_ajax.php?action=nginx_sudo', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if (!d.ok) {
+                    setNginxReloadUi('ready', '环境检测失败，但仍可尝试提交，失败时会显示具体原因。');
+                    return;
+                }
+                if (d.reload_ok) {
+                    el.innerHTML = '';
+                    setNginxReloadUi('ready', d.message || '环境检测通过，可以直接生成配置并 Reload。');
+                    return;
+                }
+                var html = '<div class="alert alert-warn">⚠️ ' + escHtml(d.message || '未检测到可用的 Nginx reload 执行权限。');
+                if (d.sudo_hint) {
+                    html += '<br>请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre>';
+                }
+                html += '</div>';
+                el.innerHTML = html;
+                setNginxReloadUi('warn', '环境检测未通过，点击按钮后会返回明确错误；也可以先按上方提示补齐执行权限。');
+            })
+            .catch(function(){
+                setNginxReloadUi('ready', '环境检测请求失败，但仍可尝试提交，失败时会显示具体原因。');
+            });
+    }
+
+    var nginx = document.getElementById('proxy');
+    if (window.IntersectionObserver) {
+        if (nginx) {
+            var io2 = new IntersectionObserver(function(entries){
+                entries.forEach(function(e){ if (e.isIntersecting) loadNginxSudoOnce(); });
+            }, { rootMargin: '80px' });
+            io2.observe(nginx);
+        }
+    } else {
+        if (nginx) loadNginxSudoOnce();
+    }
+    if (location.hash === '#proxy') loadNginxSudoOnce();
 })();
 </script>
 

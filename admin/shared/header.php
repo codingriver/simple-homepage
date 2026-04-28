@@ -48,8 +48,10 @@ $nav_items = [
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
 
     ['sep'],
-    ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
-    ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],
+    ['file' => 'settings.php',      'icon' => '⚙️', 'label' => '系统设置'],
+    ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知管理'],
+    ['file' => 'health_check.php',  'icon' => '💚', 'label' => '健康检测'],
+    ['file' => 'backups.php',       'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'sessions.php', 'icon' => '📱', 'label' => '会话管理'],
     ['file' => 'logs.php',     'icon' => '📄', 'label' => '日志中心'],

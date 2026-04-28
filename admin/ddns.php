@@ -1,8 +1,31 @@
 <?php
 declare(strict_types=1);
 
-$page_title = 'DDNS 动态解析';
 require_once __DIR__ . '/shared/ddns_lib.php';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_once __DIR__ . '/shared/functions.php';
+    $user = auth_get_current_user();
+    if (!$user || ($user['role'] ?? '') !== 'admin') {
+        header('Location: /login.php'); exit;
+    }
+    csrf_check();
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'clear_ddns_tasks') {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        @set_time_limit(0);
+        backup_create('auto_clear_ddns_tasks');
+        $result = ddns_clear_all_tasks();
+        audit_log('clear_ddns_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
+        flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条 DDNS 任务，并同步清理日志与系统调度器');
+        header('Location: ddns.php'); exit;
+    }
+}
+
+$page_title = 'DDNS 动态解析';
 require_once __DIR__ . '/shared/header.php';
 
 $allTasks = ddns_load_tasks()['tasks'] ?? [];
@@ -609,5 +632,19 @@ document.addEventListener('DOMContentLoaded', function(){
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') { closeDdnsModal(); closeDdnsLogModal(); } });
 });
 </script>
+
+<div class="card">
+  <div class="card-title" style="color:#ff9f43">⚠ 危险操作</div>
+  <div class="form-hint" style="margin-bottom:12px">
+    下列操作会先自动创建备份，再执行清空。会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <form method="POST" onsubmit="return confirm('确认清空全部 DDNS 任务？\n\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。');">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="clear_ddns_tasks">
+      <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
+    </form>
+  </div>
+</div>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>
