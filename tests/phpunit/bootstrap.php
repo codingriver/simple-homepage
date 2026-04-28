@@ -15,7 +15,7 @@ if (!is_dir($tmpDir)) {
 define('DATA_DIR', $tmpDir);
 
 require_once __DIR__ . '/../../shared/auth.php';
-require_once __DIR__ . '/../../shared/notify_runtime.php';
+
 require_once __DIR__ . '/../../admin/shared/functions.php';
 
 register_shutdown_function(function () use ($tmpDir) {

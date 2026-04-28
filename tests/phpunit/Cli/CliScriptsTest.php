@@ -60,13 +60,6 @@ CODE
         $this->assertStringContainsString('invalid task id', strtolower($result['output']));
     }
 
-    public function testCheckExpiryOutputFormat(): void
-    {
-        $result = $this->runCli('cli/check_expiry.php');
-        $this->assertSame(0, $result['exitCode']);
-        $this->assertStringContainsString('expiry scan finished', $result['output']);
-    }
-
     public function testDdnsSyncWithInvalidIdReturnsExitCode1(): void
     {
         $result = $this->runCli('cli/ddns_sync.php', ['nonexistent-id']);

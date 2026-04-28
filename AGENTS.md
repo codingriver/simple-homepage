@@ -7,7 +7,7 @@
 
 ## 项目概述
 
-**Simple Homepage**（私有导航首页）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管导航面板。它不只是书签页，还集成了站点/分组管理、反向代理入口、DNS 管理、DDNS 动态解析、计划任务、配置备份与恢复、Host-Agent 宿主机运维桥接、Docker 管理、WebDAV、Webhook 通知等能力。
+**Simple Homepage**（私有导航首页）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管导航面板。它不只是书签页，还集成了站点/分组管理、反向代理入口、DNS 管理、DDNS 动态解析、计划任务、配置备份与恢复、Webhook 通知等能力。
 
 - **GitHub**: https://github.com/codingriver/simple-homepage
 - **Docker Hub**: https://hub.docker.com/r/codingriver/simple-homepage
@@ -44,7 +44,7 @@
 | `Dockerfile` | 多阶段构建：`php:8.2-fpm-bookworm` + Nginx + Supervisor + Cron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、反代配置预生成、sudo 白名单设置 |
 | `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
-| `docker/nginx.conf` / `nginx-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存、WebDAV 方法透传 |
+| `docker/nginx.conf` / `nginx-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；支持代理环境变量透传 |
 | `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新、启用 `NAV_DEV_MODE`、临时挂载 `docker.sock` |
 | `local/docker-compose.test.yml` | 测试环境叠加配置：定义 `playwright-full`、`playwright-mobile`、`lighthouse` 服务 |
@@ -63,8 +63,7 @@ public/          # 前台入口
   logout.php     # 退出登录（清除 Cookie）
   bg.php         # 背景图安全输出（防路径遍历）
   favicon.php    # Favicon 代理抓取（SSRF 防护、缓存 7 天、魔数校验）
-  webdav.php     # WebDAV 服务器（OPTIONS/PROPFIND/GET/PUT/DELETE/MKCOL/MOVE/COPY）
-  notify_probe.php # 通知探针（用于健康检查/通知通道可用性探测）
+
   sw.js          # Service Worker（PWA 缓存策略）
   gesture-guard.js # 移动端手势拦截（防止边缘滑动返回）
   manifest.webmanifest # PWA 清单
@@ -78,14 +77,13 @@ admin/           # 后台管理页面和 AJAX API
   *.php          # 后台页面（共 39 个，按功能分组如下）
     站点与分组：sites.php、groups.php
     用户与认证：users.php、sessions.php、login_logs.php
-    系统与设置：settings.php、configs.php、notifications.php
+    系统与设置：settings.php、configs.php
     网络与代理：nginx.php、dns.php、ddns.php
     宿主机与 Docker：hosts.php、host_runtime.php、docker_hosts.php、manifests.php、packages.php
     文件与审计：files.php、file_audit.php、ssh_audit.php、share_service_audit.php
     任务与计划：scheduled_tasks.php、tasks.php、task_templates.php
     备份与日志：backups.php、logs.php、logs_api.php
-    健康与证书：health_check.php、expiry.php
-    WebDAV：webdav.php、webdav_shares.php、webdav_audit.php
+    健康与证书：health_check.php
     调试：debug.php、index.php（后台首页）
   *_ajax.php / *_api.php  # AJAX 端点（ddns_ajax.php、settings_ajax.php、sessions_api.php 等）
   api/           # 后台专用 API（task_status.php、task_log.php）
@@ -100,14 +98,13 @@ admin/           # 后台管理页面和 AJAX API
 shared/          # 核心共享库（前后台共用）
   auth.php           # 核心认证库：JWT-like Token、Cookie、用户管理、IP 锁定、CSRF、会话撤销、权限系统
   http_client.php    # 带 SSRF 防护的 HTTP 客户端（curl 优先，fallback 到 file_get_contents）
-  notify_runtime.php # 统一通知运行时：Telegram/Feishu/DingTalk/WeCom/Webhook，事件过滤与冷却
+  request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
   request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
 
 cli/             # CLI 脚本
   run_scheduled_task.php   # 计划任务执行器（硬超时 3600s、PID 锁、僵尸锁清理）
   ddns_sync.php            # DDNS 同步
   alidns_sync.php          # 阿里云 DNS 同步
-  check_expiry.php         # 证书/域名过期检查
   health_check_cron.php    # 健康检查定时任务
   manage_users.php         # 用户管理 CLI（list/info/add/passwd/del/reset）
 
@@ -336,7 +333,6 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - `configs.php`：系统配置编辑
 - **保持现状（≤5 行短文本，无需改造）**：
   - `sites.php`：站点备注（3 行）
-  - `webdav.php`：IP 白名单
 
 #### 10.1 NavAceEditor 统一封装接口完整规范
 
@@ -673,7 +669,7 @@ function openLogViewer(logContent, logName) {
 
 1. **P0（先封装）**：实现 `admin/shared/ace_editor_modal.php` 统一接口，将 `files.php`、`nginx.php`、`logs.php` 迁移到统一接口，验证稳定性。
 2. **P1（再迁移）**：改造 `hosts.php`（5 处多行文本）、`scheduled_tasks.php`、`manifests.php`。
-3. **P2（最后）**：改造 `settings.php`（2 处）、`dns.php`、`configs.php`。`sites.php` 和 `webdav.php` 保持 `<textarea>` 不变。
+3. **P2（最后）**：改造 `settings.php`（2 处）、`dns.php`、`configs.php`。`sites.php` 保持 `<textarea>` 不变。
 
 ---
 
@@ -691,7 +687,7 @@ function openLogViewer(logContent, logName) {
 - **测试规范**: 必须遵守 `docs/测试用例编写规范.md` 中的维度清单（权限、异常、边界、状态、响应式、数据一致性等）。
 - **数据隔离**:
   - `tests/helpers/fixtures.ts` 扩展 Playwright base test，在每个测试前自动调用 `resetVolatileAppData()`。
-  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，重置 `sites.json` 为空分组、清空日志和备份、重置各类任务/通知/会话等 JSON。
+  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，重置 `sites.json` 为空分组、清空日志和备份、重置各类任务/会话等 JSON。
   - 创建型数据需使用唯一值（`Date.now()` 时间戳），禁止测试间残留数据依赖。
   - 修改全局配置/文件后需在 `try/finally` 中回滚。
 - **定位策略**: 优先使用 `getByRole` / `getByLabel`，其次稳定 `id/name`，禁止把 `waitForTimeout` 当作主要同步手段。
@@ -709,7 +705,7 @@ function openLogViewer(logContent, logName) {
   - `Shared` 套件（4 个）：`AuthTest`、`NotifyTest`、`RequestTimingTest`、`SessionManagementTest`
   - `Admin` 套件（5 个）：`ApiTokenTest`、`AuditLogTest`、`HealthCheckTest`、`SharedFunctionsTest`、`ThemeConfigTest`
   - `Subsite` 套件：当前暂无测试类
-  - 涵盖范围：Token 生成验证、密码哈希、用户生命周期、IP 锁定、通知渠道 CRUD、备份创建/恢复、Nginx 配置生成、API Token、审计日志、主题配置等。
+  - 涵盖范围：Token 生成验证、密码哈希、用户生命周期、IP 锁定、备份创建/恢复、Nginx 配置生成、API Token、审计日志、主题配置等。
 
 ### Lighthouse 性能测试
 
@@ -742,7 +738,7 @@ function openLogViewer(logContent, logName) {
 - `scheduled_tasks.json` — 计划任务
 - `dns_config.json` — DNS 配置
 - `ddns_tasks.json` — DDNS 任务
-- `notifications.json` — 通知渠道
+
 - `ip_locks.json` — IP 登录失败锁定
 - `sessions.json` — 会话撤销记录
 - `auth_secret.key` — 认证密钥（权限 600）
@@ -789,7 +785,7 @@ function openLogViewer(logContent, logName) {
 - **P0**: `subsite-middleware/auth_check.php` 中 `_nav_token` Cookie 写入/URL 清理逻辑位于 `exit` 之后，正常流程下不可达。
 - **P1**: `public/index.php` 体积过大（880+ 行），承担职责过多；`admin/shared/functions.php` 中的 `admin_run_command()` 缺少超时控制。
 - **P1**: Webhook HTTP 请求逻辑存在重复代码，未统一收敛到 `shared/http_client.php`。
-- **P2**: 缺少统一异常处理层；配置读取缺少统一抽象；权限粒度较粗；测试层对 `shared/auth.php`、`shared/notify_runtime.php`、`shared/request_timing.php` 缺少底层单元测试。
+- **P2**: 缺少统一异常处理层；配置读取缺少统一抽象；权限粒度较粗；测试层对 `shared/auth.php`、`shared/request_timing.php` 缺少底层单元测试。
 
 ---
 

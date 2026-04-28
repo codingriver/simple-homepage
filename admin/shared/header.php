@@ -46,8 +46,7 @@ $nav_items = [
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
-    ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知中心'],
-    ['file' => 'expiry.php',   'icon' => '📆', 'label' => '到期管理'],
+
     ['sep'],
     ['file' => 'settings.php', 'icon' => '⚙️', 'label' => '系统设置'],
     ['file' => 'backups.php',  'icon' => '💾', 'label' => '备份恢复'],

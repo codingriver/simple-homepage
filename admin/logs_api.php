@@ -23,7 +23,7 @@ $logSources = [
     'request_timing' => ['path' => DATA_DIR . '/logs/request_timing.log', 'category' => 'app', 'label' => '请求耗时日志',      'clearable' => true],
     'dns'            => ['path' => DATA_DIR . '/logs/dns.log',        'category' => 'app', 'label' => 'DNS 日志',          'clearable' => true],
     'dns_python'     => ['path' => DATA_DIR . '/logs/dns_python.log', 'category' => 'app', 'label' => 'DNS Python 日志',   'clearable' => true],
-    'notifications'  => ['path' => DATA_DIR . '/logs/notifications.log', 'category' => 'app', 'label' => '通知日志',         'clearable' => true],
+
     'auth'           => ['path' => DATA_DIR . '/logs/auth.log',       'category' => 'app', 'label' => '登录认证日志',      'clearable' => true],
     'audit'          => ['path' => DATA_DIR . '/logs/audit.log',      'category' => 'app', 'label' => '操作审计日志',      'clearable' => true],
 ];

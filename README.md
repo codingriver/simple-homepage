@@ -12,8 +12,7 @@
 - ⏰ 计划任务（带日志、定时执行）
 - 💾 配置备份与恢复
 - 🔧 调试工具（日志、PHP 错误开关）
-- 🌐 WebDAV 服务端
-- 📢 Webhook 通知
+- 🔗 Webhook 通知
 
 项目地址：
 
@@ -77,8 +76,6 @@
 - **Nginx 反代**：后台一键生成配置并 Reload
 - **备份恢复**：导出、导入、手动备份、自动备份、恢复
 - **调试工具**：日志查看、Cookie 清理、PHP 错误显示切换
-- **WebDAV**：Basic Auth + 配额 + 审计
-- **通知中心**：Telegram、飞书、钉钉、企业微信、自定义 Webhook
 
 ### 运维相关
 
@@ -300,7 +297,7 @@ http://192.168.1.10:58080
 | DDNS | DDNS 管理 | 公网 IP 变动时自动更新域名解析 |
 | DNS | DNS 管理 | 管理阿里云/Cloudflare 的解析记录 |
 | 计划任务 | 计划任务 | 定时执行脚本，如自动清理、签到 |
-| 通知 | 通知中心 | 登录、任务失败时推送到微信/钉钉/TG |
+
 
 ---
 
@@ -406,7 +403,7 @@ data/
 ├── scheduled_tasks.json    # 计划任务
 ├── dns_config.json         # DNS 配置
 ├── ddns_tasks.json         # DDNS 任务
-├── notifications.json      # 通知渠道
+
 ├── ip_locks.json           # IP 登录失败锁定
 ├── sessions.json           # 会话撤销记录
 ├── backups/                # 备份快照

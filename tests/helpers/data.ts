@@ -23,11 +23,8 @@ export async function resetVolatileAppData(): Promise<void> {
     'sessions.json': '{}',
     'ssh_hosts.json': '[]',
     'ssh_keys.json': '[]',
-    'expiry_scan.json': '{}',
-    'file_favorites.json': '[]',
-    'file_recent.json': '[]',
+
     'ip_locks.json': '{}',
-    'webdav_accounts.json': '{}',
   };
 
   // 重置 config.json 中易被测试污染的字段，保留其他全局配置
@@ -108,9 +105,7 @@ export async function resetVolatileAppData(): Promise<void> {
     { file: 'logs/audit.log', content: '' },
     { file: 'logs/ssh_audit.log', content: '' },
     { file: 'logs/share_service_audit.log', content: '' },
-    { file: 'logs/webdav.log', content: '' },
-    { file: 'logs/notifications.log', content: '' },
-    { file: 'logs/notify_probe.log', content: '' },
+
     { file: 'logs/ssh_manager_audit.log', content: '' },
     { file: 'logs/dns.log', content: '' },
     { file: 'logs/dns_python.log', content: '' },

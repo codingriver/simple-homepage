@@ -220,16 +220,7 @@ function homepage_render_site_card(array $site, array $group, string $href, stri
       <?php endforeach; ?>
     </div>
     <?php endif; ?>
-    <?php if (($domainDays !== null && $domainDays <= 30) || ($sslDays !== null && $sslDays <= 30)): ?>
-    <div class="expiry-row">
-      <?php if ($domainDays !== null && $domainDays <= 30): ?>
-      <span class="expiry-chip">域名 <?= $domainDays < 0 ? '已过期' : ('剩余 ' . $domainDays . ' 天') ?></span>
-      <?php endif; ?>
-      <?php if ($sslDays !== null && $sslDays <= 30): ?>
-      <span class="expiry-chip">SSL <?= $sslDays < 0 ? '已过期' : ('剩余 ' . $sslDays . ' 天') ?></span>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
+
     <div class="group-chip">#<?= htmlspecialchars((string)($group['name'] ?? '')) ?></div>
     <?php if (!empty($site['desc']) || $iconUrl !== '' || $notes !== '' || $renewUrl !== ''): ?>
     <div class="tt">
@@ -375,14 +366,14 @@ body.search-open .section-label{display:block}
 .quick-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
 .quick-title strong{font-size:13px}
 .quick-title span{font-size:11px;color:var(--tm)}
-.card-meta-line,.tag-row,.expiry-row{display:flex;gap:6px;flex-wrap:wrap}
+.card-meta-line,.tag-row{display:flex;gap:6px;flex-wrap:wrap}
 .card-meta-line{min-height:20px}
-.mini-badge,.tag-chip,.expiry-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:10px;line-height:1.5;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:var(--tx2)}
+.mini-badge,.tag-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:10px;line-height:1.5;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:var(--tx2)}
 .mini-star{background:rgba(251,191,36,.14);color:#fbbf24;border-color:rgba(251,191,36,.28)}
 .mini-pin{background:rgba(96,165,250,.14);color:#93c5fd;border-color:rgba(96,165,250,.24)}
 .mini-status{background:rgba(74,222,128,.12);color:#86efac;border-color:rgba(74,222,128,.24)}
 .tag-chip{color:var(--ac2);border-color:rgba(167,139,250,.22)}
-.expiry-chip{color:#fca5a5;border-color:rgba(248,113,113,.28);background:rgba(248,113,113,.1)}
+
 <?php
 // ── 方向映射 ──
 $dir_map = [

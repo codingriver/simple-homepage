@@ -69,11 +69,7 @@ function auth_default_config(): array {
         'webhook_url'         => '',
         'webhook_tg_chat'     => '',
         'webhook_events'      => 'FAIL,IP_LOCKED',
-        'webdav_enabled'      => '0',
-        'webdav_username'     => '',
-        'webdav_password_hash' => '',
-        'webdav_root'         => '/var/www/nav/data',
-        'webdav_readonly'     => '0',
+
         'ssh_terminal_persist' => '1',
         'ssh_terminal_idle_minutes' => 120,
         'task_execution_timeout' => 7200,
@@ -1244,14 +1240,7 @@ function auth_write_log(string $type, string $username, string $ip, string $note
     if (function_exists('webhook_send')) {
         webhook_send($type, $username, $ip, $note);
     }
-    if (in_array($type, ['FAIL', 'IP_LOCKED'], true) && function_exists('notify_event')) {
-        notify_event('login_abnormal', [
-            'type' => $type,
-            'username' => $username ?: '-',
-            'ip' => $ip,
-            'note' => $note,
-        ]);
-    }
+
 }
 
 /**

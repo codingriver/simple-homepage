@@ -14,83 +14,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $action = $_POST['action'] ?? '';
 
-        // ── 导出配置（与备份下载、backup_create 同一载荷：含计划任务与 DNS 账户）──
-        if ($action === 'export_sites' || $action === 'export_config') {
-            $export = backup_collect_payload('export');
-            $json = json_encode($export, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            header('Content-Type: application/json; charset=utf-8');
-            header('Content-Disposition: attachment; filename="nav_export_' . date('Ymd_His') . '.json"');
-            header('Content-Length: ' . strlen($json));
-            echo $json; exit;
-        }
-
-        // ── 导入配置（兼容备份格式和旧 sites-only 格式）──
-        if ($action === 'import_sites' || $action === 'import_config') {
-            if (empty($_FILES['import_file']['tmp_name'])) {
-                flash_set('error', '请选择要导入的文件');
-                header('Location: settings.php'); exit;
-            }
-            if ($_FILES['import_file']['size'] > 4 * 1024 * 1024) {
-                flash_set('error', '文件过大，配置文件不应超过 4MB');
-                header('Location: settings.php'); exit;
-            }
-            $raw = file_get_contents($_FILES['import_file']['tmp_name']);
-            if ($raw === false || strlen($raw) === 0) {
-                flash_set('error', '文件读取失败或文件为空');
-                header('Location: settings.php'); exit;
-            }
-            try {
-                $obj = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-            } catch (\JsonException $e) {
-                flash_set('error', 'JSON 格式解析错误：' . $e->getMessage());
-                header('Location: settings.php'); exit;
-            }
-            if (session_status() === PHP_SESSION_ACTIVE) {
-                session_write_close();
-            }
-            @set_time_limit(0);
-            backup_create('auto_import');
-            // 识别格式：新备份格式 {created_at, trigger, sites:{groups:[]}, config:{}}
-            //           旧格式 {groups:[]}
-            if (isset($obj['sites']['groups']) && is_array($obj['sites']['groups'])) {
-                // 新统一格式（与备份恢复一致，可选含 scheduled_tasks、dns_config）
-                $merged_cfg = !empty($obj['config']) && is_array($obj['config'])
-                    ? array_merge(auth_default_config(), $obj['config'])
-                    : auth_default_config();
-                $apply = [
-                    'sites'  => $obj['sites'],
-                    'config' => $merged_cfg,
-                ];
-                if (isset($obj['scheduled_tasks']) && is_array($obj['scheduled_tasks'])) {
-                    $apply['scheduled_tasks'] = $obj['scheduled_tasks'];
-                }
-                if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
-                    $apply['dns_config'] = $obj['dns_config'];
-                }
-                backup_apply_restored_sections($apply);
-                $gc = count($obj['sites']['groups']);
-                $parts = [$gc . ' 个分组'];
-                if (isset($apply['scheduled_tasks']) && is_array($apply['scheduled_tasks'])) {
-                    $tc = count($apply['scheduled_tasks']['tasks'] ?? []);
-                    $parts[] = $tc . ' 条计划任务';
-                }
-                if (isset($apply['dns_config'])) {
-                    $parts[] = 'DNS 账户已同步';
-                }
-                audit_log('settings_import', ['format' => 'full', 'groups' => $gc]);
-                flash_set('success', '导入成功（完整格式）：' . implode('，', $parts) . '；旧配置已自动备份');
-            } elseif (isset($obj['groups']) && is_array($obj['groups'])) {
-                // 旧 sites-only 格式
-                file_put_contents(SITES_FILE, json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-                audit_log('settings_import', ['format' => 'legacy', 'groups' => count($obj['groups'])]);
-                flash_set('success', '导入成功（站点格式），共 ' . count($obj['groups']) . ' 个分组，旧配置已自动备份');
-            } else {
-                flash_set('error', '文件结构无效：无法识别的配置格式，请使用导出配置或备份文件');
-                header('Location: settings.php'); exit;
-            }
-            header('Location: settings.php'); exit;
-        }
-
         // ── 下载 Nginx 配置 ──
         if ($action === 'gen_nginx') {
             $cfg        = load_config();
@@ -129,18 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Disposition: attachment; filename="nav_proxy_' . date('Ymd_His') . '.conf"');
             header('Content-Length: ' . strlen($content));
             echo $content; exit;
-        }
-
-        // ── 手动备份 ──
-        if ($action === 'manual_backup') {
-            if (session_status() === PHP_SESSION_ACTIVE) {
-                session_write_close();
-            }
-            @set_time_limit(0);
-            backup_create('manual');
-            audit_log('backup_create', ['trigger' => 'manual']);
-            flash_set('success', '备份已创建');
-            header('Location: settings.php'); exit;
         }
 
         if ($action === 'clear_scheduled_tasks') {
@@ -574,33 +485,6 @@ $cfg = auth_get_config();
   </form>
 </div>
 
-<!-- 数据管理 -->
-<div class="card">
-  <div class="card-title">📦 数据管理</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="POST"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="export_config">
-      <button class="btn btn-secondary">⬇ 导出配置</button>
-    </form>
-    <form method="POST" enctype="multipart/form-data" id="importForm"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="import_config">
-      <input type="file" name="import_file" accept=".json" id="importFile" style="display:none"
-             onchange="handleImportFile(this)">
-      <button type="button" class="btn btn-secondary" onclick="document.getElementById('importFile').click()">⬆ 导入配置</button>
-    </form>
-    <form method="POST"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="manual_backup">
-      <button class="btn btn-secondary">💾 立即备份</button>
-    </form>
-    <form method="POST"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="gen_nginx">
-      <button class="btn btn-secondary">⬇ 下载 Nginx 配置</button>
-    </form>
-    <a href="backups.php" class="btn btn-secondary">📋 备份管理</a>
-  </div>
-  <div class="form-hint" style="margin-top:10px">「导出配置」与「备份下载」为同一 JSON 结构（站点、系统配置、计划任务含脚本、DNS 解析账户）。不含用户账户、任务日志、<code>data/tasks/</code> 共享工作目录下的额外文件等。导入时自动识别格式。</div>
-</div>
-
 <div class="card">
   <div class="card-title" style="color:#ff9f43">⚠ 危险操作</div>
   <div class="form-hint" style="margin-bottom:12px">
@@ -621,59 +505,6 @@ $cfg = auth_get_config();
 </div>
 
 <script>
-// ── 导入配置前端校验（兼容备份格式和旧 sites-only 格式）──
-function handleImportFile(input) {
-    if (!input.files || !input.files.length) return;
-    var file = input.files[0];
-    if (file.size > 4 * 1024 * 1024) {
-        showToast('文件过大，配置文件不应超过 4MB', 'error');
-        input.value = '';
-        return;
-    }
-    var reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            var obj = JSON.parse(e.target.result);
-            var groupCount = 0;
-            var formatLabel = '';
-            if (obj && obj.sites && Array.isArray(obj.sites.groups)) {
-                // 新统一格式（备份/导出）
-                groupCount = obj.sites.groups.length;
-                var extras = [];
-                var tasks = obj.scheduled_tasks && obj.scheduled_tasks.tasks;
-                if (Array.isArray(tasks) && tasks.length) {
-                    extras.push('计划任务 ' + tasks.length + ' 条（含脚本）');
-                }
-                if (obj.dns_config && typeof obj.dns_config === 'object') {
-                    extras.push('DNS 账户');
-                }
-                formatLabel = '完整备份格式，' + groupCount + ' 个分组及系统配置' +
-                    (extras.length ? '，另含 ' + extras.join('、') : '');
-            } else if (obj && Array.isArray(obj.groups)) {
-                // 旧 sites-only 格式
-                groupCount = obj.groups.length;
-                formatLabel = '站点格式，含 ' + groupCount + ' 个分组';
-            } else {
-                showToast('无法识别的配置格式，请使用导出配置或备份文件', 'error');
-                input.value = '';
-                return;
-            }
-            if (!confirm('确认导入？' + formatLabel + '，当前配置将被覆盖（自动备份）')) {
-                input.value = '';
-                return;
-            }
-            document.getElementById('importForm').submit();
-        } catch(err) {
-            showToast('JSON 格式解析错误：' + err.message, 'error');
-            input.value = '';
-        }
-    };
-    reader.onerror = function() {
-        showToast('文件读取失败，请重试', 'error');
-        input.value = '';
-    };
-    reader.readAsText(file, 'utf-8');
-}
 // ── 卡片尺寸自定义输入联动 ──
 function syncCustom(field) {
     var sel = document.getElementById(field + '_sel');

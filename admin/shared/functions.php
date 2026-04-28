@@ -4,7 +4,6 @@
  * 包含：站点数据读写、配置读写、CSRF、Flash消息、备份/恢复、统计
  */
 require_once __DIR__ . '/../../shared/auth.php';
-require_once __DIR__ . '/../../shared/notify_runtime.php';
 require_once __DIR__ . '/../../shared/http_client.php';
 
 // 数据文件路径常量
@@ -257,7 +256,6 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
     $tpl_file  = DATA_DIR . '/task_templates.json';
-    $notify_file = DATA_DIR . '/notifications.json';
     $scheduled_tasks = file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [];
     if (is_array($scheduled_tasks)) {
         require_once __DIR__ . '/cron_lib.php';
@@ -278,7 +276,6 @@ function backup_collect_payload(string $trigger = 'manual'): array {
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
         'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
         'task_templates'  => file_exists($tpl_file) ? (json_decode(file_get_contents($tpl_file), true) ?? []) : [],
-        'notifications'   => file_exists($notify_file) ? (json_decode(file_get_contents($notify_file), true) ?? []) : [],
     ];
 }
 
@@ -293,7 +290,6 @@ function backup_apply_restored_sections(array $data): void {
     $wrote_dns  = false;
     $wrote_ddns = false;
     $wrote_templates = false;
-    $wrote_notifications = false;
 
     if (isset($data['sites'])) {
         file_put_contents(SITES_FILE,
@@ -310,7 +306,6 @@ function backup_apply_restored_sections(array $data): void {
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
     $tpl_file  = DATA_DIR . '/task_templates.json';
-    $notify_file = DATA_DIR . '/notifications.json';
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
         file_put_contents($st_file,
             json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -337,13 +332,6 @@ function backup_apply_restored_sections(array $data): void {
             LOCK_EX);
         $wrote_templates = true;
     }
-    if (isset($data['notifications']) && is_array($data['notifications'])) {
-        file_put_contents($notify_file,
-            json_encode($data['notifications'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            LOCK_EX);
-        $wrote_notifications = true;
-    }
-
     if ($wrote_st) {
         require_once __DIR__ . '/cron_lib.php';
         cron_regenerate();
@@ -357,9 +345,6 @@ function backup_apply_restored_sections(array $data): void {
     }
     if ($wrote_templates && !file_exists($tpl_file)) {
         file_put_contents($tpl_file, json_encode(['version' => 1, 'templates' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    }
-    if ($wrote_notifications && !file_exists($notify_file)) {
-        file_put_contents($notify_file, json_encode(['version' => 1, 'channels' => []], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
     }
 }
 
@@ -731,7 +716,7 @@ function debug_read_log(string $type, int $lines = 100): string {
         'request_timing' => DATA_DIR . '/logs/request_timing.log',
         'dns'            => DATA_DIR . '/logs/dns.log',
         'dns_python'     => DATA_DIR . '/logs/dns_python.log',
-        'notifications'  => DATA_DIR . '/logs/notifications.log',
+
         'auth'           => DATA_DIR . '/logs/auth.log',
         'audit'          => DATA_DIR . '/logs/audit.log',
     ];
