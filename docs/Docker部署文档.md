@@ -31,17 +31,17 @@ docker compose version    # Docker Compose version v2.x.x
 | 资源 | 最低 | 推荐 | 说明 |
 |---|---|---|---|
 | CPU | 1 核 | 2 核 | PHP-FPM 进程池默认 4 个工作进程 |
-| 内存 | 128MB | 256MB+ | Debian 单容器方案，兼容性优先 |
-| 磁盘 | 500MB | 1GB+ | 镜像约 180MB + 数据目录 |
+| 内存 | 64MB | 128MB+ | Alpine 单容器方案，极致轻量 |
+| 磁盘 | 300MB | 500MB+ | 镜像约 150MB + 数据目录 |
 | 端口 | 任意空闲端口 | 58080（默认）| 可通过 `NAV_PORT` 修改 |
 
 ### 0.3 操作系统支持
 
 | 系统 | 支持情况 | 备注 |
 |---|---|---|
-| Ubuntu 20.04+ / Debian 11+ | ✅ 推荐 | 最佳兼容性 |
+| Ubuntu 20.04+ / Debian 11+ | ✅ 推荐 | Docker 宿主机最佳兼容性 |
 | CentOS 7/8 / RHEL | ✅ 支持 | 需手动安装 Docker |
-| Alpine Linux | ⚠️ 不再作为默认镜像基础 | 如需极小镜像需自行维护兼容性 |
+| Alpine Linux | ✅ 镜像本身基于 Alpine | 宿主机为 Alpine 时同样兼容 |
 | macOS（Apple Silicon / Intel）| ✅ 支持 | 需安装 Docker Desktop |
 | Windows 10/11（WSL2）| ✅ 支持 | 需安装 Docker Desktop + WSL2 |
 | 宝塔面板服务器 | ✅ 支持 | 宝塔软件商店可直接安装 Docker |
@@ -76,20 +76,20 @@ docker compose version    # Docker Compose version v2.x.x
 
 | 层级 | 组件 | 版本 | 来源 | 说明 |
 |---|---|---|---|---|
-| **基础系统** | Debian Bookworm | 12（随 php:8.2-fpm-bookworm）| Docker 官方镜像 | 兼容第三方 Linux 二进制更好 |
-| **运行时** | PHP | 8.2-fpm | `php:8.2-fpm-bookworm` | 当前默认版本 |
-| **Web 服务器** | Nginx | Debian 仓库稳定版 | `apt-get install nginx` | 处理静态文件和 PHP 转发 |
-| **进程管理** | Supervisor | Debian 仓库稳定版 | `apt-get install supervisor` | 管理 Nginx + PHP-FPM + Cron 生命周期 |
+| **基础系统** | Alpine Linux | 3.19+（随 php:8.2-fpm-alpine）| Docker 官方镜像 | 极致轻量，支持 amd64/arm64 |
+| **运行时** | PHP | 8.2-fpm | `php:8.2-fpm-alpine` | 当前默认版本，musl libc |
+| **Web 服务器** | Nginx | Alpine 仓库稳定版 | `apk add nginx` | 处理静态文件和 PHP 转发 |
+| **进程管理** | Supervisor | Alpine 仓库稳定版 | `apk add supervisor` | 管理 Nginx + PHP-FPM + Cron 生命周期 |
 | **PHP 扩展** | `fileinfo` | 随 PHP 编译 | `docker-php-ext-install` | 背景图 MIME 检测（可选增强）|
 | **PHP 扩展** | `session` | PHP 核心内置 | 内置 | Cookie/Session 管理 |
 | **PHP 扩展** | `json` | PHP 7.1+ 永久内置 | 内置 | 数据文件读写 |
 | **PHP 扩展** | `hash` | PHP 7.4+ 永久内置 | 内置 | Token 签名和比对 |
 | **PHP 扩展** | `pcre` | PHP 4+ 内置 | 内置 | 正则校验 |
-| **工具** | curl | Debian 仓库 | `apt-get install curl` | 健康检查探针 |
-| **工具** | tzdata | Debian 仓库 | `apt-get install tzdata` | 时区数据库 |
-| **工具** | bash | Debian 仓库 | `apt-get install bash` | 启动脚本依赖 |
-| **工具** | cron | Debian 仓库 | 计划任务调度 | 容器内自动运行 |
-| **工具** | openssh-client | Debian 仓库 | SSH 连接与密钥管理 | 可选 |
+| **工具** | curl | Alpine 仓库 | `apk add curl` | 健康检查探针 |
+| **工具** | tzdata | Alpine 仓库 | `apk add tzdata` | 时区数据库 |
+| **工具** | bash | Alpine 仓库 | `apk add bash` | 启动脚本与任务脚本依赖 |
+| **工具** | dcron | Alpine 仓库 | `apk add dcron` | 计划任务调度，兼容标准 crontab |
+| **工具** | openssh-client | Alpine 仓库 | `apk add openssh-client` | SSH 连接与密钥管理 |
 
 ### 1.2 内置配置文件
 

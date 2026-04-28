@@ -1,42 +1,41 @@
 # ============================================================
 # 导航网站 Docker 镜像
-# 基础：php:8.2-fpm-bookworm + Nginx（单容器方案）
+# 基础：php:8.2-fpm-alpine + Nginx（单容器方案）
+# 支持架构：linux/amd64、linux/arm64
 # PHP 版本：8.2（可替换为 8.1 / 8.0 / 7.4 / 7.3）
 # ============================================================
-FROM php:8.2-fpm-bookworm
+FROM php:8.2-fpm-alpine
 
 # ── 代理策略 ──
 # 不在镜像中显式写入 HTTP(S)_PROXY/NO_PROXY。
 # 构建期与运行期均跟随宿主机 / Docker 自身代理配置。
 
 # ── 安装系统依赖 ──
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Alpine 使用 apk，--no-cache 避免残留索引
+RUN apk add --no-cache \
     nginx \
     supervisor \
-    passwd \
+    shadow \
     tzdata \
     sudo \
-    cron \
+    dcron \
     python3 \
-    # fileinfo 扩展依赖
-    libmagic1 \
-    libmagic-dev \
+    py3-pip \
+    # fileinfo 扩展依赖 libmagic
+    file \
+    file-dev \
     # 工具
     curl \
     bash \
     openssh-client \
     sshpass \
-    gettext-base \
-    file \
+    gettext \
     binutils \
     ca-certificates \
-    procps \
-    psmisc \
     iproute2 \
     net-tools \
     less \
-    vim-tiny && \
-    rm -rf /var/lib/apt/lists/*
+    vim
 
 # ── 设置时区 ──
 ARG TZ=Asia/Shanghai
@@ -44,20 +43,18 @@ RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone
 
 # ── 安装 PHP 扩展 ──
-# fileinfo（可选，背景图 MIME 检测增强）
-RUN docker-php-ext-install fileinfo
-
-# session 已内置，json/hash/pcre 均为核心内置，无需额外安装
+# fileinfo 在 php:8.2-fpm-alpine 中已默认内置，无需额外安装
+# session/json/hash/pcre 均为核心内置
 
 # ── 创建运行用户（与 Nginx worker 统一）──
-RUN groupadd -g 1000 navwww && \
-    useradd -m -u 1000 -g navwww -s /bin/sh navwww && \
-    usermod -aG crontab,sudo navwww
+RUN addgroup -g 1000 navwww && \
+    adduser -u 1000 -G navwww -s /bin/sh -D navwww && \
+    addgroup navwww wheel
 
 # ── 复制项目文件 ──
 COPY --chown=navwww:navwww . /var/www/nav/
 
-# ── 预创建配置目录（Debian Nginx 默认不提供 http.d）──
+# ── 预创建配置目录 ──
 RUN mkdir -p /etc/nginx/http.d /etc/nginx/conf.d
 
 # ── 复制配置文件 ──
@@ -103,7 +100,6 @@ RUN mkdir -p \
     /etc/nginx/conf.d && \
     # 删除默认站点配置（会拦截所有请求返回 404）
     rm -f /etc/nginx/http.d/default.conf && \
-    rm -f /etc/nginx/sites-enabled/default && \
     # 配置 sudo 白名单，允许 navwww 执行 nginx -t 和 nginx -s reload
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \

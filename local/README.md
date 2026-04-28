@@ -11,7 +11,9 @@
 
 如果你只是第一次部署项目，先看根目录的 [README.md](../README.md) 就够了。
 
-当前镜像基础已切换到 Debian 系 `php:8.2-fpm-bookworm`。相比 Alpine，镜像体积会更大，但计划任务里执行常见第三方 Linux 二进制的兼容性更好。
+当前镜像基础为 `php:8.2-fpm-alpine`（Alpine Linux，musl libc）。相比 Debian 系，Alpine 镜像体积更小（基础 ~80MB，最终 ~150MB），适合 NAS、软路由、VPS 等资源受限场景。支持 `linux/amd64` 和 `linux/arm64` 双架构。
+
+> 注意：Alpine 使用 musl libc（而非 glibc），绝大多数 PHP 应用和常见 CLI 工具均可正常运行。如果在计划任务中执行第三方预编译二进制，请确认其支持 musl 或 Alpine 环境。
 
 ## 1. 生产部署的进阶参数
 

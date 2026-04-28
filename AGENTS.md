@@ -23,7 +23,7 @@
 | **前端** | 原生 HTML/CSS/JS（无 React/Vue/Angular/jQuery 等现代前端框架） |
 | **Web 服务器** | Nginx + PHP-FPM（Unix socket `/run/nginx/php-fpm.sock`） |
 | **进程管理** | Supervisor（容器内同时管理 Nginx、PHP-FPM、Cron、Nginx-Reload-Watcher） |
-| **容器化** | Docker，基于 `php:8.2-fpm-bookworm`（Debian 系），支持 `linux/amd64` 和 `linux/arm64` |
+| **容器化** | Docker，基于 `php:8.2-fpm-alpine`（Alpine Linux，musl libc），支持 `linux/amd64` 和 `linux/arm64` |
 | **测试** | Playwright 1.54.2（E2E）、PHPUnit 11（单元）、Lighthouse CI 0.15.1（性能） |
 | **包管理** | Composer（PHP）、npm（仅开发依赖） |
 | **辅助脚本** | Python 3（`python/dns_core.py`）、Bash（`docker/entrypoint.sh`、`local/docker-build.sh`） |
@@ -41,7 +41,7 @@
 | `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data` |
 | `phpunit.xml` | PHPUnit 配置：三个测试套件 `Shared` / `Admin` / `Subsite`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
-| `Dockerfile` | 多阶段构建：`php:8.2-fpm-bookworm` + Nginx + Supervisor + Cron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
+| `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + Supervisor + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、反代配置预生成、sudo 白名单设置 |
 | `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
 | `docker/nginx.conf` / `nginx-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |

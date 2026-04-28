@@ -9,8 +9,8 @@ umask 027
 echo "[entrypoint] 导航网站容器启动..."
 
 # ── 环境变量默认值 ──
-NAV_PORT=${NAV_PORT:-58080}
-TZ=${TZ:-Asia/Shanghai}
+export NAV_PORT=${NAV_PORT:-58080}
+export TZ=${TZ:-Asia/Shanghai}
 PUID=${PUID:-}
 PGID=${PGID:-}
 
