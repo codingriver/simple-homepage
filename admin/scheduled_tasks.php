@@ -35,8 +35,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: scheduled_tasks.php'); exit;
         }
         if (!cron_validate_schedule($sched)) {
-            flash_set('error', 'Cron 表达式无效（需至少 5 个时间字段）');
-            header('Location: scheduled_tasks.php'); exit;
+            $sched = '0 * * * *';
+            $schedResetNotice = true;
+        } else {
+            $schedResetNotice = false;
         }
         $found = false;
         $taskRow = null;
@@ -75,8 +77,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         save_scheduled_tasks($data);
         $r = cron_regenerate();
-        flash_set($r['ok'] ? 'success' : 'error',
-            $r['ok'] ? '已保存并更新 crontab' : $r['msg']);
+        $msg = $r['ok'] ? '已保存并更新 crontab' : $r['msg'];
+        if ($r['ok'] && !empty($schedResetNotice)) {
+            $msg .= '（注意：执行周期格式错误，已自动重置为每小时运行一次 0 * * * *）';
+        }
+        flash_set($r['ok'] ? 'success' : 'error', $msg);
         header('Location: scheduled_tasks.php'); exit;
     }
 

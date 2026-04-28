@@ -1190,7 +1190,7 @@ function cron_validate_schedule(string $line): bool {
         return false;
     }
     $parts = preg_split('/\s+/', $line);
-    return count($parts) >= 5 && $parts[0] !== '' && $parts[1] !== '' && $parts[2] !== '' && $parts[3] !== '' && $parts[4] !== '';
+    return count($parts) === 5 && $parts[0] !== '' && $parts[1] !== '' && $parts[2] !== '' && $parts[3] !== '' && $parts[4] !== '';
 }
 
 function cron_regenerate(): array {
@@ -1199,6 +1199,8 @@ function cron_regenerate(): array {
     $lines[] = '# simple-homepage generated — do not edit by hand';
     $lines[] = 'SHELL=/bin/bash';
     $lines[] = 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+
+    $lineToTask = []; // lineNumber (1-based) => ['id'=>..., 'name'=>...]
 
     $data = load_scheduled_tasks();
     foreach ($data['tasks'] ?? [] as $t) {
@@ -1219,10 +1221,25 @@ function cron_regenerate(): array {
             . ' /var/www/nav/cli/run_scheduled_task.php '
             . escapeshellarg($id);
         $lines[] = $sched . ' ' . $cmd;
+        $lineToTask[count($lines)] = ['id' => $id, 'name' => (string)($t['name'] ?? '')];
     }
 
     $content = implode("\n", $lines) . "\n";
-    return cron_install_stdin($content);
+    $result = cron_install_stdin($content);
+    if (!$result['ok']) {
+        $errMsg = (string)($result['msg'] ?? '');
+        // 尝试解析 crontab 错误中的行号，如 "-":4: bad command
+        if (preg_match('/"-":(\d+):/i', $errMsg, $m)) {
+            $badLine = (int)$m[1];
+            if (isset($lineToTask[$badLine])) {
+                $badTask = $lineToTask[$badLine];
+                $result['msg'] = 'crontab 第 ' . $badLine . ' 行语法错误（任务：' . ($badTask['name'] ?: $badTask['id'])
+                    . '）。请检查该任务的「执行周期」是否为标准 5 字段 Cron 格式（如 */5 * * * *），'
+                    . '不要写成 6 字段（带秒）或其他非常规格式。原始错误：' . $errMsg;
+            }
+        }
+    }
+    return $result;
 }
 
 /**
@@ -1457,7 +1474,7 @@ function cron_execute_task(string $id): array {
  */
 function cron_next_run(string $expr): string|false {
     $parts = preg_split('/\s+/', trim($expr));
-    if (count($parts) < 5) return false;
+    if (count($parts) !== 5) return false;
     [$min, $hour, $dom, $mon, $dow] = $parts;
 
     $expand = function(string $field, int $lo, int $hi): array {
