@@ -22,13 +22,10 @@ RUN apk add --no-cache \
     sudo \
     dcron \
     python3 \
-    py3-pip \
     file \
     file-dev \
     curl \
     bash \
-    openssh-client \
-    sshpass \
     gettext \
     ca-certificates
 
@@ -114,7 +111,6 @@ RUN mkdir -p \
     chown -R navwww:navwww /var/lib/nginx && \
     chmod -R 755 /var/lib/nginx/tmp && \
     # 设置权限
-    chown -R navwww:navwww /var/www/nav && \
     chmod 750 /var/www/nav/data && \
     chmod 755 /var/www/nav/data/bg \
               /var/www/nav/data/favicon_cache \

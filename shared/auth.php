@@ -70,8 +70,6 @@ function auth_default_config(): array {
         'webhook_tg_chat'     => '',
         'webhook_events'      => 'FAIL,IP_LOCKED',
 
-        'ssh_terminal_persist' => '1',
-        'ssh_terminal_idle_minutes' => 120,
         'task_execution_timeout' => 7200,
         'nginx_last_applied'  => 0,
         'fs_allowed_roots'    => [],
@@ -836,26 +834,8 @@ function auth_role_labels(): array {
 function auth_role_permissions_map(): array {
     return [
         'admin' => ['*'],
-        'host_admin' => [
-            'ssh.view',
-            'ssh.manage',
-            'ssh.config.manage',
-            'ssh.service.manage',
-            'ssh.batch',
-            'ssh.remote_hosts',
-            'ssh.keys',
-            'ssh.files',
-            'ssh.files.write',
-            'ssh.terminal',
-            'ssh.audit',
-            'ssh.audit.export',
-            'ssh.package.manage',
-        ],
-        'host_viewer' => [
-            'ssh.view',
-            'ssh.audit',
-            'ssh.files',
-        ],
+        'host_admin' => [],
+        'host_viewer' => [],
         'user' => [],
     ];
 }

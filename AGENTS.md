@@ -79,8 +79,8 @@ admin/           # 后台管理页面和 AJAX API
     用户与认证：users.php、sessions.php、login_logs.php
     系统与设置：settings.php、configs.php
     网络与代理：nginx.php、dns.php、ddns.php
-    宿主机与 Docker：hosts.php、host_runtime.php、docker_hosts.php、manifests.php、packages.php
-    文件与审计：files.php、file_audit.php、ssh_audit.php、share_service_audit.php
+    宿主机与 Docker：host_runtime.php、docker_hosts.php、manifests.php、packages.php
+    文件与审计：files.php、file_audit.php、share_service_audit.php
     任务与计划：scheduled_tasks.php、tasks.php、task_templates.php
     备份与日志：backups.php、logs.php、logs_api.php
     健康与证书：health_check.php
@@ -273,7 +273,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 - **Ace Editor 是项目默认的多行文本编辑器**。所有涉及多行文本输入/编辑的场景，**内容预期超过 5 行时**，必须使用 Ace Editor 弹窗打开；5 行及以内的短文本可直接使用原生 `<textarea>`，无需强制接入 Ace Editor。
 - **统一入口：所有后台页面调用文本编辑器时，必须使用 `admin/shared/ace_editor_modal.php` 提供的 `NavAceEditor` 接口**。禁止各页面自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML。页面只需在加载 `ace.js` 和 `ext-searchbox.js` 后引入 `admin/shared/ace_editor_modal.php`，然后调用 `NavAceEditor.open({...})` 即可。
-- **判断标准**：按字段的业务语义判断（如 SSH 配置文件、Nginx 配置、计划任务脚本、JSON/YAML 导入等必然超过 5 行）；若无法确定，默认走 Ace Editor 弹窗。
+- **判断标准**：按字段的业务语义判断（如 Nginx 配置、计划任务脚本、JSON/YAML 导入等必然超过 5 行）；若无法确定，默认走 Ace Editor 弹窗。
 - **统一资源引用**：`<script src="assets/ace/ace.js"></script>`，`admin/assets/ace/` 目录已包含 ace.js、ext-searchbox.js、mode-nginx.js、theme-tomorrow_night.js 等核心文件。
 - **统一基础配置**：
   - 默认主题：`ace/theme/tomorrow_night`
@@ -319,13 +319,12 @@ if (session_status() === PHP_SESSION_NONE) session_start();
     6. **`onAction`**：统一回调接口，所有按钮点击（含快捷键触发的保存）都通过此回调分发，页面在此处理业务逻辑（AJAX 提交、表单提交、关闭弹窗等）。
     7. **左侧按钮**：通常放置脏标记、语法检查、预览等辅助操作；右侧按钮放置保存、关闭、删除等主操作。两侧按钮各自按配置顺序从左到右排列。
   - **各页面典型按钮组合示例**：
-    - **纯编辑保存**（如 SSH 配置）：左侧 `[dirty]`，右侧 `[关闭, 保存]`
+    - **纯编辑保存**（如自定义 CSS）：左侧 `[dirty]`，右侧 `[关闭, 保存]`
     - **编辑 + 语法检查**（如 Nginx 配置）：左侧 `[dirty, 检查语法]`，右侧 `[关闭, 保存, 保存并 Reload]`
     - **文件管理**（如 files.php）：左侧 `[dirty]`，右侧 `[关闭, 下载, 删除, 保存]`
     - **只读查看**（如 logs.php）：左侧 `[]`，右侧 `[关闭]`
 - **参考实现**：`admin/files.php` 中的文件管理器弹窗编辑器（`fm-editor-modal`）和 `admin/nginx.php` 中的 Nginx 配置编辑器弹窗。
 - **待改造清单**（当前仍使用原生 `<textarea>`，需逐步替换为 Ace Editor 弹窗）：
-  - `hosts.php`：SSH 配置编辑（2 处）、私钥内容、authorized_keys、known_hosts、文件内容编辑
   - `scheduled_tasks.php`：计划任务命令脚本
   - `settings.php`：自定义 CSS、文件系统允许根目录
   - `dns.php`：DNS JSON 批量导入
@@ -500,46 +499,7 @@ NavAceEditor.open({
 
 ##### 七、完整接入示例
 
-**场景 1：SSH 配置编辑（AJAX 读写）**
-
-```javascript
-// 页面只需一个「打开编辑器」按钮
-function openSshEditor() {
-  NavAceEditor.open({
-    title: '编辑 SSH 配置',
-    mode: 'sh',
-    value: document.getElementById('ssh-config-hidden').value,
-    buttons: {
-      left:  [{ type: 'dirty' }],
-      right: [
-        { text: '关闭', class: 'btn-secondary', action: 'close' },
-        { text: '保存', class: 'btn-primary', action: 'save' }
-      ]
-    },
-    onAction: function(action, value) {
-      if (action === 'save') {
-        fetch('/admin/hosts.php', {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          body: new URLSearchParams({ action: 'save_ssh_config', ssh_config: value, _csrf: window._csrf })
-        }).then(r => r.json()).then(data => {
-          if (data.ok) {
-            NavAceEditor.markClean();
-            showToast('SSH 配置已保存', 'success');
-          } else {
-            showToast(data.msg || '保存失败', 'error');
-          }
-        });
-      }
-      if (action === 'close') {
-        NavAceEditor.close();
-      }
-    }
-  });
-}
-```
-
-**场景 2：Nginx 配置编辑（Form 桥接）**
+**场景 1：Nginx 配置编辑（Form 桥接）**
 
 ```javascript
 function openNginxEditor(targetContent) {
@@ -668,7 +628,7 @@ function openLogViewer(logContent, logName) {
 #### 10.2 改造优先级建议
 
 1. **P0（先封装）**：实现 `admin/shared/ace_editor_modal.php` 统一接口，将 `files.php`、`nginx.php`、`logs.php` 迁移到统一接口，验证稳定性。
-2. **P1（再迁移）**：改造 `hosts.php`（5 处多行文本）、`scheduled_tasks.php`、`manifests.php`。
+2. **P1（再迁移）**：改造 `scheduled_tasks.php`、`manifests.php`。
 3. **P2（最后）**：改造 `settings.php`（2 处）、`dns.php`、`configs.php`。`sites.php` 保持 `<textarea>` 不变。
 
 ---

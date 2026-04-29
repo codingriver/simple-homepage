@@ -92,6 +92,12 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
                     $apply['dns_config'] = $obj['dns_config'];
                 }
+                if (isset($obj['ddns_tasks']) && is_array($obj['ddns_tasks'])) {
+                    $apply['ddns_tasks'] = $obj['ddns_tasks'];
+                }
+                if (isset($obj['task_templates']) && is_array($obj['task_templates'])) {
+                    $apply['task_templates'] = $obj['task_templates'];
+                }
                 backup_apply_restored_sections($apply);
                 $gc = count($obj['sites']['groups']);
                 $parts = [$gc . ' 个分组'];
@@ -101,6 +107,18 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if (isset($apply['dns_config'])) {
                     $parts[] = 'DNS 账户已同步';
+                }
+                if (isset($apply['ddns_tasks'])) {
+                    $dc = count($apply['ddns_tasks']['tasks'] ?? []);
+                    if ($dc > 0) {
+                        $parts[] = $dc . ' 条 DDNS 任务';
+                    }
+                }
+                if (isset($apply['task_templates'])) {
+                    $tplc = count($apply['task_templates']['templates'] ?? []);
+                    if ($tplc > 0) {
+                        $parts[] = $tplc . ' 个任务模板';
+                    }
                 }
                 audit_log('settings_import', ['format' => 'full', 'groups' => $gc]);
                 flash_set('success', '导入成功（完整格式）：' . implode('，', $parts) . '；旧配置已自动备份');
@@ -230,7 +248,7 @@ function trigger_badge(string $t): string {
   <div class="card-title">ℹ️ 备份方案说明</div>
   <ul style="color:var(--tm);font-size:13px;line-height:2;padding-left:18px">
     <li><strong>单文件 JSON</strong>：与「设置 → 导出配置」结构相同，一条记录对应一次快照。</li>
-    <li><strong>包含内容</strong>：<code>sites</code>（站点分组）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）。</li>
+    <li><strong>包含内容</strong>：<code>sites</code>（站点分组）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）、<code>ddns_tasks</code>（DDNS 动态解析任务）、<code>task_templates</code>（任务模板）。</li>
     <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务脚本与运行日志（<code>data/tasks/*.sh</code>、<code>data/tasks/*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
     <li><strong>恢复与导入</strong>：写入计划任务后会重新生成系统 crontab；写入 DNS 配置后会清除本机 DNS Zone 缓存。</li>
     <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的；恢复或导入前会先自动备份当前状态。</li>
@@ -263,6 +281,14 @@ function handleImportFile(input) {
                 }
                 if (obj.dns_config && typeof obj.dns_config === 'object') {
                     extras.push('DNS 账户');
+                }
+                var ddnsTasks = obj.ddns_tasks && obj.ddns_tasks.tasks;
+                if (Array.isArray(ddnsTasks) && ddnsTasks.length) {
+                    extras.push('DDNS 任务 ' + ddnsTasks.length + ' 条');
+                }
+                var taskTemplates = obj.task_templates && obj.task_templates.templates;
+                if (Array.isArray(taskTemplates) && taskTemplates.length) {
+                    extras.push('任务模板 ' + taskTemplates.length + ' 个');
                 }
                 formatLabel = '完整备份格式，' + groupCount + ' 个分组及系统配置' +
                     (extras.length ? '，另含 ' + extras.join('、') : '');
