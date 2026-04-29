@@ -81,7 +81,7 @@ admin/           # 后台管理页面和 AJAX API
     网络与代理：nginx.php、dns.php、ddns.php
     宿主机与 Docker：host_runtime.php、docker_hosts.php、manifests.php、packages.php
     文件与审计：files.php、file_audit.php、share_service_audit.php
-    任务与计划：scheduled_tasks.php、tasks.php、task_templates.php
+    任务与计划：scheduled_tasks.php、tasks.php
     备份与日志：backups.php、logs.php、logs_api.php
     健康与证书：health_check.php
     调试：debug.php、index.php（后台首页）

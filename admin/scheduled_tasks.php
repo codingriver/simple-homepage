@@ -35,10 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: scheduled_tasks.php'); exit;
         }
         if (!cron_validate_schedule($sched)) {
-            $sched = '0 * * * *';
-            $schedResetNotice = true;
-        } else {
-            $schedResetNotice = false;
+            flash_set('error', '执行周期格式无效：' . htmlspecialchars($sched) . ' 不是合法的 5 段 Cron 表达式（如 */5 * * * *）');
+            header('Location: scheduled_tasks.php'); exit;
         }
         $found = false;
         $taskRow = null;
@@ -77,11 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         save_scheduled_tasks($data);
         $r = cron_regenerate();
-        $msg = $r['ok'] ? '已保存并更新 crontab' : $r['msg'];
-        if ($r['ok'] && !empty($schedResetNotice)) {
-            $msg .= '（注意：执行周期格式错误，已自动重置为每小时运行一次 0 * * * *）';
-        }
-        flash_set($r['ok'] ? 'success' : 'error', $msg);
+        flash_set($r['ok'] ? 'success' : 'error', $r['ok'] ? '已保存并更新 crontab' : $r['msg']);
         header('Location: scheduled_tasks.php'); exit;
     }
 
@@ -144,16 +138,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: scheduled_tasks.php'); exit;
     }
 
-    /* ------ 重新安装 crontab ------ */
-    if ($action === 'cron_reload') {
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-        $r = cron_regenerate();
-        flash_set($r['ok'] ? 'success' : 'error',
-            $r['ok'] ? '已重新安装 crontab' : $r['msg']);
-        header('Location: scheduled_tasks.php'); exit;
-    }
 }
 
 $page_title = '计划任务';
@@ -222,12 +206,6 @@ $CSRF = csrf_field();
 <!-- ===== 工具栏 ===== -->
 <div class="toolbar">
   <button type="button" class="btn btn-primary" onclick="openTaskModal(null)">＋ 新建任务</button>
-  <a href="task_templates.php" class="btn btn-secondary">🧱 任务模板</a>
-  <form method="POST" style="display:inline">
-    <?= csrf_field() ?>
-    <input type="hidden" name="action" value="cron_reload">
-    <button type="submit" class="btn btn-secondary">↺ 重新安装 crontab</button>
-  </form>
   <span style="color:var(--tm);font-size:12px">管理员可执行任意 shell，请自行评估风险。</span>
 </div>
 
@@ -662,20 +640,73 @@ function closeTaskModal() {
   document.getElementById('task-modal').style.display = 'none';
 }
 
-/* 实时预览下次运行时间（简单客户端提示，5段基本格式）*/
+/* 严格验证单个 cron 字段（与后端 cron_validate_field 等价） */
+function validateCronField(field, min, max) {
+  if (!field || /[^0-9*,\-\/]/.test(field)) return false;
+  var parts = field.split(',');
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i];
+    if (part === '*') continue;
+    var slashIdx = part.indexOf('/');
+    if (slashIdx !== -1) {
+      var range = part.substring(0, slashIdx);
+      var step = part.substring(slashIdx + 1);
+      if (!step || !/^\d+$/.test(step) || parseInt(step, 10) < 1) return false;
+      if (range !== '*') {
+        var dashIdx = range.indexOf('-');
+        if (dashIdx !== -1) {
+          var s = parseInt(range.substring(0, dashIdx), 10);
+          var e = parseInt(range.substring(dashIdx + 1), 10);
+          if (isNaN(s) || isNaN(e) || s < min || e > max || s > e) return false;
+        } else {
+          var v = parseInt(range, 10);
+          if (isNaN(v) || v < min || v > max) return false;
+        }
+      }
+    } else if (part.indexOf('-') !== -1) {
+      var dashIdx = part.indexOf('-');
+      var s = parseInt(part.substring(0, dashIdx), 10);
+      var e = parseInt(part.substring(dashIdx + 1), 10);
+      if (isNaN(s) || isNaN(e) || s < min || e > max || s > e) return false;
+    } else {
+      var v = parseInt(part, 10);
+      if (isNaN(v) || v < min || v > max) return false;
+    }
+  }
+  return true;
+}
+
+/* 严格验证 5 段 Cron 表达式 */
+function validateCronSchedule(expr) {
+  var v = (expr || '').trim();
+  if (!v || /[\r\n]/.test(v)) return { ok: false, msg: '不能为空' };
+  var parts = v.split(/\s+/);
+  if (parts.length !== 5) return { ok: false, msg: '需 5 个时间字段（分 时 日 月 周）' };
+  var ranges = [[0,59,'分'], [0,23,'时'], [1,31,'日'], [1,12,'月'], [0,6,'周']];
+  for (var i = 0; i < 5; i++) {
+    if (!validateCronField(parts[i], ranges[i][0], ranges[i][1])) {
+      return { ok: false, msg: '第 ' + (i + 1) + ' 段（' + ranges[i][2] + '）格式无效：' + parts[i] };
+    }
+  }
+  return { ok: true };
+}
+
+/* 实时预览下次运行时间 */
 function updateNextTip() {
   var tip = document.getElementById('fm-next-tip');
   var v = (document.getElementById('fm-schedule').value || '').trim();
-  if (/^(\S+ ){4}\S+/.test(v)) {
-    tip.textContent = '✓ 格式看起来正确';
-  } else if (v === '') {
+  if (v === '') {
     tip.textContent = '';
-  } else {
-    tip.textContent = '⚠ 请填写 5 个时间字段';
-    tip.style.color = 'var(--yellow)';
     return;
   }
-  tip.style.color = 'var(--ac)';
+  var result = validateCronSchedule(v);
+  if (result.ok) {
+    tip.textContent = '✓ Cron 格式合法';
+    tip.style.color = 'var(--ac)';
+  } else {
+    tip.textContent = '⚠ ' + result.msg;
+    tip.style.color = 'var(--yellow)';
+  }
 }
 
 function taskExitBadgeHtml(code) {
@@ -803,7 +834,20 @@ function pollTaskStatuses() {
 
 document.addEventListener('DOMContentLoaded', function(){
   var inp = document.getElementById('fm-schedule');
-  if (inp) inp.addEventListener('input', updateNextTip);
+  if (inp) {
+    inp.addEventListener('input', updateNextTip);
+    inp.addEventListener('blur', function() {
+      var v = (inp.value || '').trim();
+      if (!v) return;
+      var result = validateCronSchedule(v);
+      if (!result.ok) {
+        showToast('Cron 表达式无效：' + result.msg, 'error');
+        inp.style.borderColor = 'var(--red)';
+      } else {
+        inp.style.borderColor = '';
+      }
+    });
+  }
   switchScheduledTab('tasks');
   taskStatusPollingStopped = false;
   pollTaskStatuses();

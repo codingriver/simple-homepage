@@ -1181,16 +1181,85 @@ function cron_sync_ddns_dispatcher_task(): array {
     ];
 }
 
-function cron_validate_schedule(string $line): bool {
-    $line = trim($line);
-    if ($line === '') {
+/**
+ * 严格验证单个 cron 字段。
+ * 支持的语法：* 、 n 、 n,m 、 n-m 、 * /step 、 n-m/step
+ *
+ * @param string $field cron 字段值
+ * @param int $min 最小允许值
+ * @param int $max 最大允许值
+ * @return bool
+ */
+function cron_validate_field(string $field, int $min, int $max): bool {
+    if ($field === '' || preg_match('/[^0-9*,\-\/]/', $field)) {
         return false;
     }
-    if (preg_match('/[\r\n]/', $line)) {
+    foreach (explode(',', $field) as $part) {
+        if ($part === '*') {
+            continue;
+        }
+        if (str_contains($part, '/')) {
+            [$range, $step] = explode('/', $part, 2);
+            if ($step === '' || !ctype_digit($step) || (int)$step < 1) {
+                return false;
+            }
+            if ($range !== '*' && str_contains($range, '-')) {
+                [$start, $end] = explode('-', $range, 2);
+                if ($start === '' || $end === '' || !ctype_digit($start) || !ctype_digit($end)) {
+                    return false;
+                }
+                $s = (int)$start;
+                $e = (int)$end;
+                if ($s < $min || $e > $max || $s > $e) {
+                    return false;
+                }
+            } elseif ($range !== '*') {
+                if (!ctype_digit($range)) {
+                    return false;
+                }
+                $v = (int)$range;
+                if ($v < $min || $v > $max) {
+                    return false;
+                }
+            }
+        } elseif (str_contains($part, '-')) {
+            [$start, $end] = explode('-', $part, 2);
+            if ($start === '' || $end === '' || !ctype_digit($start) || !ctype_digit($end)) {
+                return false;
+            }
+            $s = (int)$start;
+            $e = (int)$end;
+            if ($s < $min || $e > $max || $s > $e) {
+                return false;
+            }
+        } else {
+            if (!ctype_digit($part)) {
+                return false;
+            }
+            $v = (int)$part;
+            if ($v < $min || $v > $max) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function cron_validate_schedule(string $line): bool {
+    $line = trim($line);
+    if ($line === '' || preg_match('/[\r\n]/', $line)) {
         return false;
     }
     $parts = preg_split('/\s+/', $line);
-    return count($parts) === 5 && $parts[0] !== '' && $parts[1] !== '' && $parts[2] !== '' && $parts[3] !== '' && $parts[4] !== '';
+    if (count($parts) !== 5) {
+        return false;
+    }
+    [$min, $hour, $dom, $mon, $dow] = $parts;
+    return cron_validate_field($min, 0, 59)
+        && cron_validate_field($hour, 0, 23)
+        && cron_validate_field($dom, 1, 31)
+        && cron_validate_field($mon, 1, 12)
+        && cron_validate_field($dow, 0, 6);
 }
 
 function cron_regenerate(): array {

@@ -198,6 +198,12 @@ if [ -f /var/www/nav/data/sites.json ]; then
         echo "[entrypoint][WARN] 反代配置预生成失败，容器将继续启动，可稍后在后台手动 Reload Nginx"
 fi
 
+# ── 根据持久化数据预生成 crontab（容器重建后 /var/spool/cron/crontabs 下的配置会丢失）──
+if [ -f /var/www/nav/data/scheduled_tasks.json ]; then
+    su navwww -s /bin/sh -c 'php -r '\''require "/var/www/nav/admin/shared/cron_lib.php"; $result = cron_regenerate(); echo "[entrypoint] " . ($result["ok"] ? "crontab 已恢复" : "crontab 恢复失败：" . ($result["msg"] ?? "未知错误")) . PHP_EOL;'\''' || \
+        echo "[entrypoint][WARN] crontab 恢复失败，容器将继续启动"
+fi
+
 # ── 删除默认站点配置（会拦截所有请求返回 404）──
 rm -f /etc/nginx/http.d/default.conf
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true

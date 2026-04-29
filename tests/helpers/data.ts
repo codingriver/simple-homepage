@@ -19,7 +19,6 @@ export async function resetVolatileAppData(): Promise<void> {
     'ddns_tasks.json': '[]',
     'scheduled_tasks.json': '[]',
     'notifications.json': '[]',
-    'task_templates.json': '[]',
     'sessions.json': '{}',
     'ssh_hosts.json': '[]',
     'ssh_keys.json': '[]',

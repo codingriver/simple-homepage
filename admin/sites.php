@@ -33,21 +33,9 @@ function sites_handle_post(array &$sites_data): array {
         $sid     = trim($_POST['sid']  ?? '');
         $name    = trim($_POST['name'] ?? '');
         $icon    = trim($_POST['icon'] ?? '🔗');
-        $desc    = trim($_POST['desc'] ?? '');
-        $order   = (int)($_POST['order'] ?? 0);
         $type    = $_POST['type'] ?? 'external';
         $url     = trim($_POST['url']  ?? '');
-        $tags    = sites_parse_tags((string)($_POST['tags'] ?? ''));
-        $favorite = sites_parse_bool_post('favorite');
-        $pinned   = sites_parse_bool_post('pinned');
-        $statusBadge = trim((string)($_POST['status_badge'] ?? ''));
-        $owner = trim((string)($_POST['owner'] ?? ''));
-        $env   = trim((string)($_POST['env'] ?? ''));
-        $assetType = trim((string)($_POST['asset_type'] ?? ''));
         $notes = trim((string)($_POST['notes'] ?? ''));
-        $domainExpireAt = trim((string)($_POST['domain_expire_at'] ?? ''));
-        $sslExpireAt = trim((string)($_POST['ssl_expire_at'] ?? ''));
-        $renewUrl = trim((string)($_POST['renew_url'] ?? ''));
 
         $err = '';
         if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
@@ -60,25 +48,28 @@ function sites_handle_post(array &$sites_data): array {
 
         if ($err) return ['ok' => false, 'msg' => $err];
 
+        // 编辑时保留旧数据中不在表单里的字段
+        $oldSite = null;
+        if ($old_gid && $old_sid) {
+            foreach ($sites_data['groups'] as $g) {
+                if ($g['id'] !== $old_gid) continue;
+                foreach ($g['sites'] as $s) {
+                    if ($s['id'] === $old_sid) { $oldSite = $s; break 2; }
+                }
+            }
+        }
         $site = [
             'id' => $sid,
             'name' => $name,
             'icon' => $icon,
-            'desc' => $desc,
-            'order' => $order,
             'type' => $type,
-            'tags' => $tags,
-            'favorite' => $favorite,
-            'pinned' => $pinned,
-            'status_badge' => $statusBadge,
-            'owner' => $owner,
-            'env' => $env,
-            'asset_type' => $assetType,
             'notes' => $notes,
-            'domain_expire_at' => $domainExpireAt,
-            'ssl_expire_at' => $sslExpireAt,
-            'renew_url' => $renewUrl,
         ];
+        if ($oldSite) {
+            foreach (['desc','order','tags','favorite','pinned','status_badge','owner','env','asset_type','domain_expire_at','ssl_expire_at','renew_url'] as $k) {
+                if (isset($oldSite[$k])) $site[$k] = $oldSite[$k];
+            }
+        }
         if ($type === 'proxy') {
             $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
             $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
@@ -281,7 +272,7 @@ $groups_json = json_encode(
     <p style="color:var(--tm);font-size:13px">该分组暂无站点</p>
   <?php else: ?>
   <div class="table-wrap"><table class="sites-table" data-gid="<?= htmlspecialchars($grp['id']) ?>">
-    <thead><tr><th style="width:40px"></th><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>资产信息</th><th>状态</th><th>排序</th><th>操作</th></tr></thead>
+    <thead><tr><th style="width:40px"></th><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
     <?php foreach ($grp['sites'] as $s):
       $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
@@ -305,27 +296,7 @@ $groups_json = json_encode(
       <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars($s['type']??'external') ?></span></td>
       <td style="font-size:12px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></td>
-      <td style="font-size:12px;line-height:1.6;color:var(--tx2)">
-        <?php
-          $metaParts = [];
-          if (!empty($s['asset_type'])) $metaParts[] = '类型：' . (string)$s['asset_type'];
-          if (!empty($s['env'])) $metaParts[] = '环境：' . (string)$s['env'];
-          if (!empty($s['owner'])) $metaParts[] = '负责人：' . (string)$s['owner'];
-          if (!empty($s['status_badge'])) $metaParts[] = '徽标：' . (string)$s['status_badge'];
-        ?>
-        <div><?= $metaParts ? htmlspecialchars(implode(' · ', $metaParts)) : '—' ?></div>
-        <?php if (!empty($s['tags']) && is_array($s['tags'])): ?>
-          <div style="margin-top:4px"><?= htmlspecialchars(implode('、', $s['tags'])) ?></div>
-        <?php endif; ?>
-        <?php if (!empty($s['favorite']) || !empty($s['pinned'])): ?>
-          <div style="margin-top:4px">
-            <?php if (!empty($s['favorite'])): ?><span class="badge badge-yellow">收藏</span><?php endif; ?>
-            <?php if (!empty($s['pinned'])): ?><span class="badge badge-blue">常用</span><?php endif; ?>
-          </div>
-        <?php endif; ?>
-      </td>
       <td style="font-size:12px;white-space:nowrap"><?= $h_dot ?><?= $h_status==='up' && $h_ms!=='-' ? ' <span style="color:var(--tm);font-size:10px">('.$h_ms.'ms)</span>' : '' ?></td>
-      <td><?= $s['order']??0 ?></td>
       <td>
         <button class="btn btn-sm btn-secondary"
           onclick='openForm(<?= htmlspecialchars(json_encode($s),ENT_QUOTES) ?>, "<?= htmlspecialchars($grp['id'],ENT_QUOTES) ?>")'>编辑</button>
@@ -366,12 +337,6 @@ padding:28px;width:100%;max-width:520px;margin:auto">
           <input type="text" name="icon" id="fi_icon" value="🔗" style="flex:1">
           <button type="button" class="btn btn-secondary btn-sm" onclick="openEmojiPicker('fi_icon')" style="flex-shrink:0">😊 选择</button>
         </div></div>
-      <div class="form-group"><label>排序</label>
-        <input type="number" name="order" id="fi_order" value="0"></div>
-      <div class="form-group full"><label>描述</label>
-        <input type="text" name="desc" id="fi_desc"></div>
-      <div class="form-group full"><label>标签</label>
-        <input type="text" name="tags" id="fi_tags" placeholder="例如：生产, 监控, Docker"></div>
       <div class="form-group"><label>所属分组</label>
         <select name="gid" id="fi_gid"></select></div>
       <div class="form-group"><label>类型</label>
@@ -380,38 +345,8 @@ padding:28px;width:100%;max-width:520px;margin:auto">
           <option value="internal">内站 Internal</option>
           <option value="proxy">代理 Proxy</option>
         </select></div>
-      <div class="form-group"><label>资产类型</label>
-        <select name="asset_type" id="fi_asset_type">
-          <option value="">未设置</option>
-          <option value="dashboard">dashboard</option>
-          <option value="service">service</option>
-          <option value="api">api</option>
-          <option value="server">server</option>
-          <option value="storage">storage</option>
-          <option value="doc">doc</option>
-          <option value="other">other</option>
-        </select></div>
-      <div class="form-group"><label>环境</label>
-        <select name="env" id="fi_env">
-          <option value="">未设置</option>
-          <option value="prod">prod</option>
-          <option value="staging">staging</option>
-          <option value="test">test</option>
-          <option value="dev">dev</option>
-        </select></div>
       <div class="form-group full" id="row_url"><label>目标URL</label>
         <input type="url" name="url" id="fi_url" placeholder="https://"></div>
-      <div class="form-group"><label>状态徽标</label>
-        <select name="status_badge" id="fi_status_badge">
-          <option value="">未设置</option>
-          <option value="online">online</option>
-          <option value="offline">offline</option>
-          <option value="beta">beta</option>
-          <option value="new">new</option>
-          <option value="deprecated">deprecated</option>
-        </select></div>
-      <div class="form-group"><label>负责人</label>
-        <input type="text" name="owner" id="fi_owner" placeholder="ops / admin / 张三"></div>
       <div id="proxy_fields" style="display:none;grid-column:1/-1">
         <div class="form-grid">
           <div class="form-group"><label>代理模式</label>
@@ -427,18 +362,8 @@ padding:28px;width:100%;max-width:520px;margin:auto">
             <input type="text" name="proxy_domain" id="fi_pdomain" placeholder="app.yourdomain.com"></div>
         </div>
       </div>
-      <div class="form-group"><label>域名到期日</label>
-        <input type="date" name="domain_expire_at" id="fi_domain_expire_at"></div>
-      <div class="form-group"><label>SSL 到期日</label>
-        <input type="date" name="ssl_expire_at" id="fi_ssl_expire_at"></div>
-      <div class="form-group full"><label>续费/说明链接</label>
-        <input type="url" name="renew_url" id="fi_renew_url" placeholder="https://your-registrar.example/order"></div>
       <div class="form-group full"><label>备注</label>
         <textarea name="notes" id="fi_notes" rows="3" style="width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;resize:vertical"></textarea></div>
-      <div class="form-group full" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="favorite" id="fi_favorite" value="1"> 收藏</label>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="pinned" id="fi_pinned" value="1"> 常用</label>
-      </div>
     </div>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">保存</button>
@@ -468,25 +393,13 @@ function openForm(s, gid) {
     document.getElementById('fi_sid').value    = s ? s.id   : '';
     document.getElementById('fi_name').value   = s ? s.name : '';
     document.getElementById('fi_icon').value   = s ? (s.icon||'🔗') : '🔗';
-    document.getElementById('fi_order').value  = s ? (s.order||0) : 0;
-    document.getElementById('fi_desc').value   = s ? (s.desc||'') : '';
-    document.getElementById('fi_tags').value   = s && Array.isArray(s.tags) ? s.tags.join(', ') : '';
     document.getElementById('fi_url').value    = s ? (s.url||'') : '';
     document.getElementById('fi_type').value   = s ? (s.type||'external') : 'external';
-    document.getElementById('fi_asset_type').value = s ? (s.asset_type||'') : '';
-    document.getElementById('fi_env').value = s ? (s.env||'') : '';
-    document.getElementById('fi_status_badge').value = s ? (s.status_badge||'') : '';
-    document.getElementById('fi_owner').value = s ? (s.owner||'') : '';
     document.getElementById('fi_pmode').value  = s ? (s.proxy_mode||'path') : 'path';
     document.getElementById('fi_ptarget').value= s ? (s.proxy_target||'') : '';
     document.getElementById('fi_slug').value   = s ? (s.slug||'') : '';
     document.getElementById('fi_pdomain').value= s ? (s.proxy_domain||'') : '';
-    document.getElementById('fi_domain_expire_at').value = s ? (s.domain_expire_at||'') : '';
-    document.getElementById('fi_ssl_expire_at').value = s ? (s.ssl_expire_at||'') : '';
-    document.getElementById('fi_renew_url').value = s ? (s.renew_url||'') : '';
     document.getElementById('fi_notes').value = s ? (s.notes||'') : '';
-    document.getElementById('fi_favorite').checked = !!(s && s.favorite);
-    document.getElementById('fi_pinned').checked = !!(s && s.pinned);
     populateGroups(gid||(groups.length?groups[0].id:''));
     toggleType(s ? (s.type||'external') : 'external');
     var sb=document.querySelector('#siteForm button[type=submit]');if(sb){sb.disabled=false;sb.textContent='保存';}
