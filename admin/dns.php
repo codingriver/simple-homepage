@@ -925,7 +925,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 <?php endif; ?>
 
 <!-- ═══ 账号管理弹窗 ═══ -->
-<div id="account-mgr-modal" class="dns-modal" onclick="if(event.target===this)closeModal('account-mgr-modal')">
+<div id="account-mgr-modal" class="dns-modal">
   <div class="dns-modal-card">
     <div class="dns-modal-head">
       <span class="dns-modal-title">DNS 账号管理</span>
@@ -968,7 +968,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 </div>
 
 <!-- ═══ 账号表单弹窗 ═══ -->
-<div id="account-form-modal" class="dns-modal" onclick="if(event.target===this)closeModal('account-form-modal')">
+<div id="account-form-modal" class="dns-modal">
   <div class="dns-modal-card">
     <div class="dns-modal-head">
       <span class="dns-modal-title" id="acct-form-title">添加 DNS 账户</span>
@@ -1010,7 +1010,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 </div>
 
 <!-- ═══ 账号接入说明弹窗 ═══ -->
-<div id="account-help-modal" class="dns-modal" onclick="if(event.target===this)closeModal('account-help-modal')">
+<div id="account-help-modal" class="dns-modal">
   <div class="dns-modal-card">
     <div class="dns-modal-head">
       <span class="dns-modal-title">DNS 账户参数获取说明</span>
@@ -1055,7 +1055,7 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 </div>
 
 <!-- ═══ 本机 DNS API 说明弹窗 ═══ -->
-<div id="dns-api-modal" class="dns-modal" onclick="if(event.target===this)closeModal('dns-api-modal')">
+<div id="dns-api-modal" class="dns-modal">
   <div class="dns-modal-card" style="width:min(880px,96vw);max-height:92vh">
     <div class="dns-modal-head">
       <span class="dns-modal-title">本机 DNS API</span>
@@ -1114,7 +1114,7 @@ log "=== DDNS 结束 ==="</pre>
 </div>
 
 <!-- ═══ 记录编辑弹窗 ═══ -->
-<div id="record-modal" class="dns-modal" onclick="if(event.target===this)closeModal('record-modal')">
+<div id="record-modal" class="dns-modal">
   <div class="dns-modal-card">
     <div class="dns-modal-head">
       <span class="dns-modal-title" id="rec-modal-title">新建解析记录</span>
@@ -1184,7 +1184,7 @@ log "=== DDNS 结束 ==="</pre>
 </div>
 
 <!-- ═══ 批量导入弹窗 ═══ -->
-<div id="import-modal" class="dns-modal" onclick="if(event.target===this)closeModal('import-modal')">
+<div id="import-modal" class="dns-modal">
   <div class="dns-modal-card">
     <div class="dns-modal-head">
       <span class="dns-modal-title">批量导入解析记录</span>
@@ -1469,6 +1469,20 @@ async function dnsZoneSwitchViaFetch(zoneSelect, zoneIdInput) {
 
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
+
+/* 弹窗背景点击关闭防护（阻止 mousedown 在内容区、mouseup 在背景层的误触） */
+(function(){
+  var mdTarget = null;
+  ['account-mgr-modal','account-form-modal','account-help-modal','dns-api-modal','record-modal','import-modal'].forEach(function(id){
+    var modal = document.getElementById(id);
+    if (!modal) return;
+    modal.addEventListener('mousedown', function(e){ mdTarget = e.target; });
+    modal.addEventListener('click', function(e){
+      if (e.target === modal && mdTarget === modal) closeModal(id);
+      mdTarget = null;
+    });
+  });
+})();
 function openAccountMgr()  { openModal('account-mgr-modal'); }
 function openAccountHelpModal() { openModal('account-help-modal'); }
 function openDnsApiModal() { openModal('dns-api-modal'); }

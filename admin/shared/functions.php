@@ -1807,6 +1807,55 @@ function nginx_test_config(): array {
 }
 
 /**
+ * 将当前编辑内容写入原文件做预览检测，检测完恢复原文件
+ * 用于"检查语法"按钮实时检测当前编辑框内容，不实际保存
+ *
+ * @return array{ok:bool,msg:string,test_output:string}
+ */
+function nginx_test_config_preview(string $target, string $content): array {
+    $targets = nginx_editable_targets();
+    if (!isset($targets[$target])) {
+        return ['ok' => false, 'msg' => '未知配置目标', 'test_output' => ''];
+    }
+    $path = $targets[$target]['path'];
+    if (!is_file($path)) {
+        return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'test_output' => ''];
+    }
+
+    $backup = @file_get_contents($path);
+    if ($backup === false) {
+        return ['ok' => false, 'msg' => '读取原文件失败：' . $path, 'test_output' => ''];
+    }
+
+    // 写入预览内容（复用 nginx_write_target 的 http 块替换逻辑）
+    if ($target === 'http') {
+        $bounds = nginx_http_block_bounds($backup);
+        if (!$bounds) {
+            return ['ok' => false, 'msg' => '未找到 http { ... } 模块', 'test_output' => ''];
+        }
+        $preview = substr($backup, 0, $bounds['inner_start'])
+            . "\n" . rtrim($content) . "\n"
+            . substr($backup, $bounds['close']);
+        $written = @file_put_contents($path, $preview, LOCK_EX);
+    } else {
+        $written = @file_put_contents($path, $content, LOCK_EX);
+    }
+
+    if ($written === false) {
+        @file_put_contents($path, $backup, LOCK_EX);
+        return ['ok' => false, 'msg' => '写入预览文件失败，请检查文件权限：' . $path, 'test_output' => ''];
+    }
+
+    // 执行语法检测
+    $test = nginx_test_config();
+
+    // 恢复原文件（无论检测成功与否）
+    @file_put_contents($path, $backup, LOCK_EX);
+
+    return $test;
+}
+
+/**
  * 执行 nginx -t 语法检测 + nginx -s reload
  * 优先使用 sudo 白名单；容器环境可退回到包装脚本
  *

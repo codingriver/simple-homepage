@@ -58,7 +58,10 @@ COPY docker/php-custom.ini   /usr/local/etc/php/conf.d/99-nav-custom.ini
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/entrypoint.sh    /entrypoint.sh
 
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    # Nginx 主配置需对运行用户可写（后台编辑需要）
+    chown root:navwww /etc/nginx/nginx.conf && \
+    chmod 664 /etc/nginx/nginx.conf
 
 # ── 构建元数据（GitHub Actions 传入；本地 docker build 未传则为 unknown）──
 ARG GIT_COMMIT=unknown

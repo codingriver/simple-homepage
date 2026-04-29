@@ -72,7 +72,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
   </div>
 </div>
 
-<div id="ddns-modal" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);align-items:center;justify-content:center" onclick="if(event.target===this)closeDdnsModal()">
+<div id="ddns-modal" style="display:none;position:fixed;inset:0;z-index:900;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);align-items:center;justify-content:center" >
   <div style="background:var(--sf);border:1px solid var(--bd2);border-radius:var(--r2);width:min(760px,96vw);box-shadow:0 24px 64px rgba(0,0,0,.5);display:flex;flex-direction:column;max-height:92vh;">
     <div style="padding:18px 22px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between">
       <span id="ddns-modal-title" style="font-weight:700;font-size:15px;font-family:var(--mono);color:var(--ac)">新建 DDNS 任务</span>
@@ -171,7 +171,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
   </div>
 </div>
 
-<div id="ddns-log-modal" style="display:none;position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:12px" onclick="if(event.target===this)closeDdnsLogModal()">
+<div id="ddns-log-modal" style="display:none;position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:12px" >
   <div style="background:var(--sf);border:1px solid var(--bd2);border-radius:var(--r2);width:min(1280px,99vw);height:min(88vh,920px);box-shadow:0 24px 64px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;">
     <div style="padding:16px 20px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;flex-wrap:wrap">
       <span id="ddns-log-modal-title" style="font-weight:700;font-size:14px;font-family:var(--mono);color:var(--blue)">DDNS 日志</span>
@@ -374,6 +374,27 @@ function openDdnsLogModal(id, name) {
 function closeDdnsLogModal() {
   document.getElementById('ddns-log-modal').style.display = 'none';
 }
+
+/* 弹窗背景点击关闭防护（阻止 mousedown 在内容区、mouseup 在背景层的误触） */
+(function(){
+  var mdTarget = null;
+  var ddnsModal = document.getElementById('ddns-modal');
+  if (ddnsModal) {
+    ddnsModal.addEventListener('mousedown', function(e){ mdTarget = e.target; });
+    ddnsModal.addEventListener('click', function(e){
+      if (e.target === ddnsModal && mdTarget === ddnsModal) closeDdnsModal();
+      mdTarget = null;
+    });
+  }
+  var ddnsLogModal = document.getElementById('ddns-log-modal');
+  if (ddnsLogModal) {
+    ddnsLogModal.addEventListener('mousedown', function(e){ mdTarget = e.target; });
+    ddnsLogModal.addEventListener('click', function(e){
+      if (e.target === ddnsLogModal && mdTarget === ddnsLogModal) closeDdnsLogModal();
+      mdTarget = null;
+    });
+  }
+})();
 
 async function clearCurrentDdnsLog() {
   if (!ddnsLogState.id) return;

@@ -62,6 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $cfg['card_height']    = max(0, min(800, $card_height));
             $cfg['card_show_desc'] = isset($_POST['card_show_desc']) ? '1' : '0';
+            $cfg['show_asset_filter']  = isset($_POST['show_asset_filter'])  ? '1' : '0';
+            $cfg['show_recent_visits'] = isset($_POST['show_recent_visits']) ? '1' : '0';
             $cfg['card_layout']    = in_array($_POST['card_layout'] ?? 'grid', ['grid','list','compact','large']) ? $_POST['card_layout'] : 'grid';
             $cfg['card_direction'] = in_array($_POST['card_direction'] ?? 'col', ['col','row','row-reverse','col-center']) ? $_POST['card_direction'] : 'col';
             $bg_color = trim($_POST['bg_color'] ?? '');
@@ -282,6 +284,26 @@ $cfg = auth_get_config();
             <label style="font-size:12px;color:var(--tm)">显示卡片描述</label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
               <input type="checkbox" name="card_show_desc" value="1" <?= ($cfg['card_show_desc']??'1')==='1'?'checked':'' ?>
+                     style="width:16px;height:16px;accent-color:var(--ac)">
+              <span style="font-size:12px;color:var(--tx)">显示</span>
+            </label>
+          </div>
+
+          <!-- 显示资产筛选 -->
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="font-size:12px;color:var(--tm)">显示资产筛选</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" name="show_asset_filter" value="1" <?= ($cfg['show_asset_filter']??'1')==='1'?'checked':'' ?>
+                     style="width:16px;height:16px;accent-color:var(--ac)">
+              <span style="font-size:12px;color:var(--tx)">显示</span>
+            </label>
+          </div>
+
+          <!-- 显示最近访问 -->
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="font-size:12px;color:var(--tm)">显示最近访问</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" name="show_recent_visits" value="1" <?= ($cfg['show_recent_visits']??'1')==='1'?'checked':'' ?>
                      style="width:16px;height:16px;accent-color:var(--ac)">
               <span style="font-size:12px;color:var(--tx)">显示</span>
             </label>

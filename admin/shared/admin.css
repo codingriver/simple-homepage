@@ -155,6 +155,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  border-bottom: 1px solid var(--bd);
 }
 
 .topbar {
@@ -574,7 +575,7 @@ details summary:hover { color: var(--ac); }
 .ngx-modal {
   display: none; position: fixed; inset: 0;
   background: rgba(8,10,14,.78); backdrop-filter: blur(4px);
-  z-index: 980; align-items: center; justify-content: center; padding: 8px;
+  z-index: 980; align-items: center; justify-content: center; padding: 0;
 }
 .ngx-modal.open { display: flex; }
 .ngx-modal-card {
@@ -583,43 +584,211 @@ details summary:hover { color: var(--ac); }
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 30px 80px rgba(0,0,0,.45);
 }
+.ngx-modal-card.fullscreen {
+  width: 100vw; height: 100vh;
+  border-radius: 0; max-width: none; max-height: none;
+}
 .ngx-modal-head {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--bd); min-height: 30px;
+  gap: 0; padding: 0 2px 0 20px; border-bottom: 1px solid var(--bd); min-height: 30px;
 }
-.ngx-modal-title { font-size: 12px; color: var(--ac); font-family: var(--mono); line-height: 1.1; }
-.ngx-close-btn { padding: 3px 10px !important; min-height: 24px; line-height: 1.1; font-size: 12px; }
+.ngx-modal-title-wrap {
+  display: flex; align-items: center; gap: 6px;
+}
+.ngx-modal-title { font-size: 13px; color: var(--ac); font-family: var(--mono); line-height: 1.2; font-weight: 500; }
+.ngx-modal-head-actions {
+  display: flex; align-items: center; gap: 4px;
+}
+.ngx-close-btn {
+  padding: 0 !important; min-height: 24px; width: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; font-size: 16px;
+}
+.ngx-fullscreen-btn {
+  padding: 0 !important; min-height: 24px; width: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; font-size: 13px;
+}
+.ngx-modal-dirty-status {
+  font-size: 11px; color: var(--tx2); font-family: var(--mono);
+  line-height: 1.2; white-space: nowrap;
+}
+.ngx-modal-dirty-status.dirty {
+  color: var(--yellow);
+}
+
 .ngx-modal-body {
-  padding: 6px 8px 8px; display: flex; flex-direction: column;
+  padding: 0; display: flex; flex-direction: column;
   min-height: 0; height: 100%;
+  position: relative;
 }
 .ngx-editor-toolbar {
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-  margin-bottom: 6px; line-height: 1.1;
+  display: flex; gap: 5px; flex-wrap: wrap; align-items: center;
+  margin-bottom: 0; padding: 5px 8px;
+  border-bottom: 1px solid var(--bd);
+  line-height: 1.2;
 }
-.ngx-editor-toolbar .btn { padding: 4px 10px; min-height: 26px; line-height: 1.1; font-size: 12px; }
+.ngx-editor-toolbar .btn { padding: 3px 8px; min-height: 22px; line-height: 1.2; font-size: 12px; border: 1px solid var(--bd2); border-radius: 4px; }
+.ngx-editor-toolbar-actions {
+  display: flex; gap: 5px; align-items: center;
+  margin-right: 8px;
+}
+.ngx-editor-toolbar-actions .btn,
+.ngx-editor-toolbar-actions .btn-primary,
+.ngx-editor-toolbar-actions .btn-secondary,
+.ngx-editor-toolbar-actions .btn-danger,
+.ngx-editor-toolbar-actions .btn-success,
+.ngx-editor-toolbar-actions .btn-warning {
+  padding: 3px 8px; min-height: 22px; line-height: 1.2; font-size: 12px;
+  border: 1px solid var(--bd2); border-radius: 4px;
+}
+.ngx-editor-toolbar-actions .btn-primary {
+  background: var(--ac); color: #000; border-color: var(--ac);
+}
+.ngx-editor-toolbar-actions .btn-primary:hover {
+  background: var(--ach);
+  box-shadow: 0 0 16px var(--ac-glow);
+}
+.ngx-editor-toolbar-actions .btn-secondary {
+  background: var(--sf2); color: var(--tx); border-color: var(--bd);
+}
+.ngx-editor-toolbar-actions .btn-secondary:hover {
+  border-color: var(--ac);
+  color: var(--ac);
+  background: var(--ac-dim);
+}
+.ngx-editor-toolbar-actions .btn-danger {
+  background: rgba(255,85,102,.08); color: var(--red); border-color: rgba(255,85,102,.25);
+}
+/* 工具栏按钮统一基础样式（新增按钮只允许自定义 bgColor） */
+.nav-ace-toolbar-btn {
+  padding: 3px 8px; min-height: 22px; line-height: 1.2; font-size: 12px;
+  border: 1px solid var(--bd2); border-radius: 4px;
+  background: var(--sf2); color: var(--tx);
+  cursor: pointer;
+}
+.nav-ace-toolbar-btn:hover {
+  opacity: .9;
+}
+.nav-ace-toolbar-btn:disabled {
+  opacity: .5; cursor: not-allowed;
+}
+.ngx-editor-toolbar-actions span { font-size: 11px; }
 .ngx-editor-toolbar label {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 11px; line-height: 1.1; color: var(--tx2);
+  display: flex; align-items: center; gap: 3px;
+  font-size: 12px; line-height: 1.2; color: var(--tx); font-weight: 500;
+  white-space: nowrap;
 }
-.ngx-editor-toolbar select { height: 24px; padding: 0 6px; }
+.ngx-editor-toolbar select { height: 22px; padding: 0 6px; font-size: 12px; border-radius: 4px; border: 1px solid var(--bd2); }
+.ngx-editor-toolbar .toolbar-sep {
+  width: 1px; height: 16px; background: var(--bd2);
+  margin: 0 2px; flex-shrink: 0;
+}
+.ngx-editor-toolbar input[type="checkbox"] {
+  width: 13px; height: 13px; accent-color: var(--ac);
+  cursor: pointer; border: 1px solid var(--bd2);
+}
+.ngx-editor-goto-bar {
+  display: none; align-items: center; gap: 4px;
+  position: absolute; top: 0; right: 0; z-index: 100;
+  padding: 3px 6px;
+  background: var(--sf2); border: 1px solid var(--bd2);
+  border-top: 0; border-right: 0;
+  border-radius: 0 0 0 6px;
+  font-size: 12px; color: var(--tx);
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+}
+.ngx-editor-goto-bar.open { display: flex; }
+.ngx-editor-goto-bar input[type="number"] {
+  width: 70px; height: 22px; padding: 0 4px;
+  font-size: 12px; background: var(--bg); border: 1px solid var(--bd);
+  border-radius: 4px; color: var(--tx);
+}
+.ngx-editor-goto-bar input[type="number"]:focus {
+  border-color: var(--ac);
+  box-shadow: 0 0 0 2px rgba(0,212,170,.1);
+  outline: none;
+}
+.ngx-editor-goto-bar .btn {
+  padding: 1px 6px; min-height: 22px; font-size: 11px;
+  border: 1px solid var(--bd2); border-radius: 4px;
+}
 .ngx-editor-main {
   width: 100%; flex: 1 1 auto; min-height: 0;
   border: 1px solid var(--bd2); border-radius: 8px; overflow: hidden;
 }
 .ngx-editor-actions {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; flex-wrap: wrap; margin-top: 6px; padding-top: 6px;
-  border-top: 1px solid var(--bd);
+  display: none;
 }
-.ngx-editor-actions-left, .ngx-editor-actions-right {
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+
+/* 编辑器底部栏（日志查看器分页等） */
+.ngx-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--sf2);
+  border-top: 1px solid var(--bd2);
+  font-size: 12px;
+  color: var(--tx);
+  flex-wrap: wrap;
+  min-height: 32px;
 }
-.ngx-editor-actions .btn { padding: 5px 12px; min-height: 28px; line-height: 1.1; font-size: 12px; }
-.ngx-editor-actions .btn-primary { padding: 5px 14px; }
-.ngx-modal-card.focus-mode .ngx-modal-head { display: none; }
-.ngx-modal-card.focus-mode .ngx-editor-toolbar { display: none; }
-.ngx-modal-card.focus-mode .ngx-modal-body { padding: 4px 6px 6px; }
-.ngx-modal-card.focus-mode .ngx-editor-main { border-radius: 6px; }
-.ngx-focus-exit-btn { display: none; }
-.ngx-modal-card.focus-mode .ngx-focus-exit-btn { display: inline-flex; }
+.ngx-editor-footer .btn {
+  padding: 3px 8px;
+  min-height: 22px;
+  line-height: 1.2;
+  font-size: 12px;
+  border: 1px solid var(--bd2);
+  border-radius: 4px;
+  background: var(--sf2);
+  color: var(--tx);
+  cursor: pointer;
+}
+.ngx-editor-footer .btn:hover {
+  border-color: var(--ac);
+  color: var(--ac);
+}
+.ngx-editor-footer .btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.ngx-editor-footer select {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--bd2);
+  background: var(--bg);
+  color: var(--tx);
+}
+.ngx-editor-footer input[type="number"] {
+  width: 50px;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--bd2);
+  background: var(--bg);
+  color: var(--tx);
+  text-align: center;
+}
+.ngx-editor-footer input[type="number"]:focus {
+  border-color: var(--ac);
+  outline: none;
+}
+.ngx-editor-footer .footer-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--bd2);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.ngx-editor-footer .footer-info {
+  font-size: 11px;
+  color: var(--tm);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+

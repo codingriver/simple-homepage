@@ -14,6 +14,8 @@ $bg_image  = $cfg['bg_image']  ?? '';
 $card_size      = max(50, min(600, (int)($cfg['card_size']   ?? 140)));
 $card_height    = max(0,  min(800, (int)($cfg['card_height'] ?? 0)));
 $card_show_desc = ($cfg['card_show_desc'] ?? '1') === '1';
+$show_asset_filter  = ($cfg['show_asset_filter']  ?? '1') === '1';
+$show_recent_visits = ($cfg['show_recent_visits'] ?? '1') === '1';
 $card_layout    = in_array($cfg['card_layout']    ?? 'grid', ['grid','compact','list','large'])        ? ($cfg['card_layout']    ?? 'grid') : 'grid';
 $card_direction = in_array($cfg['card_direction'] ?? 'col',  ['col','row','row-reverse','col-center']) ? ($cfg['card_direction'] ?? 'col')  : 'col';
 
@@ -212,7 +214,9 @@ function homepage_render_site_card(array $site, array $group, string $href, stri
       <?php if ($env !== ''): ?><span class="mini-badge"><?= htmlspecialchars($env) ?></span><?php endif; ?>
       <?php if ($statusBadge !== ''): ?><span class="mini-badge mini-status"><?= htmlspecialchars($statusBadge) ?></span><?php endif; ?>
     </div>
-    <div class="cd"><?= htmlspecialchars((string)($site['desc'] ?? $typeLabel)) ?></div>
+    <?php if (!empty($site['desc'])): ?>
+    <div class="cd"><?= htmlspecialchars((string)$site['desc']) ?></div>
+    <?php endif; ?>
     <?php if ($tags !== []): ?>
     <div class="tag-row">
       <?php foreach (array_slice($tags, 0, 4) as $tag): ?>
@@ -315,7 +319,7 @@ $theme = $cfg['theme'] ?? 'dark';
 --tx:#e2e4f0;--tm:#7b7f9e;--r:14px;--fn:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
 html{overscroll-behavior-x:none;overscroll-behavior-y:none}
-body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;display:flex;flex-direction:column;
 <?= $bg_style ?>overscroll-behavior-x:none;overscroll-behavior-y:none}
 body.search-open{overflow-x:hidden}
 header{padding:12px 18px 10px;
@@ -352,7 +356,7 @@ border-bottom:1px solid var(--bd);background:rgba(15,17,23,.6);backdrop-filter:b
 padding:7px 14px;border-radius:999px;transition:all .15s;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.02)}
 .na:hover{color:var(--tx);background:rgba(255,255,255,.06)}
 .na.active{color:var(--tx);background:rgba(108,99,255,.18);border-color:rgba(108,99,255,.42);box-shadow:0 6px 16px rgba(108,99,255,.12)}
-main{max-width:1280px;margin:0 auto;padding:22px 16px}
+main{width:100%;flex:1;padding:22px 24px}
 .sec{display:none}.sec.active{display:block}
 .section-label{display:none;margin-bottom:10px;color:var(--tm);font-size:12px;letter-spacing:.04em}
 body.search-open .section-label{display:block}
@@ -402,14 +406,14 @@ switch ($card_layout) {
     case 'list':
         // 列表模式：强制横向，direction 控制图标左/右
         $fd = in_array($card_direction,['row-reverse']) ? 'row-reverse' : 'row';
-        echo ".grid{display:flex;flex-direction:column;gap:5px}";
-        echo ".card{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:10px 16px;"
+        echo ".grid{display:flex;flex-direction:column;gap:8px}";
+        echo ".card{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:12px 16px;"
            . "text-decoration:none;color:var(--tx);display:flex;flex-direction:{$fd};align-items:center;gap:12px;"
            . "transition:transform .15s,border-color .15s;position:relative;overflow:hidden;{$ch_css}}"
            . ".card .bx{position:static;font-size:10px;padding:2px 7px;border-radius:9px;font-weight:600;flex-shrink:0;order:99}"
            . ".card .ci{width:30px;height:30px;flex-shrink:0;font-size:20px;display:flex;align-items:center;justify-content:center}"
            . ".card .ci img{width:20px;height:20px}"
-           . ".card .cn{font-size:13px;font-weight:600;flex:1}"
+           . ".card .cn{font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}"
            . ".card .cd{font-size:11px;color:var(--tm);flex:2}";
         break;
     case 'large':
@@ -417,28 +421,28 @@ switch ($card_layout) {
         $fd  = $dir['flex'];
         $al  = $dir['align'];
         $ta  = $dir['text'];
-        echo ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax({$card_size}px,1fr));gap:12px}";
-        echo ".card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px 16px;"
-           . "text-decoration:none;color:var(--tx);display:flex;flex-direction:{$fd};align-items:{$al};text-align:{$ta};gap:10px;"
+        echo ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax({$card_size}px,1fr));gap:14px}";
+        echo ".card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px 18px;"
+           . "text-decoration:none;color:var(--tx);display:flex;flex-direction:{$fd};align-items:{$al};text-align:{$ta};gap:12px;"
            . "transition:transform .2s,border-color .2s,box-shadow .2s;position:relative;overflow:hidden;{$ch_css}}"
            . ".card .bx{position:absolute;top:0;right:0;font-size:9px;padding:1px 5px;border-radius:0 var(--r) 0 6px;font-weight:600;line-height:1.6}"
            . ".card .ci{width:44px;height:44px;font-size:32px;display:flex;align-items:center;justify-content:center;flex-shrink:0}"
            . ".card .ci img{width:32px;height:32px;border-radius:8px}"
-           . ".card .cn{font-size:14px;font-weight:700}"
+           . ".card .cn{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}"
            . ".card .cd{font-size:12px;color:var(--tm);line-height:1.5}";
         break;
     default: // grid
         $fd  = $dir['flex'];
         $al  = $dir['align'];
         $ta  = $dir['text'];
-        $pd  = in_array($card_direction,['row','row-reverse']) ? '10px 14px' : '12px 14px';
-        echo ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax({$card_size}px,1fr));gap:8px}";
+        $pd  = in_array($card_direction,['row','row-reverse']) ? '12px 16px' : '14px 16px';
+        echo ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax({$card_size}px,1fr));gap:12px}";
         echo ".card{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:{$pd};"
-           . "text-decoration:none;color:var(--tx);display:flex;flex-direction:{$fd};align-items:{$al};text-align:{$ta};gap:8px;"
+           . "text-decoration:none;color:var(--tx);display:flex;flex-direction:{$fd};align-items:{$al};text-align:{$ta};gap:10px;"
            . "transition:transform .18s,border-color .18s,box-shadow .18s;position:relative;overflow:hidden;{$ch_css}}"
            . ".card .ci{width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}"
            . ".card .ci img{width:18px;height:18px;border-radius:3px;object-fit:contain}"
-           . ".card .cn{font-weight:600;font-size:13px;" . (in_array($card_direction,['row','row-reverse'])?' flex:1;':'') . "}"
+           . ".card .cn{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" . (in_array($card_direction,['row','row-reverse'])?' flex:1;':'') . "}"
            . ".card .cd{font-size:11px;color:var(--tm);line-height:1.4}";
 }
 ?>
@@ -573,6 +577,7 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
 </div>
 <?php endif; ?>
 
+<?php if ($show_asset_filter): ?>
 <section class="quick-section" id="homepage-filters">
   <div class="quick-title">
     <strong>资产筛选</strong>
@@ -625,6 +630,7 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
     </div>
   </div>
 </section>
+<?php endif; ?>
 
 <?php if ($favorite_sites !== []): ?>
 <section class="quick-section" id="favoritesSection">
@@ -648,10 +654,12 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
 </section>
 <?php endif; ?>
 
+<?php if ($show_recent_visits): ?>
 <section class="quick-section hidden" id="recentSection">
   <div class="quick-title"><strong>最近访问</strong><span>基于当前浏览器本地记录</span></div>
   <div class="quick-grid" id="recentGrid"></div>
 </section>
+<?php endif; ?>
 
 <?php $first_grp = true; foreach($visible_groups as $grp):
   $gid=htmlspecialchars((string)$grp['id']);

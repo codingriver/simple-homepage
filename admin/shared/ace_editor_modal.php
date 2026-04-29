@@ -12,16 +12,24 @@
 ?>
 
 <!-- ========== NavAceEditor 统一弹窗 ========== -->
-<div id="nav-ace-editor-modal" class="ngx-modal" onclick="if(event.target===this)NavAceEditor.close()">
+<div id="nav-ace-editor-modal" class="ngx-modal">
   <div class="ngx-modal-card" id="nav-ace-modal-card">
     <div class="ngx-modal-head">
-      <div class="ngx-modal-title" id="nav-ace-title">文本编辑器</div>
-      <button type="button" class="btn btn-secondary ngx-close-btn" onclick="NavAceEditor.close()">×</button>
+      <div class="ngx-modal-title-wrap">
+        <span class="ngx-modal-title" id="nav-ace-title">文本编辑器</span>
+        <span class="ngx-modal-dirty-status" id="nav-ace-dirty-status">未修改</span>
+      </div>
+      <div class="ngx-modal-head-actions">
+        <button type="button" class="btn btn-secondary ngx-fullscreen-btn" id="nav-ace-fullscreen" title="放大">⛶</button>
+        <button type="button" class="btn btn-secondary ngx-close-btn" onclick="NavAceEditor.close()">×</button>
+      </div>
     </div>
     <div class="ngx-modal-body">
       <div class="ngx-editor-toolbar" id="nav-ace-toolbar">
+        <div class="ngx-editor-toolbar-actions" id="nav-ace-toolbar-actions"></div>
         <button type="button" class="btn btn-secondary" id="nav-ace-btn-find">查找 (Ctrl+F)</button>
         <button type="button" class="btn btn-secondary" id="nav-ace-btn-goto">跳转行号 (Ctrl+G)</button>
+        <span class="toolbar-sep"></span>
         <label>语言
           <select id="nav-ace-lang">
             <option value="text">Plain Text</option>
@@ -62,10 +70,17 @@
             <option value="20">20px</option>
           </select>
         </label>
+        <span class="toolbar-sep"></span>
         <label><input type="checkbox" id="nav-ace-wrap" checked> 自动换行</label>
-        <label><input type="checkbox" id="nav-ace-focus"> 沉浸模式</label>
+      </div>
+      <div class="ngx-editor-goto-bar" id="nav-ace-goto-bar">
+        <span>跳转到行号</span>
+        <input type="number" id="nav-ace-goto-input" placeholder="行号" min="1" autocomplete="off">
+        <button type="button" class="btn btn-secondary" id="nav-ace-goto-confirm">跳转</button>
+        <button type="button" class="btn btn-secondary" id="nav-ace-goto-cancel">取消</button>
       </div>
       <div id="nav-ace-editor" class="ngx-editor-main"></div>
+      <div class="ngx-editor-footer" id="nav-ace-footer" style="display:none"></div>
       <div class="ngx-editor-actions">
         <div class="ngx-editor-actions-left" id="nav-ace-actions-left"></div>
         <div class="ngx-editor-actions-right" id="nav-ace-actions-right"></div>
@@ -99,9 +114,11 @@
     els.theme = document.getElementById('nav-ace-theme');
     els.fontsize = document.getElementById('nav-ace-fontsize');
     els.wrap = document.getElementById('nav-ace-wrap');
-    els.focus = document.getElementById('nav-ace-focus');
     els.actionsLeft = document.getElementById('nav-ace-actions-left');
     els.actionsRight = document.getElementById('nav-ace-actions-right');
+    els.footer = document.getElementById('nav-ace-footer');
+    els.toolbarActions = document.getElementById('nav-ace-toolbar-actions');
+    els.fullscreenBtn = document.getElementById('nav-ace-fullscreen');
   }
 
   // ── 初始化 ──
@@ -145,7 +162,7 @@
     editor.commands.addCommand({
       name: 'navAceGoto',
       bindKey: { win: 'Ctrl-G', mac: 'Command-G' },
-      exec: function() { editor.execCommand('gotoline'); }
+      exec: function() { openGotoBar(); }
     });
 
     // 内容变化监听
@@ -166,9 +183,80 @@
       }
     });
 
-    // Esc 关闭
+    // 弹窗手势拦截（防止滑动误关闭）
+    var modalTouchStartX = 0;
+    var modalTouchStartY = 0;
+    var modalTouchMoved = false;
+
+    function onModalClick(e) {
+      if (e.target === els.modal) {
+        // 触摸滑动后触发的 click 不关闭
+        if (modalTouchMoved) {
+          e.preventDefault();
+          e.stopPropagation();
+          modalTouchMoved = false;
+          return false;
+        }
+        NavAceEditor.close();
+      }
+    }
+    function onModalTouchStart(e) {
+      if (e.touches && e.touches.length === 1) {
+        modalTouchStartX = e.touches[0].clientX;
+        modalTouchStartY = e.touches[0].clientY;
+        modalTouchMoved = false;
+      }
+    }
+    function onModalTouchMove(e) {
+      if (!e.touches || e.touches.length !== 1) return;
+      var touch = e.touches[0];
+      var dx = touch.clientX - modalTouchStartX;
+      var dy = touch.clientY - modalTouchStartY;
+      // 水平滑动超过阈值时阻止默认行为（防止边缘滑动返回/关闭）
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+        e.preventDefault();
+      }
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        modalTouchMoved = true;
+      }
+    }
+    function onModalTouchEnd() {
+      modalTouchMoved = false;
+    }
+
+    if (els.modal) {
+      els.modal.addEventListener('click', onModalClick);
+      els.modal.addEventListener('touchstart', onModalTouchStart, { passive: true });
+      els.modal.addEventListener('touchmove', onModalTouchMove, { passive: false });
+      els.modal.addEventListener('touchend', onModalTouchEnd, { passive: true });
+      // 禁用鼠标滚轮的水平回退手势
+      els.modal.addEventListener('wheel', function(e) {
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 10) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+    }
+
+    // 全屏切换
+    var isFullscreen = false;
+    function toggleFullscreen() {
+      if (!els.modalCard) return;
+      isFullscreen = !isFullscreen;
+      els.modalCard.classList.toggle('fullscreen', isFullscreen);
+      if (els.fullscreenBtn) els.fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
+      setTimeout(function() { if (editor) editor.resize(); }, 20);
+    }
+    if (els.fullscreenBtn) {
+      els.fullscreenBtn.addEventListener('click', toggleFullscreen);
+    }
+
+    // Esc 关闭（全屏时先退出全屏）
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && els.modal && els.modal.classList.contains('open')) {
+        if (isFullscreen) {
+          toggleFullscreen();
+          return;
+        }
         var btn = findButtonByAction('close');
         if (btn && isButtonVisible(btn)) {
           handleAction('close');
@@ -183,6 +271,30 @@
     if (typeof config.onInit === 'function') {
       try { config.onInit(editor); } catch(e) {}
     }
+  }
+
+  // ── 跳转行号栏 ──
+  function openGotoBar() {
+    var bar = document.getElementById('nav-ace-goto-bar');
+    var input = document.getElementById('nav-ace-goto-input');
+    if (!bar || !input) return;
+    bar.classList.add('open');
+    input.value = '';
+    input.focus();
+  }
+  function closeGotoBar() {
+    var bar = document.getElementById('nav-ace-goto-bar');
+    if (bar) bar.classList.remove('open');
+  }
+  function doGotoLine() {
+    var input = document.getElementById('nav-ace-goto-input');
+    if (!input || !editor) return;
+    var line = parseInt(input.value, 10);
+    if (line && line > 0) {
+      editor.gotoLine(line, 0, true);
+      editor.focus();
+    }
+    closeGotoBar();
   }
 
   function bindToolbarEvents() {
@@ -212,17 +324,21 @@
         try { localStorage.setItem('nav-ace-wrap', !!this.checked ? '1' : '0'); } catch(e) {}
       });
     }
-    if (els.focus) {
-      els.focus.addEventListener('change', function() {
-        applyFocusMode(!!this.checked);
-      });
-    }
-
     document.getElementById('nav-ace-btn-find').addEventListener('click', function() {
       if (editor) editor.execCommand('find');
     });
     document.getElementById('nav-ace-btn-goto').addEventListener('click', function() {
-      if (editor) editor.execCommand('gotoline');
+      openGotoBar();
+    });
+    document.getElementById('nav-ace-goto-confirm').addEventListener('click', function() {
+      doGotoLine();
+    });
+    document.getElementById('nav-ace-goto-cancel').addEventListener('click', function() {
+      closeGotoBar();
+    });
+    document.getElementById('nav-ace-goto-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { doGotoLine(); }
+      if (e.key === 'Escape') { closeGotoBar(); editor && editor.focus(); }
     });
 
     // 恢复 localStorage 偏好
@@ -247,15 +363,21 @@
   function updateDirty() {
     if (!editor) return;
     dirty = editor.getValue() !== initialValue;
-    var hint = document.getElementById('nav-ace-dirty-hint');
-    if (hint) {
-      hint.textContent = dirty ? '有未保存修改' : '未修改';
-      hint.style.color = dirty ? 'var(--yellow)' : 'var(--tm)';
+    var status = document.getElementById('nav-ace-dirty-status');
+    if (status) {
+      status.textContent = dirty ? '· 有未保存修改' : '· 未修改';
+      status.classList.toggle('dirty', dirty);
     }
   }
 
   // ── 按钮辅助 ──
   function findButtonByAction(action) {
+    if (els.toolbarActions) {
+      var all = els.toolbarActions.querySelectorAll('button[data-action]');
+      for (var i = 0; i < all.length; i++) {
+        if (all[i].getAttribute('data-action') === action) return all[i];
+      }
+    }
     if (!els.actionsLeft || !els.actionsRight) return null;
     var all = els.actionsLeft.querySelectorAll('button[data-action]');
     for (var i = 0; i < all.length; i++) {
@@ -273,6 +395,9 @@
   }
 
   function renderButtons() {
+    if (els.toolbarActions) {
+      els.toolbarActions.innerHTML = '';
+    }
     if (!els.actionsLeft || !els.actionsRight) return;
     els.actionsLeft.innerHTML = '';
     els.actionsRight.innerHTML = '';
@@ -281,20 +406,36 @@
     var left = btns.left || [];
     var right = btns.right || [];
 
-    // 只读模式：隐藏保存按钮，不显示脏标记
+    // 过滤掉脏标记（已移到标题栏）和关闭按钮（统一使用标题栏 × 或蒙层/Esc 关闭）
+    left = left.filter(function(b) { return b.type !== 'dirty' && b.action !== 'close'; });
+    right = right.filter(function(b) { return b.action !== 'close'; });
+
+    // 只读模式：隐藏保存按钮
     if (config.readOnly) {
-      left = left.filter(function(b) { return b.type === 'dirty' ? false : true; });
       right = right.filter(function(b) { return b.action !== 'save'; });
     }
 
-    left.forEach(function(btnCfg) {
-      var el = createButtonEl(btnCfg);
-      if (el) els.actionsLeft.appendChild(el);
-    });
-    right.forEach(function(btnCfg) {
-      var el = createButtonEl(btnCfg);
-      if (el) els.actionsRight.appendChild(el);
-    });
+    // 所有按钮统一渲染到工具栏左侧
+    if (els.toolbarActions) {
+      left.forEach(function(btnCfg) {
+        var el = createButtonEl(btnCfg);
+        if (el) els.toolbarActions.appendChild(el);
+      });
+      right.forEach(function(btnCfg) {
+        var el = createButtonEl(btnCfg);
+        if (el) els.toolbarActions.appendChild(el);
+      });
+    } else {
+      // fallback：渲染到底部操作区
+      left.forEach(function(btnCfg) {
+        var el = createButtonEl(btnCfg);
+        if (el) els.actionsLeft.appendChild(el);
+      });
+      right.forEach(function(btnCfg) {
+        var el = createButtonEl(btnCfg);
+        if (el) els.actionsRight.appendChild(el);
+      });
+    }
   }
 
   function createButtonEl(btnCfg) {
@@ -307,21 +448,37 @@
     }
     if (!visible) return null;
 
-    // 脏标记特殊处理
+    // 脏标记已移到标题栏，不再通过按钮渲染
     if (btnCfg.type === 'dirty') {
-      var span = document.createElement('span');
-      span.id = 'nav-ace-dirty-hint';
-      span.style.fontSize = '12px';
-      span.style.color = 'var(--tm)';
-      span.textContent = '未修改';
-      return span;
+      return null;
     }
 
     var btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = btnCfg.class || 'btn btn-secondary';
     btn.textContent = btnCfg.text || '';
     btn.setAttribute('data-action', btnCfg.action || '');
+
+    // 工具栏按钮统一样式，仅背景色可自定义
+    btn.className = 'btn btn-sm nav-ace-toolbar-btn';
+    if (btnCfg.bgColor) {
+      btn.style.backgroundColor = btnCfg.bgColor;
+      btn.style.borderColor = btnCfg.bgColor;
+    } else if (btnCfg.class) {
+      // 向后兼容：解析 class 中的语义颜色类
+      if (btnCfg.class.indexOf('btn-primary') !== -1) {
+        btn.classList.add('btn-primary');
+      } else if (btnCfg.class.indexOf('btn-danger') !== -1) {
+        btn.classList.add('btn-danger');
+      } else if (btnCfg.class.indexOf('btn-success') !== -1) {
+        btn.classList.add('btn-success');
+      } else if (btnCfg.class.indexOf('btn-warning') !== -1) {
+        btn.classList.add('btn-warning');
+      } else {
+        btn.classList.add('btn-secondary');
+      }
+    } else {
+      btn.classList.add('btn-secondary');
+    }
 
     // 禁用态
     var disabled = false;
@@ -348,14 +505,6 @@
     if (typeof config.onAction === 'function') {
       try { config.onAction(action, value); } catch(e) { console.error('NavAceEditor onAction error', e); }
     }
-  }
-
-  // ── 沉浸模式 ──
-  function applyFocusMode(enabled) {
-    if (!els.modalCard) return;
-    els.modalCard.classList.toggle('focus-mode', !!enabled);
-    if (els.focus) els.focus.checked = !!enabled;
-    setTimeout(function() { if (editor) editor.resize(); }, 20);
   }
 
   // ── 全局暴露 ──
@@ -411,9 +560,22 @@
       // 渲染按钮
       renderButtons();
 
+      // 底部栏
+      if (els.footer) {
+        if (options.footerHtml) {
+          els.footer.innerHTML = options.footerHtml;
+          els.footer.style.display = '';
+        } else {
+          els.footer.innerHTML = '';
+          els.footer.style.display = 'none';
+        }
+      }
+
+      // 关闭可能残留的行号跳转栏
+      closeGotoBar();
+
       // 显示弹窗
       els.modal.classList.add('open');
-      applyFocusMode(false);
       setTimeout(function() {
         if (editor) { editor.resize(); editor.focus(); }
       }, 10);
@@ -428,7 +590,12 @@
       }
 
       els.modal.classList.remove('open');
-      applyFocusMode(false);
+      closeGotoBar();
+      if (isFullscreen) toggleFullscreen();
+      if (els.footer) {
+        els.footer.innerHTML = '';
+        els.footer.style.display = 'none';
+      }
       dirty = false;
       initialValue = '';
 

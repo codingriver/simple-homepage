@@ -32,11 +32,36 @@ function task_log_file(string $id): string {
     if (is_array($task)) {
         return task_log_file_for_task($task, $data['tasks'] ?? []);
     }
+    if (task_is_numeric_id($id)) {
+        return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/run.log';
+    }
     return task_log_path_from_filename(task_default_log_filename($id));
 }
 
 function task_script_dir(): string {
     return TASKS_WORKDIR_ROOT;
+}
+
+function task_is_numeric_id(string $id): bool {
+    return preg_match('/^\d+$/', $id) === 1;
+}
+
+function task_allocate_next_id(): string {
+    $data = load_scheduled_tasks();
+    $existingIds = [];
+    foreach ($data['tasks'] ?? [] as $task) {
+        $existingIds[(string)($task['id'] ?? '')] = true;
+    }
+    $id = 1;
+    while ($id <= 999999) {
+        $idStr = (string)$id;
+        $dir = TASKS_WORKDIR_ROOT . '/task_' . $idStr;
+        if (!isset($existingIds[$idStr]) && !is_dir($dir)) {
+            return $idStr;
+        }
+        $id++;
+    }
+    return '';
 }
 
 function task_legacy_script_filename(string $id): string {
@@ -102,6 +127,10 @@ function task_project_root(): string {
 }
 
 function task_default_workdir(string $id = ''): string {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if (task_is_numeric_id($id)) {
+        return TASKS_WORKDIR_ROOT . '/task_' . $id;
+    }
     return TASKS_WORKDIR_ROOT;
 }
 
@@ -233,6 +262,9 @@ function task_name_script_filename_candidate(string $name): string {
 
 function task_default_script_filename(string $id): string {
     $clean = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if (task_is_numeric_id($clean)) {
+        return 'run.sh';
+    }
     if ($clean === '') {
         $clean = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
     }
@@ -249,6 +281,9 @@ function task_log_filename_from_script_filename(string $scriptFilename): string 
 
 function task_default_log_filename(string $id): string {
     $clean = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if (task_is_numeric_id($clean)) {
+        return 'run.log';
+    }
     if ($clean === '') {
         $clean = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
     }
@@ -270,6 +305,12 @@ function task_script_filename_conflicts(string $filename, string $taskId, array 
 
 function task_resolve_script_filename(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+
+    // 新版数字ID任务固定使用 run.sh
+    if (task_is_numeric_id($id)) {
+        return 'run.sh';
+    }
+
     $explicit = trim((string)($task['script_filename'] ?? ''));
     if (task_is_valid_script_filename($explicit)) {
         return $explicit;
@@ -289,7 +330,12 @@ function task_resolve_script_filename(array $task, array $allTasks = []): string
 }
 
 function task_script_file_for_task(array $task, array $allTasks = []): string {
-    return task_script_path_from_filename(task_resolve_script_filename($task, $allTasks));
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+    $filename = task_resolve_script_filename($task, $allTasks);
+    if (task_is_numeric_id($id) && $filename === 'run.sh') {
+        return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/' . $filename;
+    }
+    return task_script_path_from_filename($filename);
 }
 
 function task_resolve_log_filename(array $task, array $allTasks = []): string {
@@ -302,7 +348,12 @@ function task_resolve_log_filename(array $task, array $allTasks = []): string {
 }
 
 function task_log_file_for_task(array $task, array $allTasks = []): string {
-    return task_log_path_from_filename(task_resolve_log_filename($task, $allTasks));
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+    $logFilename = task_resolve_log_filename($task, $allTasks);
+    if (task_is_numeric_id($id) && $logFilename === 'run.log') {
+        return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/' . $logFilename;
+    }
+    return task_log_path_from_filename($logFilename);
 }
 
 function task_find_by_id(string $id, array $tasks): ?array {
@@ -318,6 +369,14 @@ function task_existing_log_file(string $id): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     if ($id === '') {
         return '';
+    }
+
+    // 新版数字ID优先检查子目录
+    if (task_is_numeric_id($id)) {
+        $subPath = rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/run.log';
+        if (is_file($subPath)) {
+            return $subPath;
+        }
     }
 
     $data = load_scheduled_tasks();
@@ -371,7 +430,15 @@ function task_write_script_file(array $task, string $cmd, array $allTasks = []):
     }
     task_ensure_workdir_root();
     $filename = task_resolve_script_filename($task, $allTasks);
-    $path = task_script_path_from_filename($filename);
+    if (task_is_numeric_id($id) && $filename === 'run.sh') {
+        $subdir = rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id;
+        if (!is_dir($subdir)) {
+            @mkdir($subdir, 0755, true);
+        }
+        $path = $subdir . '/' . $filename;
+    } else {
+        $path = task_script_path_from_filename($filename);
+    }
     if (@file_put_contents($path, task_normalize_script_contents($cmd), LOCK_EX) === false) {
         return ['ok' => false, 'msg' => '任务脚本写入失败'];
     }
@@ -417,6 +484,11 @@ function task_sync_scripts_from_scheduled_tasks(array $data, bool $remove_orphan
         return;
     }
     foreach (glob(TASKS_WORKDIR_ROOT . '/*.sh') ?: [] as $path) {
+        if (!isset($expected[$path])) {
+            @unlink($path);
+        }
+    }
+    foreach (glob(TASKS_WORKDIR_ROOT . '/*/run.sh') ?: [] as $path) {
         if (!isset($expected[$path])) {
             @unlink($path);
         }
@@ -670,7 +742,7 @@ function cron_reconcile_running_state(string $id): bool {
     return false;
 }
 
-function cron_mark_running(string $id, bool $running): bool {
+function cron_mark_running(string $id, bool $running, ?int $pid = null): bool {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     if ($id === '') {
         return false;
@@ -685,10 +757,35 @@ function cron_mark_running(string $id, bool $running): bool {
         }
         $data['tasks'][$idx]['runtime']['running'] = $running;
         $data['tasks'][$idx]['runtime']['started_at'] = $running ? date('Y-m-d H:i:s') : '';
+        if ($running && $pid !== null && $pid > 0) {
+            $data['tasks'][$idx]['runtime']['pid'] = $pid;
+        } elseif (!$running) {
+            $data['tasks'][$idx]['runtime']['pid'] = null;
+            $data['tasks'][$idx]['runtime']['bash_pid'] = null;
+        }
         save_scheduled_tasks($data);
         return true;
     }
     return false;
+}
+
+function cron_mark_bash_pid(string $id, int $bash_pid): void {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '' || $bash_pid <= 0) {
+        return;
+    }
+    $data = load_scheduled_tasks();
+    foreach ($data['tasks'] ?? [] as $idx => $task) {
+        if (($task['id'] ?? '') !== $id) {
+            continue;
+        }
+        if (!isset($data['tasks'][$idx]['runtime']) || !is_array($data['tasks'][$idx]['runtime'])) {
+            $data['tasks'][$idx]['runtime'] = [];
+        }
+        $data['tasks'][$idx]['runtime']['bash_pid'] = $bash_pid;
+        save_scheduled_tasks($data);
+        return;
+    }
 }
 
 function cron_store_run_result(string $id, int $code, string $output): void {
@@ -803,8 +900,72 @@ function cron_dispatch_task_async(string $id): array {
     if (!$spawn['ok']) {
         return $spawn;
     }
-    cron_mark_running($id, true);
+    cron_mark_running($id, true, $spawn['pid'] ?? null);
     return ['ok' => true, 'msg' => '已开始后台执行'];
+}
+
+function task_stop(string $id): array {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+    if ($id === '') {
+        return ['ok' => false, 'msg' => '无效的任务 ID'];
+    }
+    $data = load_scheduled_tasks();
+    $task = null;
+    foreach ($data['tasks'] ?? [] as $row) {
+        if (($row['id'] ?? '') === $id) {
+            $task = $row;
+            break;
+        }
+    }
+    if (!$task) {
+        return ['ok' => false, 'msg' => '任务不存在'];
+    }
+    if (!cron_task_is_running($task)) {
+        return ['ok' => false, 'msg' => '任务未在运行中'];
+    }
+
+    $runtime = cron_task_runtime($task);
+    $bashPid = (int)($runtime['bash_pid'] ?? 0);
+    $phpPid  = (int)($runtime['pid'] ?? 0);
+    $targetPid = ($bashPid > 0 && task_pid_exists($bashPid)) ? $bashPid : (($phpPid > 0 && task_pid_exists($phpPid)) ? $phpPid : 0);
+    $killed = false;
+
+    if ($targetPid > 0) {
+        // 先发送 SIGTERM
+        task_proc_send_signal($targetPid, 15);
+        // 等待最多 3 秒
+        for ($i = 0; $i < 30; $i++) {
+            if (!task_pid_exists($targetPid)) {
+                $killed = true;
+                break;
+            }
+            usleep(100000);
+        }
+        // 如果还在运行，发送 SIGKILL
+        if (!$killed && task_pid_exists($targetPid)) {
+            task_proc_send_signal($targetPid, 9);
+            usleep(300000);
+            $killed = !task_pid_exists($targetPid);
+        }
+    }
+
+    // 写入停止日志
+    $logFile = task_log_file_for_task($task, $data['tasks'] ?? []);
+    if ($logFile !== '') {
+        $stopMsg = $killed ? '任务被手动停止（PID ' . $targetPid . '）' : '任务状态被手动重置';
+        @file_put_contents($logFile, "\n[" . date('Y-m-d H:i:s') . "] [STOPPED] " . $stopMsg . "\n", FILE_APPEND | LOCK_EX);
+    }
+
+    // 清理锁文件
+    $lockFile = task_lock_file($id);
+    if ($lockFile !== '' && file_exists($lockFile)) {
+        @unlink($lockFile);
+    }
+
+    // 重置运行状态
+    cron_mark_running($id, false);
+
+    return ['ok' => true, 'msg' => $killed ? '任务已停止' : '任务状态已重置'];
 }
 
 function task_cleanup_on_delete(array $task): void {
@@ -825,6 +986,13 @@ function task_cleanup_on_delete(array $task): void {
     $lock = task_lock_file($id);
     if ($lock !== '' && file_exists($lock)) {
         @unlink($lock);
+    }
+    // 清理新版子目录
+    if (task_is_numeric_id($id)) {
+        $subdir = rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id;
+        if (is_dir($subdir)) {
+            task_rrmdir($subdir);
+        }
     }
 }
 
@@ -865,7 +1033,10 @@ function scheduled_task_upsert(array $input): array {
     $enabled = !empty($input['enabled']);
 
     if ($id === '') {
-        $id = 't_' . bin2hex(random_bytes(8));
+        $id = task_allocate_next_id();
+        if ($id === '') {
+            return ['ok' => false, 'msg' => '任务 ID 分配失败，请检查 tasks 目录'];
+        }
     }
     if (!preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
         return ['ok' => false, 'msg' => '任务 ID 仅允许字母数字、下划线、短横线'];
@@ -1477,6 +1648,11 @@ function cron_execute_task(string $id): array {
     $status_exit_code = null;
     $timedOut = false;
     if (is_resource($proc)) {
+        $procStatus = proc_get_status($proc);
+        $bashPid = (int)($procStatus['pid'] ?? 0);
+        if ($bashPid > 0) {
+            cron_mark_bash_pid($id, $bashPid);
+        }
         $startAt = time();
         $sigtermAt = null;
         $timeoutLimit = task_execution_timeout();
@@ -1696,7 +1872,7 @@ function cron_run_task_by_id(string $id): void {
         exit(1);
     }
 
-    cron_mark_running($id, true);
+    cron_mark_running($id, true, getmypid());
     try {
         $r = cron_execute_task($id);
         $task = task_find_by_id($id, load_scheduled_tasks()['tasks'] ?? []);

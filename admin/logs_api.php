@@ -129,6 +129,7 @@ if ($action === 'list') {
         $result[$key] = [
             'key'       => $key,
             'label'     => $meta['label'],
+            'path'      => $path,
             'category'  => $meta['category'],
             'clearable' => $meta['clearable'],
             'exists'    => $exists,
@@ -160,14 +161,23 @@ if ($action === 'read') {
     $limit = min(5000, max(1, (int)($_GET['limit'] ?? 100)));
     $total = log_count_lines($path);
     $direction = ($_GET['direction'] ?? '') === 'tail' ? 'tail' : 'forward';
+    $page = (int)($_GET['page'] ?? 0);
 
-    if ($direction === 'tail') {
+    if ($page > 0) {
+        // 页码模式（从 1 开始）
+        $offset = ($page - 1) * $limit;
+        $offset = min($offset, max(0, $total - 1));
+        $lines = log_read_range($path, $offset, $limit);
+    } elseif ($direction === 'tail') {
         $lines = log_read_tail($path, $limit);
         $offset = max(0, $total - count($lines));
     } else {
         $offset = max(0, (int)($_GET['offset'] ?? 0));
         $lines = log_read_range($path, $offset, $limit);
     }
+
+    $hasMore = $offset + count($lines) < $total;
+    $hasPrev = $offset > 0;
 
     echo json_encode([
         'ok'         => true,
@@ -176,7 +186,10 @@ if ($action === 'read') {
         'offset'     => $offset,
         'limit'      => $limit,
         'lines'      => $lines,
-        'has_more'   => $offset > 0,
+        'has_more'   => $hasMore,
+        'has_prev'   => $hasPrev,
+        'page'       => $page > 0 ? $page : (int)floor($offset / $limit) + 1,
+        'total_pages'=> max(1, (int)ceil($total / $limit)),
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

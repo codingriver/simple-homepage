@@ -187,6 +187,10 @@ chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf
 chown navwww:navwww /etc/nginx/http.d/nav-proxy-domains.conf
 chmod 664 /etc/nginx/conf.d/nav-proxy.conf
 chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
+
+# ── 确保 Nginx 主配置对运行用户可写（后台编辑需要）──
+chown root:navwww /etc/nginx/nginx.conf
+chmod 664 /etc/nginx/nginx.conf
 if ! nav_run "touch /var/www/nav/data/nginx/proxy-params-simple.conf /var/www/nav/data/nginx/proxy-params-full.conf"; then
     echo "[entrypoint][ERROR] 无法初始化 /var/www/nav/data/nginx 下的代理模板文件，请检查宿主机挂载目录权限。"
     exit 1

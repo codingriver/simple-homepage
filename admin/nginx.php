@@ -106,12 +106,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $plang = strtolower(trim((string)($_POST['language_mode'] ?? $lang)));
   if (!isset($langOptions[$plang])) $plang = 'nginx';
 
+  $isAjax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+
   if ($action === 'save' || $action === 'save_and_reload') {
     $utf8 = (string)($_POST['content'] ?? '');
     $write = $utf8;
     if ($penc !== 'utf-8') {
       $converted = @iconv('UTF-8', strtoupper($penc) . '//IGNORE', $utf8);
       if ($converted === false) {
+        if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '编码转换失败，请检查字符与编码是否兼容'], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '编码转换失败，请检查字符与编码是否兼容');
         header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
         exit;
@@ -121,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $saved = nginx_write_target($ptarget, $write);
     if (!$saved['ok']) {
+      if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => $saved['msg']], JSON_UNESCAPED_UNICODE); exit; }
       flash_set('error', $saved['msg']);
       header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
       exit;
@@ -129,24 +133,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_and_reload') {
       $test = nginx_test_config();
       if (!$test['ok']) {
+        if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '语法检测失败，已保存但未 Reload：' . $test['msg']], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '语法检测失败，已保存但未 Reload：' . $test['msg']);
         header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
         exit;
       }
       $reload = nginx_reload();
       if (!$reload['ok']) {
+        if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '已保存但 Reload 失败：' . $reload['msg']], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '已保存但 Reload 失败：' . $reload['msg']);
         header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
         exit;
       }
       nginx_mark_applied();
       audit_log('nginx_save_reload', ['target' => $ptarget]);
+      if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => '保存并 Reload 成功'], JSON_UNESCAPED_UNICODE); exit; }
       flash_set('success', '保存并 Reload 成功');
       header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
       exit;
     }
 
     audit_log('nginx_save', ['target' => $ptarget]);
+    if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => '配置已保存：' . ($targets[$ptarget]['label'] ?? $ptarget)], JSON_UNESCAPED_UNICODE); exit; }
     flash_set('success', '配置已保存：' . ($targets[$ptarget]['label'] ?? $ptarget));
     header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
     exit;
@@ -156,8 +164,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $test = nginx_test_config();
     $msg = $test['msg'];
     if (trim((string)$test['test_output']) !== '') $msg .= '｜' . $test['test_output'];
+    if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE); exit; }
     flash_set($test['ok'] ? 'success' : 'error', $msg);
     header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+    exit;
+  }
+
+  if ($action === 'syntax_preview') {
+    $previewContent = (string)($_POST['content'] ?? '');
+    $test = nginx_test_config_preview($ptarget, $previewContent);
+    $msg = $test['msg'];
+    if (trim((string)$test['test_output']) !== '') $msg .= '｜' . $test['test_output'];
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE);
     exit;
   }
 }
@@ -427,7 +446,9 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
     if (typeof NavAceEditor !== 'undefined' && NavAceEditor.getValue) {
       var langNow = item.lang || 'nginx';
       NavAceEditor.setValue(item.content || '', langNow);
-      NavAceEditor.setTitle('文本编辑器 · ' + (item.label || target));
+      var title = '文本编辑器 · ' + (item.label || target);
+      if (item.path) title += ' · ' + item.path;
+      NavAceEditor.setTitle(title);
       NavAceEditor.markClean();
       if (langInput) langInput.value = langNow;
     }
@@ -444,8 +465,10 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
   function openNginxEditor(){
     var item=editorDataMap[currentTarget]||{};
     var currentLang=item.lang||'nginx';
+    var title = '文本编辑器 · ' + (item.label || currentTarget);
+    if (item.path) title += ' · ' + item.path;
     NavAceEditor.open({
-      title: '文本编辑器 · ' + (item.label || currentTarget),
+      title: title,
       mode: currentLang,
       value: item.content||'',
       wrapMode: true,
@@ -457,7 +480,7 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
         right: [
           { text: '关闭', class: 'btn-secondary', action: 'close' },
           { text: '保存', class: 'btn-secondary', action: 'save' },
-          { text: '保存并 Reload', class: 'btn-primary', action: 'save_reload' }
+          { text: '保存并 Reload', class: 'btn-secondary', action: 'save_reload' }
         ]
       },
       onAction: function(action, value){
@@ -466,19 +489,46 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
           return;
         }
         if(action==='save'||action==='save_reload'||action==='syntax'){
-          hidden.value=value;
-          var actionInput=form.querySelector('input[name="action"]');
-          if(!actionInput){
-            actionInput=document.createElement('input');
-            actionInput.type='hidden';
-            actionInput.name='action';
-            form.appendChild(actionInput);
-          }
-          actionInput.value=action;
           if(action==='save_reload'){
             if(!confirm('确认保存并 Reload Nginx？')) return;
           }
-          form.submit();
+          // 映射前端 action 到后端 action
+          var serverAction = action;
+          if (action === 'save_reload') serverAction = 'save_and_reload';
+          if (action === 'syntax') serverAction = 'syntax_preview';
+
+          var payload = new URLSearchParams();
+          payload.append('action', serverAction);
+          payload.append('content', value);
+          payload.append('target', document.getElementById('nginx-editor-target').value);
+          payload.append('tab', document.getElementById('nginx-editor-tab').value);
+          payload.append('encoding', document.getElementById('nginx-editor-encoding').value);
+          payload.append('language_mode', document.getElementById('nginx-editor-lang').value);
+          payload.append('_csrf', window._csrf);
+
+          // 禁用按钮防止重复提交
+          var allBtns = document.querySelectorAll('#nav-ace-toolbar-actions button, #nav-ace-actions-left button, #nav-ace-actions-right button');
+          allBtns.forEach(function(b){ b.disabled = true; });
+
+          fetch('nginx.php', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: payload
+          })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            allBtns.forEach(function(b){ b.disabled = false; });
+            if(data.ok){
+              NavAceEditor.markClean();
+              showToast(data.msg, 'success');
+            }else{
+              showToast(data.msg || '操作失败', 'error');
+            }
+          })
+          .catch(function(){
+            allBtns.forEach(function(b){ b.disabled = false; });
+            showToast('请求失败，请检查网络', 'error');
+          });
         }
       },
       onClose: function(){

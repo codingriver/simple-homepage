@@ -191,7 +191,7 @@ require_once __DIR__ . '/shared/header.php';
 
     <div class="logs-editor-wrap">
       <div class="logs-empty" id="logEmpty">请在左侧选择一个日志文件</div>
-      <button class="btn btn-secondary btn-sm logs-load-more" id="loadMoreBtn" onclick="loadMore()">⬆️ 加载更早</button>
+      <!-- 日志内容通过 Ace Editor 弹窗展示 -->
     </div>
   </main>
 </div>
@@ -203,10 +203,17 @@ require_once __DIR__ . '/shared/header.php';
 (function(){
   var sources = {};
   var currentKey = null;
-  var currentLines = []; // 原始行数组
-  var loadedOffset = 0;
-  var loadedLimit = 500;
+  var currentLines = []; // 当前页原始行数组
   var isLoading = false;
+
+  // 分页状态（暴露到 window，供底部栏内联事件使用）
+  var logState = {
+    totalLines: 0,
+    totalPages: 1,
+    currentPage: 1,
+    limit: 500
+  };
+  window.logState = logState;
 
   function formatBytes(b) {
     if (b === 0) return '0 B';
@@ -258,22 +265,82 @@ require_once __DIR__ . '/shared/header.php';
     var result = buildLogText();
     if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
       NavAceEditor.setValue(result.text);
-      if (result.filtered) {
-        setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
-      }
     }
-    document.getElementById('loadMoreBtn').style.display = (loadedOffset > 0) ? 'block' : 'none';
-    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setButtonVisible) {
-      NavAceEditor.setButtonVisible('load_more', loadedOffset > 0);
-    }
+    updateFooterState();
   }
+
+  // 构建底部栏 HTML
+  function buildFooterHtml() {
+    var s = sources[currentKey] || {};
+    var showClear = s.exists && s.clearable;
+    return '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
+      + '<span class="footer-info" id="log-footer-info">共 0 行</span>'
+      + '<span class="footer-sep"></span>'
+      + '<select id="log-footer-limit" onchange="logChangeLimit(this.value)" style="width:90px">'
+      + '<option value="200">200 行/页</option>'
+      + '<option value="500" selected>500 行/页</option>'
+      + '<option value="1000">1000 行/页</option>'
+      + '<option value="2000">2000 行/页</option>'
+      + '</select>'
+      + '<span class="footer-sep"></span>'
+      + '<button type="button" class="btn" id="log-btn-first" onclick="logGoPage(1)">⏮ 首页</button>'
+      + '<button type="button" class="btn" id="log-btn-prev" onclick="logGoPage(logState.currentPage - 1)">◀ 上一页</button>'
+      + '<span class="footer-info">第 <span id="log-page-current">1</span> / <span id="log-page-total">1</span> 页</span>'
+      + '<input type="number" id="log-page-input" min="1" placeholder="页码" onkeydown="if(event.key===\'Enter\')logGoPage(this.value)">'
+      + '<button type="button" class="btn" onclick="logGoPage(document.getElementById(\'log-page-input\').value)">跳转</button>'
+      + '<button type="button" class="btn" id="log-btn-next" onclick="logGoPage(logState.currentPage + 1)">下一页 ▶</button>'
+      + '<button type="button" class="btn" id="log-btn-last" onclick="logGoPage(logState.totalPages)">末页 ⏭</button>'
+      + (showClear ? '<span class="footer-sep"></span><button type="button" class="btn" onclick="clearCurrentLog()" style="color:var(--red)">🗑 清空</button>' : '')
+      + '</div>';
+  }
+
+  function updateFooterState() {
+    var curEl = document.getElementById('log-page-current');
+    var totEl = document.getElementById('log-page-total');
+    var infoEl = document.getElementById('log-footer-info');
+    var firstBtn = document.getElementById('log-btn-first');
+    var prevBtn = document.getElementById('log-btn-prev');
+    var nextBtn = document.getElementById('log-btn-next');
+    var lastBtn = document.getElementById('log-btn-last');
+    var limitSel = document.getElementById('log-footer-limit');
+
+    if (curEl) curEl.textContent = logState.currentPage;
+    if (totEl) totEl.textContent = logState.totalPages;
+    if (infoEl) infoEl.textContent = '共 ' + logState.totalLines + ' 行';
+    if (firstBtn) firstBtn.disabled = logState.currentPage <= 1;
+    if (prevBtn) prevBtn.disabled = logState.currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = logState.currentPage >= logState.totalPages;
+    if (lastBtn) lastBtn.disabled = logState.currentPage >= logState.totalPages;
+    if (limitSel) limitSel.value = String(logState.limit);
+  }
+
+  window.logGoPage = function(page) {
+    if (!currentKey || isLoading) return;
+    page = parseInt(page, 10);
+    if (isNaN(page) || page < 1) page = 1;
+    if (page > logState.totalPages) page = logState.totalPages;
+    if (page === logState.currentPage && currentLines.length > 0) return;
+    logState.currentPage = page;
+    loadLogPage(currentKey, page, logState.limit);
+  };
+
+  window.logChangeLimit = function(limit) {
+    if (!currentKey || isLoading) return;
+    limit = parseInt(limit, 10) || 500;
+    // 尽量保持当前浏览位置：根据旧 limit 计算 offset，再换算新页码
+    var oldOffset = (logState.currentPage - 1) * logState.limit;
+    var newPage = Math.floor(oldOffset / limit) + 1;
+    logState.limit = limit;
+    logState.currentPage = newPage;
+    loadLogPage(currentKey, newPage, limit);
+  };
 
   window.selectLog = function(key) {
     if (isLoading) return;
     currentKey = key;
     currentLines = [];
-    loadedOffset = 0;
-    loadedLimit = parseInt(document.getElementById('logLimit').value, 10) || 500;
+    logState.currentPage = 1;
+    logState.limit = parseInt(document.getElementById('logLimit').value, 10) || 500;
 
     document.querySelectorAll('.logs-item').forEach(function(el) {
       el.classList.toggle('active', el.dataset.key === key);
@@ -287,42 +354,38 @@ require_once __DIR__ . '/shared/header.php';
     document.getElementById('btnClear').style.display = (s.exists && s.clearable) ? 'inline-flex' : 'none';
     document.getElementById('logEmpty').style.display = 'none';
 
+    var logTitle = '日志查看 · ' + s.label;
+    if (s.path) logTitle += ' · ' + s.path;
     NavAceEditor.open({
-      title: '日志查看 · ' + s.label,
+      title: logTitle,
       mode: 'text',
       value: '加载中…',
       readOnly: true,
       wrapMode: true,
+      footerHtml: buildFooterHtml(),
       buttons: {
-        left: [
-          { text: '⬆️ 加载更早', class: 'btn-secondary', action: 'load_more', visible: function() { return loadedOffset > 0; } }
-        ],
+        left: [],
         right: [
-          { text: '关闭', class: 'btn-secondary', action: 'close' }
+          { text: '关闭', action: 'close' }
         ]
       },
       onAction: function(action) {
         if (action === 'close') {
           NavAceEditor.close();
-        } else if (action === 'load_more') {
-          loadMore();
         }
       }
     });
 
-    loadLogChunk(key, 'tail', loadedLimit);
+    loadLogPage(key, 1, logState.limit);
   };
 
-  function loadLogChunk(key, direction, limit) {
+  function loadLogPage(key, page, limit) {
     if (isLoading) return;
     isLoading = true;
     setStatus('加载中…');
     var url = 'logs_api.php?action=read&type=' + encodeURIComponent(key)
-      + '&direction=' + encodeURIComponent(direction)
+      + '&page=' + encodeURIComponent(page)
       + '&limit=' + encodeURIComponent(limit);
-    if (direction === 'forward') {
-      url += '&offset=' + encodeURIComponent(Math.max(0, loadedOffset - limit));
-    }
     fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r){ return r.json(); })
       .then(function(d){
@@ -334,19 +397,21 @@ require_once __DIR__ . '/shared/header.php';
           }
           return;
         }
-        var lines = d.lines || [];
-        if (direction === 'tail') {
-          currentLines = lines;
-          loadedOffset = d.offset;
-        } else {
-          currentLines = lines.concat(currentLines);
-          loadedOffset = d.offset;
-        }
+        currentLines = d.lines || [];
+        logState.totalLines = d.total_lines || 0;
+        logState.totalPages = d.total_pages || 1;
+        logState.currentPage = d.page || 1;
+        logState.limit = d.limit || limit;
         updateEditorContent();
-        setStatus('已加载 ' + currentLines.length + ' / ' + d.total_lines + ' 行');
-        // 如果是 prepend，保持滚动位置在新增内容底部
-        if (direction === 'forward' && lines.length > 0 && typeof NavAceEditor !== 'undefined' && NavAceEditor.gotoLine) {
-          NavAceEditor.gotoLine(lines.length + 1, 0, false);
+        // 切换页码后滚动条回到最顶部
+        if (typeof NavAceEditor !== 'undefined' && NavAceEditor.gotoLine) {
+          NavAceEditor.gotoLine(1, 0, false);
+        }
+        var result = buildLogText();
+        if (result.filtered) {
+          setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
+        } else {
+          setStatus('第 ' + logState.currentPage + ' / ' + logState.totalPages + ' 页 · 共 ' + logState.totalLines + ' 行');
         }
       })
       .catch(function(){
@@ -360,19 +425,18 @@ require_once __DIR__ . '/shared/header.php';
 
   window.reloadCurrentLog = function() {
     if (!currentKey) return;
-    currentLines = [];
-    loadedOffset = 0;
-    loadLogChunk(currentKey, 'tail', parseInt(document.getElementById('logLimit').value, 10) || 500);
-  };
-
-  window.loadMore = function() {
-    if (!currentKey || isLoading || loadedOffset <= 0) return;
-    var limit = parseInt(document.getElementById('logLimit').value, 10) || 500;
-    loadLogChunk(currentKey, 'forward', limit);
+    logState.currentPage = 1;
+    loadLogPage(currentKey, 1, logState.limit);
   };
 
   window.filterLog = function() {
     updateEditorContent();
+    var result = buildLogText();
+    if (result.filtered) {
+      setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
+    } else {
+      setStatus('第 ' + logState.currentPage + ' / ' + logState.totalPages + ' 页 · 共 ' + logState.totalLines + ' 行');
+    }
   };
 
   window.clearCurrentLog = function() {

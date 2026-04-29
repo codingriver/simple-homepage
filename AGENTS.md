@@ -286,8 +286,9 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - 弹窗内提供语言模式切换、主题切换、字号调整、查找(Ctrl+F)、跳转行号(Ctrl+G)、自动换行开关
   - 支持沉浸模式（全屏编辑器）
   - 编辑完成后将内容同步回隐藏的 `<textarea>` 或表单字段，再由表单提交
-- **右下角按钮区域统一配置接口**：
-  - 按钮区域分为 **左侧**（脏标记 + 辅助操作）和 **右侧**（主操作按钮），通过统一接口配置，禁止各页面硬编码按钮 HTML。
+- **工具栏按钮区域统一配置接口**：
+  - **所有按钮统一渲染在弹窗顶部工具栏左侧**，禁止在工具栏右侧或底部操作区新增按钮。
+  - 支持配置多个按钮，通过统一接口配置，禁止各页面硬编码按钮 HTML。
   - 按钮配置格式：
     ```javascript
     NavAceEditor.open({
@@ -295,13 +296,13 @@ if (session_status() === PHP_SESSION_NONE) session_start();
       buttons: {
         left: [
           { type: 'dirty' },                       // 自动脏标记，无需手动管理
-          { text: '检查语法', class: 'btn-secondary', action: 'syntax', visible: canSyntax }
+          { text: '检查语法', action: 'syntax', visible: canSyntax }
         ],
         right: [
-          { text: '关闭', class: 'btn-secondary', action: 'close' },
-          { text: '保存', class: 'btn-primary', action: 'save' },
-          { text: '保存并 Reload', class: 'btn-primary', action: 'save_reload' },
-          { text: '删除', class: 'btn-danger', action: 'delete', visible: canDelete }
+          { text: '关闭', action: 'close' },
+          { text: '保存', action: 'save' },
+          { text: '保存并 Reload', action: 'save_reload' },
+          { text: '删除', action: 'delete', visible: canDelete }
         ]
       },
       onAction: function(action, value) {
@@ -313,16 +314,18 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - **接口能力说明**：
     1. **`type: 'dirty'`**：自动监听编辑器内容变化，显示「未修改 / 有未保存修改」状态，无需页面手动实现。
     2. **`text`**：按钮显示文本。
-    3. **`class`**：按钮样式类，支持 `btn-primary`（主操作，蓝色）、`btn-secondary`（次要操作，灰色）、`btn-danger`（危险操作，红色）以及项目其他标准按钮类。
-    4. **`action`**：按钮标识符，点击后触发 `onAction(action, currentValue)` 回调。保留关键字：`save`（Ctrl-S 自动绑定）、`close`（Esc/关闭弹窗时触发）。
-    5. **`visible`**：布尔值或返回布尔值的函数，控制按钮是否渲染（用于权限控制，如「删除」仅管理员可见）。
+    3. **`action`**：按钮标识符，点击后触发 `onAction(action, currentValue)` 回调。保留关键字：`save`（Ctrl-S 自动绑定）、`close`（Esc/关闭弹窗时触发）。
+    4. **`visible`**：布尔值或返回布尔值的函数，控制按钮是否渲染（用于权限控制，如「删除」仅管理员可见）。
+    5. **`disabled`**：布尔值或返回布尔值的函数，控制按钮是否禁用。
     6. **`onAction`**：统一回调接口，所有按钮点击（含快捷键触发的保存）都通过此回调分发，页面在此处理业务逻辑（AJAX 提交、表单提交、关闭弹窗等）。
-    7. **左侧按钮**：通常放置脏标记、语法检查、预览等辅助操作；右侧按钮放置保存、关闭、删除等主操作。两侧按钮各自按配置顺序从左到右排列。
+    7. **`class`（向后兼容）**：保留 `btn-primary` / `btn-secondary` / `btn-danger` 等语义类，新写页面不建议继续使用。
+    8. **`bgColor`**（推荐）：自定义按钮背景色，**新增按钮只允许通过 `bgColor` 自定义颜色，不允许自定义其他样式**。例如 `{ text: '自定义', action: 'custom', bgColor: '#4a9eff' }`。
+  - **样式规则**：工具栏按钮统一使用 `.nav-ace-toolbar-btn` 基础样式（padding、字号、圆角、边框等完全一致），**只允许通过 `bgColor` 属性改变背景色，禁止通过 `class` 传入自定义样式类改变按钮外观**。
   - **各页面典型按钮组合示例**：
-    - **纯编辑保存**（如自定义 CSS）：左侧 `[dirty]`，右侧 `[关闭, 保存]`
-    - **编辑 + 语法检查**（如 Nginx 配置）：左侧 `[dirty, 检查语法]`，右侧 `[关闭, 保存, 保存并 Reload]`
-    - **文件管理**（如 files.php）：左侧 `[dirty]`，右侧 `[关闭, 下载, 删除, 保存]`
-    - **只读查看**（如 logs.php）：左侧 `[]`，右侧 `[关闭]`
+    - **纯编辑保存**（如自定义 CSS）：`[dirty, 关闭, 保存]`
+    - **编辑 + 语法检查**（如 Nginx 配置）：`[dirty, 检查语法, 关闭, 保存, 保存并 Reload]`
+    - **文件管理**（如 files.php）：`[dirty, 关闭, 下载, 删除, 保存]`
+    - **只读查看**（如 logs.php）：`[关闭]`
 - **参考实现**：`admin/files.php` 中的文件管理器弹窗编辑器（`fm-editor-modal`）和 `admin/nginx.php` 中的 Nginx 配置编辑器弹窗。
 - **待改造清单**（当前仍使用原生 `<textarea>`，需逐步替换为 Ace Editor 弹窗）：
   - `scheduled_tasks.php`：计划任务命令脚本
@@ -399,8 +402,8 @@ NavAceEditor.open({
 
   // ━━ 按钮配置 ━━
   buttons: {
-    left:  [],                  // 左侧按钮数组（辅助操作）
-    right: []                   // 右侧按钮数组（主操作）
+    left:  [],                  // 工具栏按钮数组（脏标记 + 辅助操作，渲染在工具栏左侧）
+    right: []                   // 工具栏按钮数组（主操作按钮，同样渲染在工具栏左侧）
   },
 
   // ━━ 回调函数 ━━
@@ -423,7 +426,8 @@ NavAceEditor.open({
   // 方式二：普通操作按钮
   text: '保存',                 // 按钮显示文本
   action: 'save',               // 按钮动作标识符，点击后传递给 onAction(action, value)
-  class: 'btn-primary',         // 按钮样式类。支持：btn-primary / btn-secondary / btn-danger / btn-success / btn-warning 以及项目其他标准按钮类
+  bgColor: '#4a9eff',           // 自定义背景色（推荐方式，新增按钮只允许改背景色）
+  class: 'btn-primary',         // 向后兼容：语义样式类（btn-primary / btn-secondary / btn-danger）
   visible: true,                // 是否渲染。支持 boolean 或返回 boolean 的函数 () => canWrite
   disabled: false               // 是否禁用。支持 boolean 或返回 boolean 的函数 () => isSaving
 }
@@ -436,7 +440,8 @@ NavAceEditor.open({
 | `type` | `string` | 否 | — | 特殊类型。目前仅 `'dirty'`：自动监听内容变化，显示「未修改 / 有未保存修改」。设置 `type` 后忽略 `text`/`action`/`class` 等字段。 |
 | `text` | `string` | 是* | — | 按钮显示文本（`*type='dirty' 时不需要`）。 |
 | `action` | `string` | 是* | — | 按钮动作标识符（`*type='dirty' 时不需要`）。点击后调用 `onAction(action, NavAceEditor.getValue())`。保留关键字：`save`（自动绑定 Ctrl-S）、`close`（自动绑定 Esc 和弹窗关闭）。 |
-| `class` | `string` | 否 | `btn-secondary` | 按钮样式类。常用：`btn-primary`（主操作，高亮）、`btn-secondary`（次要操作）、`btn-danger`（危险操作，如删除）。支持项目中任意有效的按钮 CSS 类。 |
+| `bgColor` | `string` | 否 | — | **新增按钮推荐方式**。自定义按钮背景色（如 `#4a9eff`、`rgba(61,255,160,.2)`）。设置后按钮使用统一基础样式，仅背景色生效。 |
+| `class` | `string` | 否 | `btn-secondary` | **向后兼容**。语义样式类：`btn-primary` / `btn-secondary` / `btn-danger` / `btn-success` / `btn-warning`。新写页面请优先使用 `bgColor`，避免传入自定义样式类。 |
 | `visible` | `boolean \| function` | 否 | `true` | 控制按钮是否渲染。`false` 时不渲染该按钮；支持传入函数动态判断，如 `visible: () => canDelete`。 |
 | `disabled` | `boolean \| function` | 否 | `false` | 控制按钮是否禁用（置灰不可点击）。支持布尔值或函数，如 `disabled: () => isSubmitting`。 |
 
