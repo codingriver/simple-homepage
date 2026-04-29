@@ -52,3 +52,20 @@ local/php-dev.ini
 # 部署编排/调试脚本（不需要打入运行镜像）
 docker-compose.yml
 pack.sh
+
+# PHP 开发依赖（生产运行不需要 composer autoload 外的任何 vendor 包）
+vendor/
+composer.json
+composer.lock
+
+# 测试代码与配置（生产不执行测试）
+tests/
+phpunit.xml
+playwright.config.ts
+tsconfig.json
+lighthouserc.json
+scripts/
+
+# npm 清单（纯开发依赖：Playwright / Lighthouse）
+package.json
+package-lock.json

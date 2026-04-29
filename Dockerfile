@@ -12,6 +12,8 @@ FROM php:8.2-fpm-alpine
 
 # ── 安装系统依赖 ──
 # Alpine 使用 apk，--no-cache 避免残留索引
+# 已移除生产不需要的包：vim、less、binutils、iproute2、net-tools
+# fileinfo 扩展依赖 libmagic（file 提供运行时库 + file-dev 开发头文件）
 RUN apk add --no-cache \
     nginx \
     supervisor \
@@ -21,21 +23,14 @@ RUN apk add --no-cache \
     dcron \
     python3 \
     py3-pip \
-    # fileinfo 扩展依赖 libmagic
     file \
     file-dev \
-    # 工具
     curl \
     bash \
     openssh-client \
     sshpass \
     gettext \
-    binutils \
-    ca-certificates \
-    iproute2 \
-    net-tools \
-    less \
-    vim
+    ca-certificates
 
 # ── 设置时区 ──
 ARG TZ=Asia/Shanghai

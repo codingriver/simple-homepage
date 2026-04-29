@@ -1,6 +1,5 @@
 <?php
-$page_title = 'Nginx 管理';
-require_once __DIR__ . '/shared/header.php';
+require_once __DIR__ . '/shared/functions.php';
 
 $targets = nginx_editable_targets();
 $target = trim((string)($_GET['target'] ?? 'main'));
@@ -17,7 +16,11 @@ $lang = strtolower(trim((string)($_GET['lang'] ?? 'nginx')));
 if (!isset($langOptions[$lang])) $lang = 'nginx';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  require_once __DIR__ . '/shared/functions.php';
+  $current_user = auth_get_current_user();
+  if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
+    header('Location: /login.php');
+    exit;
+  }
   csrf_check();
   $action = trim((string)($_POST['action'] ?? ''));
 
@@ -158,6 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
   }
 }
+
+$page_title = 'Nginx 管理';
+require_once __DIR__ . '/shared/header.php';
 
 $cap = nginx_reload_capability();
 $editorDataMap = [];
