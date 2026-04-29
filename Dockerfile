@@ -27,7 +27,8 @@ RUN apk add --no-cache \
     curl \
     bash \
     gettext \
-    ca-certificates
+    ca-certificates \
+    icu-libs
 
 # ── 设置时区 ──
 ARG TZ=Asia/Shanghai
