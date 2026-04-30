@@ -197,11 +197,21 @@ function homepage_render_site_card(array $site, array $group, string $href, stri
     <span class="hd" style="position:absolute;bottom:5px;right:6px;width:7px;height:7px;border-radius:50%;background:<?= $healthStatus === 'up' ? '#4ade80' : '#f87171' ?>;box-shadow:0 0 5px <?= $healthStatus === 'up' ? '#4ade80' : '#f87171' ?>;" title="<?= $healthStatus === 'up' ? '在线' : '离线' ?>"></span>
     <?php endif; ?>
     <div class="ci">
-      <?php if ($domain && !is_private_ip((string)$domain)): ?>
-      <img src="/favicon.php?url=<?= urlencode('https://' . $domain) ?>"
+      <?php if ($domain && !is_private_ip((string)$domain)):
+          $fav_hash = md5($domain);
+          $fav_cache = DATA_DIR . '/favicon_cache/' . $fav_hash . '.ico';
+          $fav_has_cache = file_exists($fav_cache) && (time() - filemtime($fav_cache)) < 7 * 86400;
+          if ($fav_has_cache): ?>
+      <img src="/favicon_cache/<?= $fav_hash ?>.ico"
            onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
            alt="" loading="lazy">
       <span style="display:none"><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
+          <?php else: ?>
+      <img data-src="/favicon.php?url=<?= urlencode('https://' . $domain) ?>" src=""
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
+           alt="" loading="lazy">
+      <span style="display:none"><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
+          <?php endif; ?>
       <?php else: ?>
       <span><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
       <?php endif; ?>
@@ -460,7 +470,7 @@ footer{text-align:center;padding:18px 14px;color:var(--tm);font-size:12px;border
 body.search-open .group-chip{display:block}
 #proxy-pending-bar{background:linear-gradient(180deg,rgba(239,68,68,.12),rgba(239,68,68,.06));border:1px solid rgba(239,68,68,.35);border-radius:14px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 #proxy-pending-bar .proxy-pending-text{color:#fca5a5;font-size:13px;flex:1;line-height:1.6}
-#proxy-pending-bar .proxy-pending-action{background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.42);color:#fda4af;border-radius:10px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap}
+#proxy-pending-bar .proxy-pending-action{background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.42);color:#fda4af;border-radius:10px;padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center}
 .hidden{display:none!important}
 /* ── Tooltip ── */
 .card{position:relative}
@@ -564,15 +574,11 @@ opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
       以下代理站点配置已修改但尚未生效：
       <strong><?= implode('、', array_map(function($s){ return htmlspecialchars($s['name']); }, $_pending_proxy)) ?></strong>
     <?php else: ?>
-      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点配置已修改但尚未生效，请及时 Reload Nginx 使其生效。
+      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点配置已修改但尚未生效，请及时前往后台「Nginx 管理」点击「🔄 生成配置并 Reload」。
     <?php endif; ?>
   </span>
   <?php if ($is_admin): ?>
-  <form method="POST" action="/admin/settings.php" style="margin:0">
-    <?= csrf_field() ?>
-    <input type="hidden" name="action" value="nginx_apply_and_reload">
-    <button type="submit" class="proxy-pending-action">🔄 生成配置并 Reload Nginx</button>
-  </form>
+  <a href="/admin/nginx.php" class="proxy-pending-action">🔄 前往 Nginx 管理</a>
   <?php endif; ?>
 </div>
 <?php endif; ?>
@@ -830,10 +836,47 @@ searchInput.addEventListener('input',applyFilters);
 updateRecentSection();
 applyFilters();
 
+// ── 延迟加载未缓存的 Favicon（避免影响页面加载完成判定）──
+window.addEventListener('load', function() {
+  document.querySelectorAll('img[data-src]').forEach(function(img) {
+    if (img.dataset.src) {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    }
+  });
+});
+
 // ── Service Worker 注册 ──
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(function(){});
 }
+
+// ── 心跳：保持会话活跃状态，浏览器关闭后心跳停止，服务端自动判定离线 ──
+(function(){
+  var heartbeatInterval = 60 * 1000; // 60秒
+  var timer = null;
+  function sendHeartbeat() {
+    fetch('/api/heartbeat', { method: 'GET', credentials: 'same-origin' })
+      .then(function(r) {
+        if (r.status === 401) {
+          // 未登录，停止心跳
+          clearInterval(timer);
+          timer = null;
+        }
+      })
+      .catch(function(){});
+  }
+  // 页面可见时发送心跳，切后台时暂停节省资源
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) {
+      if (timer) { clearInterval(timer); timer = null; }
+    } else {
+      if (!timer) { sendHeartbeat(); timer = setInterval(sendHeartbeat, heartbeatInterval); }
+    }
+  });
+  // 初始启动
+  timer = setInterval(sendHeartbeat, heartbeatInterval);
+})();
 
 // ── 命令面板 (Cmd/Ctrl + K) ──
 (function(){

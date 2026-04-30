@@ -237,15 +237,6 @@
       }, { passive: false });
     }
 
-    // 全屏切换
-    var isFullscreen = false;
-    function toggleFullscreen() {
-      if (!els.modalCard) return;
-      isFullscreen = !isFullscreen;
-      els.modalCard.classList.toggle('fullscreen', isFullscreen);
-      if (els.fullscreenBtn) els.fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
-      setTimeout(function() { if (editor) editor.resize(); }, 20);
-    }
     if (els.fullscreenBtn) {
       els.fullscreenBtn.addEventListener('click', toggleFullscreen);
     }
@@ -368,6 +359,34 @@
       status.textContent = dirty ? '· 有未保存修改' : '· 未修改';
       status.classList.toggle('dirty', dirty);
     }
+  }
+
+  // ── 全屏状态 ──
+  var isFullscreen = false;
+  function toggleFullscreen() {
+    if (!els.modalCard) return;
+    isFullscreen = !isFullscreen;
+    els.modalCard.classList.toggle('fullscreen', isFullscreen);
+    if (els.fullscreenBtn) els.fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
+    setTimeout(function() { if (editor) editor.resize(); }, 20);
+  }
+
+  // ── 关闭编辑器内部逻辑 ──
+  function doCloseEditor() {
+    closeGotoBar();
+    if (isFullscreen) toggleFullscreen();
+    if (els.footer) {
+      els.footer.innerHTML = '';
+      els.footer.style.display = 'none';
+    }
+    dirty = false;
+    initialValue = '';
+
+    if (typeof config.onClose === 'function') {
+      try { config.onClose(); } catch(e) {}
+    }
+    config = {};
+    if (els.modal) els.modal.classList.remove('open');
   }
 
   // ── 按钮辅助 ──
@@ -599,22 +618,6 @@
 
       doCloseEditor();
     },
-
-    function doCloseEditor() {
-      closeGotoBar();
-      if (isFullscreen) toggleFullscreen();
-      if (els.footer) {
-        els.footer.innerHTML = '';
-        els.footer.style.display = 'none';
-      }
-      dirty = false;
-      initialValue = '';
-
-      if (typeof config.onClose === 'function') {
-        try { config.onClose(); } catch(e) {}
-      }
-      config = {};
-    }
 
     getValue: function() {
       return editor ? editor.getValue() : '';

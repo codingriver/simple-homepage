@@ -72,7 +72,7 @@ function auth_default_config(): array {
 
         'task_execution_timeout' => 7200,
         'nginx_last_applied'  => 0,
-        'fs_allowed_roots'    => [],
+
     ];
 }
 
@@ -638,7 +638,7 @@ function auth_generate_token(string $username, string $role = 'user', bool $reme
     $data = base64_encode(json_encode($payload));
     $sig  = hash_hmac('sha256', $data, auth_secret_key());
     $token = $data . '.' . $sig;
-    auth_session_register($jti, $username, $token);
+    auth_session_register($jti, $username, $token, $payload['exp']);
     return $token;
 }
 
@@ -657,16 +657,24 @@ function auth_verify_token(string $token) {
     if (!hash_equals($expected, $sig)) return false;
     $payload = json_decode(base64_decode($data), true);
     if (!$payload || !isset($payload['exp'])) return false;
-    if (time() > $payload['exp']) return false;
+    if (time() > $payload['exp']) {
+        if (!empty($payload['jti'])) {
+            auth_session_revoke((string)$payload['jti']);
+        }
+        return false;
+    }
     if (!empty($payload['jti']) && !auth_session_exists((string)$payload['jti'])) {
         return false;
+    }
+    if (!empty($payload['jti'])) {
+        auth_session_touch((string)$payload['jti']);
     }
     return $payload;
 }
 
 // ── 会话管理 ──
 
-function auth_session_register(string $jti, string $username, string $token): void {
+function auth_session_register(string $jti, string $username, string $token, int $expiresAt = 0): void {
     $dir = dirname(SESSIONS_FILE);
     if (!is_dir($dir)) mkdir($dir, 0755, true);
     $sessions = [];
@@ -676,9 +684,11 @@ function auth_session_register(string $jti, string $username, string $token): vo
     $sessions[$jti] = [
         'username'    => $username,
         'created_at'  => date('Y-m-d H:i:s'),
-        'ip'          => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'ip'          => get_client_ip(),
         'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? '',
         'token_prefix'=> substr($token, 0, 16) . '...',
+        'last_active' => date('Y-m-d H:i:s'),
+        'expires_at'  => $expiresAt > 0 ? date('Y-m-d H:i:s', $expiresAt) : date('Y-m-d H:i:s', time() + 28800),
     ];
     // 清理过期条目（保留最多 500 条）
     if (count($sessions) > 500) {
@@ -693,6 +703,55 @@ function auth_session_exists(string $jti): bool {
     }
     $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
     return isset($sessions[$jti]);
+}
+
+/**
+ * 更新会话最后活跃时间
+ */
+function auth_session_touch(string $jti): void {
+    if (!file_exists(SESSIONS_FILE)) return;
+    $fp = fopen(SESSIONS_FILE, 'c+');
+    if (!$fp) return;
+    flock($fp, LOCK_EX);
+    $content = stream_get_contents($fp);
+    $sessions = json_decode($content, true) ?? [];
+    if (isset($sessions[$jti])) {
+        $sessions[$jti]['last_active'] = date('Y-m-d H:i:s');
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    }
+    flock($fp, LOCK_UN);
+    fclose($fp);
+}
+
+/**
+ * 获取用户在线状态
+ * @return array{status: string, label: string, last_active: ?string}
+ */
+function auth_user_online_status(string $username): array {
+    $sessions = auth_session_list($username);
+    if (empty($sessions)) {
+        return ['status' => 'offline', 'label' => '离线', 'last_active' => null];
+    }
+    $lastActive = null;
+    foreach ($sessions as $s) {
+        $la = $s['last_active'] ?? $s['created_at'] ?? null;
+        if ($la && ($lastActive === null || $la > $lastActive)) {
+            $lastActive = $la;
+        }
+    }
+    if (!$lastActive) {
+        return ['status' => 'offline', 'label' => '离线', 'last_active' => null];
+    }
+    $diff = time() - strtotime($lastActive);
+    if ($diff <= 300) { // 5分钟内活跃视为在线
+        return ['status' => 'online', 'label' => '在线', 'last_active' => $lastActive];
+    }
+    if ($diff <= 600) { // 5-10分钟视为刚离线
+        return ['status' => 'recent', 'label' => '刚离线', 'last_active' => $lastActive];
+    }
+    return ['status' => 'offline', 'label' => '离线', 'last_active' => $lastActive];
 }
 
 function auth_session_revoke(string $jti): bool {
@@ -719,12 +778,25 @@ function auth_session_revoke(string $jti): bool {
 function auth_session_list(?string $filterUsername = null): array {
     if (!file_exists(SESSIONS_FILE)) return [];
     $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+    $now = time();
     $result = [];
+    $changed = false;
     foreach ($sessions as $jti => $meta) {
+        $expiresAt = !empty($meta['expires_at']) ? strtotime($meta['expires_at']) : 0;
+        $lastActive = !empty($meta['last_active']) ? strtotime($meta['last_active']) : 0;
+        // 清理 Token 已过期 或 超过 5 分钟未活跃的会话
+        if (($expiresAt > 0 && $now > $expiresAt) || ($lastActive > 0 && $now - $lastActive > 300)) {
+            unset($sessions[$jti]);
+            $changed = true;
+            continue;
+        }
         if ($filterUsername !== null && ($meta['username'] ?? '') !== $filterUsername) {
             continue;
         }
         $result[] = ['jti' => $jti] + $meta;
+    }
+    if ($changed) {
+        file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
     return array_reverse($result);
 }
@@ -818,6 +890,7 @@ function auth_dev_qa_user_record(): array {
         'role'          => 'admin',
         'created_at'    => '(dev)',
         'updated_at'    => '(dev)',
+        'max_sessions'  => 3,
         '__dev_virtual' => true,
     ];
 }
@@ -932,6 +1005,24 @@ function auth_check_password(string $username, string $password) {
     if (!isset($users[$username])) return false;
     if (!password_verify($password, $users[$username]['password_hash'])) return false;
     return $users[$username];
+}
+
+/**
+ * 获取用户最大同时在线设备数
+ */
+function auth_user_max_sessions(string $username): int {
+    $users = auth_load_users();
+    $val = $users[$username]['max_sessions'] ?? null;
+    if ($val === null || $val === '') return 3;
+    $n = (int)$val;
+    return $n >= 1 ? $n : 3;
+}
+
+/**
+ * 获取用户当前活跃会话数量
+ */
+function auth_user_active_session_count(string $username): int {
+    return count(auth_session_list($username));
 }
 
 /**

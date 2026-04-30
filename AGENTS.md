@@ -44,7 +44,7 @@
 | `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + Supervisor + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、反代配置预生成、sudo 白名单设置 |
 | `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
-| `docker/nginx.conf` / `nginx-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
+| `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；支持代理环境变量透传 |
 | `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新、启用 `NAV_DEV_MODE`、临时挂载 `docker.sock` |
 | `local/docker-compose.test.yml` | 测试环境叠加配置：定义 `playwright-full`、`playwright-mobile`、`lighthouse` 服务 |
@@ -112,10 +112,10 @@ python/          # Python 辅助脚本
   dns_core.py    # DNS 核心逻辑
 
 docker/          # Docker 构建配置
-  nginx.conf / nginx-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh
+  nginx.conf / docker-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh
 
 nginx-conf/      # Nginx 配置模板
-  proxy-params-simple.conf / proxy-params-full.conf / subsite.conf / nav.conf
+  proxy-params-simple.conf / proxy-params-full.conf / proxy-template-domain.conf / proxy-template-path.conf
 
 data/            # 持久化数据目录（必须挂载到宿主机）
   config.json / sites.json / users.json / scheduled_tasks.json / dns_config.json / ddns_tasks.json
@@ -627,6 +627,40 @@ function openLogViewer(logContent, logName) {
 | `admin/shared/admin.css` | 已包含 `.ngx-modal`、`.ngx-editor-*` 等样式，无需新增 CSS。`nginx.php` 中的内联重复 CSS 应删除。 |
 | `admin/assets/ace/ace.js` | 已有本地资源。 |
 | `admin/assets/ace/ext-searchbox.js` | 已有本地资源（查找/跳转功能依赖）。 |
+
+---
+
+##### 十、使用 NavAceEditor 作为日志查看器的规范
+
+当把 `NavAceEditor` 用作**只读日志查看器**（如 `scheduled_tasks.php` 的运行日志、`logs.php` 的 Ace 弹窗模式）时，**禁止各页面自行编写弹窗逻辑**，必须严格遵循以下约定，确保所有页面的弹窗界面、底部工具栏、交互行为完全一致：
+
+1. **禁止从零实现，必须完整复制参考代码**
+   - 以 `scheduled_tasks.php` 的 **`openLogModal()` + `logLoadPage()`** 为**唯一模板**。
+   - 复制时只允许改**数据源**（API 地址）和**变量名**，不允许改结构、删按钮、改样式、改交互逻辑。
+   - 具体必须一致的元素：
+     - `footerHtml` 的 DOM 结构、按钮数量、按钮顺序、`id` 命名规范
+     - 弹窗内分页状态对象（`logState` / `aceLogState`）的字段
+     - 翻页函数（`logGoPage` / `aceLogGoPage`）的边界检查逻辑
+     - 加载函数（`logLoadPage` / `aceLogLoadPage`）的 API 调用 → `setValue()` → 更新底部元素 → 更新按钮禁用态 的完整流程
+
+2. **底部工具栏必须通过 `footerHtml` 渲染，且按钮数量和功能固定**
+   - `buttons` 配置中的按钮会渲染到弹窗**顶部工具栏**，而非底部；且 `action: 'close'` 会被过滤。因此底部内容**只能用 `footerHtml`**。
+   - 底部必须包含以下元素（顺序和样式与 `scheduled_tasks.php` 一致）：
+     - 信息区：`共 X 行，每页 Y 行`
+     - `◀ 上一页` 按钮（带 `id`，禁用态由加载函数更新）
+     - 页码标签：`第 X / Y 页`（带 `id`，由加载函数更新）
+     - `下一页 ▶` 按钮（带 `id`，禁用态由加载函数更新）
+     - `⏮` 首页按钮（`title="第一页"`）
+     - `⏭` 末页按钮（带 `id`，`title="最后一页"`，禁用态由加载函数更新）
+
+3. **关闭弹窗统一使用标题栏 ×、蒙层点击或 Esc 键**
+   - 不要在 `buttons` 或页面中额外实现关闭按钮，避免与公共组件的关闭逻辑冲突。
+
+4. **遇到"参考 XX"需求时的强制流程**
+   - 第一步：把参考文件的**完整相关函数**（含 HTML、JS、状态对象）复制到草稿。
+   - 第二步：逐行对比，确认自己的实现和参考实现在结构、按钮数量、交互逻辑上无差异。
+   - 第三步：只允许做最小必要的适配（如改 API 地址、改标题前缀），禁止"优化"或"简化"。
+   - 第四步：截图或代码 diff 验证，确认底部工具栏的按钮数量、顺序、功能与参考实现一致。
 
 ---
 

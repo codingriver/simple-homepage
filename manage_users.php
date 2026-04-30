@@ -347,7 +347,7 @@ PPFEOF;
                 echo "[10/10] ✅ /etc/nginx/proxy_params_full 已自动创建（19组完整参数）\n";
             } else {
                 echo "[10/10] ⚠️  /etc/nginx/ 无写权限，请手动创建 proxy_params_full\n";
-                echo "         运行：cp /path/to/proxy_params_full.conf /etc/nginx/proxy_params_full\n";
+                echo "         运行：cp /path/to/proxy-params-full.conf /etc/nginx/proxy-params-full\n";
                 // 输出内容供手动复制
                 echo "\n--- proxy_params_full 内容（请手动保存）---\n";
                 echo $ppf_content;

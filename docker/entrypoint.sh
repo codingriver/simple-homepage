@@ -115,7 +115,7 @@ fi
 remap_nav_user
 
 # ── 将 NAV_PORT 注入 Nginx 站点配置 ──
-# nginx-site.conf 中使用了 ${NAV_PORT} 占位，用 envsubst 替换
+# nginx-conf/docker-site.conf（容器内为 /etc/nginx/http.d/nav.conf）中使用了 ${NAV_PORT} 占位，用 envsubst 替换
 if command -v envsubst >/dev/null 2>&1; then
     envsubst '${NAV_PORT}' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp
     mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf
@@ -191,10 +191,25 @@ chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
 # ── 确保 Nginx 主配置对运行用户可写（后台编辑需要）──
 chown root:navwww /etc/nginx/nginx.conf
 chmod 664 /etc/nginx/nginx.conf
-if ! nav_run "touch /var/www/nav/data/nginx/proxy-params-simple.conf /var/www/nav/data/nginx/proxy-params-full.conf"; then
-    echo "[entrypoint][ERROR] 无法初始化 /var/www/nav/data/nginx 下的代理模板文件，请检查宿主机挂载目录权限。"
-    exit 1
-fi
+# ── 从镜像复制 Nginx 代理模板到数据目录（不存在/为空/不可读写时）──
+for tmpl in proxy-params-simple.conf proxy-params-full.conf proxy-template-path.conf proxy-template-domain.conf; do
+    src="/var/www/nav/nginx-conf/$tmpl"
+    dst="/var/www/nav/data/nginx/$tmpl"
+    need_copy=0
+    if [ ! -f "$dst" ]; then
+        need_copy=1
+    elif [ ! -s "$dst" ]; then
+        need_copy=1
+    elif [ ! -r "$dst" ] || [ ! -w "$dst" ]; then
+        need_copy=1
+    fi
+    if [ "$need_copy" = 1 ] && [ -f "$src" ] && [ -r "$src" ]; then
+        cp "$src" "$dst"
+        chown navwww:navwww "$dst"
+        chmod 755 "$dst"
+        echo "[entrypoint] 已从镜像复制 $tmpl 到 data/nginx/"
+    fi
+done
 
 # ── 根据持久化数据预生成反代配置（容器重建后 /etc/nginx 下的动态配置会丢失）──
 if [ -f /var/www/nav/data/sites.json ]; then

@@ -24,19 +24,17 @@ final class DockerEntrypointTest extends TestCase
 
     public function testNginxSiteConfContainsNavPortPlaceholder(): void
     {
-        $content = file_get_contents(realpath(__DIR__ . '/../../../docker/nginx-site.conf'));
+        $content = file_get_contents(realpath(__DIR__ . '/../../../nginx-conf/docker-site.conf'));
         $this->assertStringContainsString('NAV_PORT', $content);
     }
 
     public function testNginxTemplateFilesExist(): void
     {
         $templates = [
-            'nav.conf',
             'proxy-params-full.conf',
             'proxy-params-simple.conf',
-            'proxy_params_full.conf',
-            'proxy_params_simple.conf',
-            'subsite.conf',
+            'proxy-template-domain.conf',
+            'proxy-template-path.conf',
         ];
         foreach ($templates as $t) {
             $this->assertFileExists(realpath(__DIR__ . "/../../../nginx-conf/{$t}"), "Template {$t} should exist");

@@ -30,6 +30,49 @@ function save_sites(array $data): void {
         LOCK_EX);
 }
 
+/**
+ * 触发指定域名的 Favicon 后台预抓取
+ */
+function favicon_trigger_sync(string $domain): void {
+    $domain = strtolower(trim($domain));
+    if ($domain === '' || is_private_ip($domain)) {
+        return;
+    }
+    $cache_dir = DATA_DIR . '/favicon_cache';
+    $cache_file = $cache_dir . '/' . md5($domain) . '.ico';
+    if (file_exists($cache_file) && (time() - filemtime($cache_file)) < 7 * 86400) {
+        return;
+    }
+    // 复用 cron_lib 中的 PHP 二进制查找逻辑
+    $phpCandidates = array_values(array_unique(array_filter([
+        PHP_BINDIR . '/php',
+        PHP_BINARY,
+        '/usr/local/bin/php',
+        '/usr/bin/php',
+        'php',
+    ], static fn($c) => is_string($c) && trim($c) !== '')));
+    $php = 'php';
+    foreach ($phpCandidates as $candidate) {
+        $candidate = trim((string)$candidate);
+        if ($candidate === '') continue;
+        $base = strtolower(basename($candidate));
+        if ($base !== 'php' && (str_starts_with($base, 'php-fpm') || str_starts_with($base, 'php-cgi'))) {
+            continue;
+        }
+        if ($candidate === 'php' || (is_file($candidate) && is_executable($candidate))) {
+            $php = $candidate;
+            break;
+        }
+    }
+    $script = realpath(__DIR__ . '/../../cli/favicon_sync.php');
+    if (!$script) {
+        return;
+    }
+    $cmd = escapeshellcmd($php) . ' ' . escapeshellarg($script)
+        . ' --domain ' . escapeshellarg($domain) . ' >/dev/null 2>&1 &';
+    @exec($cmd);
+}
+
 // ── 系统配置 ──
 
 /** 读取系统配置（含默认值，确保所有字段存在，与 auth_get_config() 保持一致）*/
@@ -1188,6 +1231,27 @@ function nginx_generate_proxy_conf(): array {
     $path_blocks   = []; // location /p/{slug}/ 块（追加到主站 server 内，需手动 include）
     $domain_blocks = []; // 独立 server 块（子域名模式）
 
+    // 读取反代配置模板（如不存在则后续 fallback 到硬编码）
+    $tplPaths = nginx_proxy_template_file_paths();
+    $tplPath = @file_get_contents($tplPaths['path']);
+    $tplDomain = @file_get_contents($tplPaths['domain']);
+    $useTplPath = $tplPath !== false && trim($tplPath) !== '';
+    $useTplDomain = $tplDomain !== false && trim($tplDomain) !== '';
+
+    // 校验模板必填占位符，缺失则回退到硬编码
+    if ($useTplPath) {
+        $v = nginx_validate_proxy_template($tplPath, ['name', 'slug', 'target', 'params_file']);
+        if (!$v['ok']) {
+            $useTplPath = false;
+        }
+    }
+    if ($useTplDomain) {
+        $v = nginx_validate_proxy_template($tplDomain, ['name', 'domain', 'target', 'params_file', 'nav_domain', 'port']);
+        if (!$v['ok']) {
+            $useTplDomain = false;
+        }
+    }
+
     foreach ($groups as $grp) {
         foreach ($grp['sites'] ?? [] as $s) {
             if (($s['type'] ?? '') !== 'proxy') continue;
@@ -1200,58 +1264,80 @@ function nginx_generate_proxy_conf(): array {
 
             if (($s['proxy_mode'] ?? 'path') === 'path') {
                 $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
-                $block_lines = [
-                    "    # {$name}",
-                    "    location /p/{$slug}/ {",
-                    "        if (\$cookie_nav_session = \"\") { return 302 /login.php?redirect=\$request_uri; }",
-                    "        auth_request      /auth/verify.php;",
-                    "        error_page 401  = @login_redirect;",
-                    "        proxy_pass        {$target}/;",
-                    "        include           {$selected_params_file};",
-                ];
-                $block_lines[] = "    }";
-                $path_blocks[] = implode("\n", $block_lines);
+                if ($useTplPath) {
+                    $path_blocks[] = nginx_render_proxy_template($tplPath, [
+                        'name' => $name,
+                        'slug' => $slug,
+                        'target' => $target,
+                        'params_file' => $selected_params_file,
+                    ]);
+                } else {
+                    // 硬编码 fallback
+                    $block_lines = [
+                        "    # {$name}",
+                        "    location /p/{$slug}/ {",
+                        "        if (\$cookie_nav_session = \"\") { return 302 /login.php?redirect=\$request_uri; }",
+                        "        auth_request      /auth/verify.php;",
+                        "        error_page 401  = @login_redirect;",
+                        "        proxy_pass        {$target}/;",
+                        "        include           {$selected_params_file};",
+                    ];
+                    $block_lines[] = "    }";
+                    $path_blocks[] = implode("\n", $block_lines);
+                }
             } else {
                 // 子域名模式：独立 server 块
                 $pd = nginx_sanitize_config_literal($s['proxy_domain'] ?? '');
                 if (!$pd || !preg_match('/^[a-zA-Z0-9._-]+$/', $pd)) continue;
-                $block_lines = [
-                    "server {",
-                    "    listen {$port};",
-                    "    listen [::]:{$port};",
-                    "    server_name {$pd};",
-                    "",
-                    "    location = /auth/verify {",
-                    "        internal;",
-                    "        fastcgi_pass unix:/run/php-fpm.sock;",
-                    "        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/auth/verify.php;",
-                    "        fastcgi_pass_request_body off;",
-                    "        fastcgi_param CONTENT_LENGTH \"\";",
-                    "        include fastcgi_params;",
-                    "        fastcgi_param HTTP_X_REAL_IP \$remote_addr;",
-                    "        fastcgi_param HTTP_X_FORWARDED_FOR \$proxy_add_x_forwarded_for;",
-                    "        fastcgi_param HTTP_X_FORWARDED_PROTO \$http_x_forwarded_proto;",
-                    "        fastcgi_connect_timeout 10s;",
-                    "        fastcgi_send_timeout 30s;",
-                    "        fastcgi_read_timeout 30s;",
-                    "    }",
-                    "",
-                    "    location / {",
-                    "        if (\$cookie_nav_session = \"\") { return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri; }",
-                    "        auth_request /auth/verify;",
-                    "        error_page 401 = @nav_login;",
-                    "        proxy_pass {$target};",
-                    "        include {$selected_params_file};",
-                ];
-                $block_lines = array_merge($block_lines, [
-                    "    }",
-                    "",
-                    "    location @nav_login {",
-                    "        return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri;",
-                    "    }",
-                    "}",
-                ]);
-                $domain_blocks[] = implode("\n", $block_lines);
+                if ($useTplDomain) {
+                    $domain_blocks[] = nginx_render_proxy_template($tplDomain, [
+                        'name' => $name,
+                        'domain' => $pd,
+                        'target' => $target,
+                        'params_file' => $selected_params_file,
+                        'nav_domain' => $nav_domain,
+                        'port' => (string)$port,
+                    ]);
+                } else {
+                    // 硬编码 fallback
+                    $block_lines = [
+                        "server {",
+                        "    listen {$port};",
+                        "    listen [::]:{$port};",
+                        "    server_name {$pd};",
+                        "",
+                        "    location = /auth/verify {",
+                        "        internal;",
+                        "        fastcgi_pass unix:/run/php-fpm.sock;",
+                        "        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/auth/verify.php;",
+                        "        fastcgi_pass_request_body off;",
+                        "        fastcgi_param CONTENT_LENGTH \"\";",
+                        "        include fastcgi_params;",
+                        "        fastcgi_param HTTP_X_REAL_IP \$remote_addr;",
+                        "        fastcgi_param HTTP_X_FORWARDED_FOR \$proxy_add_x_forwarded_for;",
+                        "        fastcgi_param HTTP_X_FORWARDED_PROTO \$http_x_forwarded_proto;",
+                        "        fastcgi_connect_timeout 10s;",
+                        "        fastcgi_send_timeout 30s;",
+                        "        fastcgi_read_timeout 30s;",
+                        "    }",
+                        "",
+                        "    location / {",
+                        "        if (\$cookie_nav_session = \"\") { return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri; }",
+                        "        auth_request /auth/verify;",
+                        "        error_page 401 = @nav_login;",
+                        "        proxy_pass {$target};",
+                        "        include {$selected_params_file};",
+                    ];
+                    $block_lines = array_merge($block_lines, [
+                        "    }",
+                        "",
+                        "    location @nav_login {",
+                        "        return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri;",
+                        "    }",
+                        "}",
+                    ]);
+                    $domain_blocks[] = implode("\n", $block_lines);
+                }
             }
         }
     }
@@ -1497,6 +1583,18 @@ function nginx_proxy_params_file_paths(): array {
 }
 
 /**
+ * 反代配置模板文件路径
+ */
+function nginx_proxy_template_file_paths(): array {
+    $baseDataDir = realpath(DATA_DIR) ?: DATA_DIR;
+    $dir = rtrim($baseDataDir, '/') . '/nginx';
+    return [
+        'path' => $dir . '/proxy-template-path.conf',
+        'domain' => $dir . '/proxy-template-domain.conf',
+    ];
+}
+
+/**
  * 精简反代参数模板（默认内置版本）
  */
 function nginx_default_proxy_params_simple_template(): string {
@@ -1522,13 +1620,81 @@ function nginx_default_proxy_params_simple_template(): string {
 }
 
 /**
+ * 路径模式反代配置默认模板（优先项目模板，其次内置）
+ */
+function nginx_default_proxy_template_path(): string {
+    $projectRoot = dirname(__DIR__, 2);
+    $candidate = $projectRoot . '/nginx-conf/proxy-template-path.conf';
+    $content = @file_get_contents($candidate);
+    if ($content !== false && trim($content) !== '') {
+        return rtrim($content) . "\n";
+    }
+    return implode("\n", [
+        '    # {{name}}',
+        '    location /p/{{slug}}/ {',
+        '        if ($cookie_nav_session = "") { return 302 /login.php?redirect=$request_uri; }',
+        '        auth_request      /auth/verify.php;',
+        '        error_page 401  = @login_redirect;',
+        '        proxy_pass        {{target}}/;',
+        '        include           {{params_file}};',
+        '    }',
+    ]) . "\n";
+}
+
+/**
+ * 子域名模式反代配置默认模板（优先项目模板，其次内置）
+ */
+function nginx_default_proxy_template_domain(): string {
+    $projectRoot = dirname(__DIR__, 2);
+    $candidate = $projectRoot . '/nginx-conf/proxy-template-domain.conf';
+    $content = @file_get_contents($candidate);
+    if ($content !== false && trim($content) !== '') {
+        return rtrim($content) . "\n";
+    }
+    return implode("\n", [
+        'server {',
+        '    listen {{port}};',
+        '    listen [::]:{{port}};',
+        '    server_name {{domain}};',
+        '',
+        '    location = /auth/verify {',
+        '        internal;',
+        '        fastcgi_pass unix:/run/php-fpm.sock;',
+        '        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/auth/verify.php;',
+        '        fastcgi_pass_request_body off;',
+        '        fastcgi_param CONTENT_LENGTH "";',
+        '        include fastcgi_params;',
+        '        fastcgi_param HTTP_X_REAL_IP $remote_addr;',
+        '        fastcgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;',
+        '        fastcgi_param HTTP_X_FORWARDED_PROTO $http_x_forwarded_proto;',
+        '        fastcgi_connect_timeout 10s;',
+        '        fastcgi_send_timeout 30s;',
+        '        fastcgi_read_timeout 30s;',
+        '    }',
+        '',
+        '    location / {',
+        '        if ($cookie_nav_session = "") { return 302 https://{{nav_domain}}/login.php?redirect=https://$host$request_uri; }',
+        '        auth_request /auth/verify;',
+        '        error_page 401 = @nav_login;',
+        '        proxy_pass {{target}};',
+        '        include {{params_file}};',
+        '    }',
+        '',
+        '    location @nav_login {',
+        '        return 302 https://{{nav_domain}}/login.php?redirect=https://$host$request_uri;',
+        '    }',
+        '}',
+    ]) . "\n";
+}
+
+/**
  * 完整反代参数模板（优先项目模板，其次 docs 示例）
  */
 function nginx_default_proxy_params_full_template(): string {
     $projectRoot = dirname(__DIR__, 2);
     $candidates = [
-        $projectRoot . '/nginx-conf/proxy_params_full.conf',
-        $projectRoot . '/docs/proxy_params_full.conf',
+        $projectRoot . '/nginx-conf/proxy-params-full.conf',
+        $projectRoot . '/docs/proxy-params-full.conf',
     ];
     foreach ($candidates as $path) {
         $content = @file_get_contents($path);
@@ -1560,8 +1726,8 @@ function nginx_default_proxy_params_full_template(): string {
 
 /**
  * 生成并写入反代参数模板文件
- * full：使用 nginx-conf/proxy_params_full.conf（不存在时回退 docs/ 与内置模板）
- * simple：使用 nginx-conf/proxy_params_simple.conf（不存在时回退内置模板）
+ * full：使用 nginx-conf/proxy-params-full.conf（不存在时回退 docs/ 与内置模板）
+ * simple：使用 nginx-conf/proxy-params-simple.conf（不存在时回退内置模板）
  * @return array{ok:bool,msg:string}
  */
 function nginx_write_proxy_params_templates(): array {
@@ -1574,7 +1740,7 @@ function nginx_write_proxy_params_templates(): array {
     }
 
     $projectRoot = dirname(__DIR__, 2);
-    $simpleTemplatePath = $projectRoot . '/nginx-conf/proxy_params_simple.conf';
+    $simpleTemplatePath = $projectRoot . '/nginx-conf/proxy-params-simple.conf';
     $simpleContent = @file_get_contents($simpleTemplatePath);
     if ($simpleContent === false || trim($simpleContent) === '') {
         $simpleContent = nginx_default_proxy_params_simple_template();
@@ -1593,6 +1759,57 @@ function nginx_write_proxy_params_templates(): array {
     return ['ok' => true, 'msg' => 'ok'];
 }
 
+/**
+ * 生成并写入反代配置模板文件
+ * @return array{ok:bool,msg:string}
+ */
+function nginx_write_proxy_templates(): array {
+    $paths = nginx_proxy_template_file_paths();
+    $dir = dirname($paths['path']);
+    if (!is_dir($dir)) {
+        if (!@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['ok' => false, 'msg' => '创建反代配置模板目录失败：' . $dir];
+        }
+    }
+
+    $pathContent = nginx_default_proxy_template_path();
+    $domainContent = nginx_default_proxy_template_domain();
+
+    $okPath = @file_put_contents($paths['path'], $pathContent, LOCK_EX);
+    $okDomain = @file_put_contents($paths['domain'], $domainContent, LOCK_EX);
+    if ($okPath === false || $okDomain === false) {
+        return ['ok' => false, 'msg' => '写入反代配置模板文件失败，请检查 Nginx 配置目录写入权限'];
+    }
+    return ['ok' => true, 'msg' => 'ok'];
+}
+
+/**
+ * 渲染反代配置模板，替换占位符
+ * @param string $template 模板内容
+ * @param array<string,string> $vars 占位符变量
+ * @return string
+ */
+function nginx_render_proxy_template(string $template, array $vars): string {
+    $result = $template;
+    foreach ($vars as $key => $value) {
+        $result = str_replace('{{' . $key . '}}', $value, $result);
+    }
+    return $result;
+}
+
+/**
+ * 校验反代配置模板是否包含所有必填占位符
+ * @return array{ok:bool,missing:array<string>}
+ */
+function nginx_validate_proxy_template(string $template, array $required): array {
+    $missing = [];
+    foreach ($required as $key) {
+        if (strpos($template, '{{' . $key . '}}') === false) {
+            $missing[] = $key;
+        }
+    }
+    return ['ok' => empty($missing), 'missing' => $missing];
+}
 
 /**
  * 主配置路径（优先运行环境，其次仓库 docker 示例）
@@ -1641,6 +1858,14 @@ function nginx_editable_targets(): array {
         'proxy_params_full' => [
             'label' => 'Nginx 反代参数模板（完整模式）',
             'path' => nginx_proxy_params_file_paths()['full'],
+        ],
+        'proxy_template_path' => [
+            'label' => 'Nginx 反代配置模板（路径模式）',
+            'path' => nginx_proxy_template_file_paths()['path'],
+        ],
+        'proxy_template_domain' => [
+            'label' => 'Nginx 反代配置模板（子域名模式）',
+            'path' => nginx_proxy_template_file_paths()['domain'],
         ],
     ];
 }
@@ -1698,6 +1923,13 @@ function nginx_read_target(string $target): array {
         }
     }
 
+    if (($target === 'proxy_template_path' || $target === 'proxy_template_domain') && !is_file($path)) {
+        $initResult = nginx_write_proxy_templates();
+        if (!$initResult['ok']) {
+            return ['ok' => false, 'msg' => $initResult['msg'], 'content' => '', 'path' => $path, 'label' => $label];
+        }
+    }
+
     if (!is_file($path)) {
         return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'content' => '', 'path' => $path, 'label' => $label];
     }
@@ -1737,6 +1969,13 @@ function nginx_write_target(string $target, string $content): array {
 
     if (($target === 'proxy_params_simple' || $target === 'proxy_params_full') && !is_file($path)) {
         $initResult = nginx_write_proxy_params_templates();
+        if (!$initResult['ok']) {
+            return ['ok' => false, 'msg' => $initResult['msg'], 'path' => $path];
+        }
+    }
+
+    if (($target === 'proxy_template_path' || $target === 'proxy_template_domain') && !is_file($path)) {
+        $initResult = nginx_write_proxy_templates();
         if (!$initResult['ok']) {
             return ['ok' => false, 'msg' => $initResult['msg'], 'path' => $path];
         }
@@ -2012,6 +2251,28 @@ function nginx_current_proxy_state(): array {
  */
 function nginx_pending_sites(): array {
     $cfg = load_config();
+
+    // 兜底：基于文件修改时间的快速检测（覆盖导入配置、外部编辑 sites.json 等场景）
+    $last_applied = (int)($cfg['nginx_last_applied'] ?? 0);
+    $sites_mtime = file_exists(DATA_DIR . '/sites.json') ? filemtime(DATA_DIR . '/sites.json') : 0;
+    if ($sites_mtime > $last_applied) {
+        $sitesData = load_sites();
+        $pending = [];
+        foreach ($sitesData['groups'] ?? [] as $grp) {
+            foreach ($grp['sites'] ?? [] as $site) {
+                if (($site['type'] ?? '') !== 'proxy') {
+                    continue;
+                }
+                $pending[] = [
+                    'name' => $site['name'] ?? $site['id'] ?? '未命名代理站点',
+                    'proxy_domain' => $site['proxy_domain'] ?? '',
+                    'group' => $grp['name'] ?? $grp['id'] ?? '',
+                ];
+            }
+        }
+        return $pending;
+    }
+
     $applied = is_array($cfg['nginx_last_applied_proxy_state'] ?? null)
         ? $cfg['nginx_last_applied_proxy_state']
         : [];
@@ -2083,7 +2344,7 @@ function audit_log(string $action, array $context = []): void {
     $line = json_encode([
         'time'    => date('Y-m-d H:i:s'),
         'user'    => $user['username'] ?? 'guest',
-        'ip'      => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'ip'      => get_client_ip(),
         'action'  => $action,
         'context' => $context,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

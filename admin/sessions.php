@@ -40,16 +40,27 @@ $filterUsername = trim($_GET['username'] ?? '');
     var html = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid var(--bd)">' +
         '<th style="padding:8px">用户</th>' +
+        '<th style="padding:8px">状态</th>' +
         '<th style="padding:8px">IP</th>' +
         '<th style="padding:8px">创建时间</th>' +
+        '<th style="padding:8px">最后活跃</th>' +
         '<th style="padding:8px">User-Agent</th>' +
         '<th style="padding:8px;width:120px">操作</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function(row){
+      var lastActive = row.last_active || row.created_at || '';
+      var statusClass = 'badge-gray', statusText = '离线';
+      if (lastActive) {
+        var diff = Math.floor((Date.now() - new Date(lastActive).getTime()) / 1000);
+        if (diff <= 300) { statusClass = 'badge-green'; statusText = '在线'; }
+        else if (diff <= 600) { statusClass = 'badge-yellow'; statusText = '刚离线'; }
+      }
       html += '<tr style="border-bottom:1px solid rgba(255,255,255,.06)">' +
         '<td style="padding:8px">' + esc(row.username) + '</td>' +
+        '<td style="padding:8px"><span class="badge ' + statusClass + '">' + esc(statusText) + '</span></td>' +
         '<td style="padding:8px;color:var(--tm)">' + esc(row.ip) + '</td>' +
         '<td style="padding:8px;color:var(--tm)">' + esc(row.created_at) + '</td>' +
+        '<td style="padding:8px;color:var(--tm)">' + esc(row.last_active || '-') + '</td>' +
         '<td style="padding:8px;color:var(--tm);word-break:break-all;max-width:300px">' + esc(row.user_agent) + '</td>' +
         '<td style="padding:8px">' +
           '<form class="revoke-form" style="display:inline">' +

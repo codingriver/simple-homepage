@@ -52,7 +52,7 @@ RUN mkdir -p /etc/nginx/http.d /etc/nginx/conf.d
 
 # ── 复制配置文件 ──
 COPY docker/nginx.conf       /etc/nginx/nginx.conf
-COPY docker/nginx-site.conf  /etc/nginx/http.d/nav.conf
+COPY nginx-conf/docker-site.conf  /etc/nginx/http.d/nav.conf
 COPY docker/php-fpm.conf     /usr/local/etc/php-fpm.d/nav.conf
 COPY docker/php-custom.ini   /usr/local/etc/php/conf.d/99-nav-custom.ini
 COPY docker/supervisord.conf /etc/supervisord.conf
@@ -103,9 +103,7 @@ RUN mkdir -p \
     chmod 440 /etc/sudoers.d/nav-nginx && \
     # 创建空的反代配置文件
     touch /etc/nginx/conf.d/nav-proxy.conf \
-          /etc/nginx/http.d/nav-proxy-domains.conf \
-          /var/www/nav/data/nginx/proxy-params-simple.conf \
-          /var/www/nav/data/nginx/proxy-params-full.conf && \
+          /etc/nginx/http.d/nav-proxy-domains.conf && \
     # Nginx 上传/代理临时目录（文件上传必须以 navwww 可写，否则 POST 返回 500）
     mkdir -p /var/lib/nginx/tmp/client_body \
              /var/lib/nginx/tmp/fastcgi \
@@ -122,13 +120,9 @@ RUN mkdir -p \
               /var/www/nav/data/logs && \
     chown -R navwww:navwww /var/log/nginx /var/log/php-fpm /run/nginx && \
     chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf \
-                        /etc/nginx/http.d/nav-proxy-domains.conf \
-                        /var/www/nav/data/nginx/proxy-params-simple.conf \
-                        /var/www/nav/data/nginx/proxy-params-full.conf && \
+                        /etc/nginx/http.d/nav-proxy-domains.conf && \
     chmod 664 /etc/nginx/conf.d/nav-proxy.conf \
-              /etc/nginx/http.d/nav-proxy-domains.conf \
-              /var/www/nav/data/nginx/proxy-params-simple.conf \
-              /var/www/nav/data/nginx/proxy-params-full.conf
+              /etc/nginx/http.d/nav-proxy-domains.conf
 
 # ── 挂载点（持久化数据目录）──
 VOLUME ["/var/www/nav/data"]

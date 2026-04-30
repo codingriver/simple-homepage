@@ -467,14 +467,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
     if (!dns_is_ajax_request()) {
         dns_log_write('app', 'error', 'DNS async hydrate rejected non-ajax request', [
             'account_id' => $selectedAccountId,
-            'remote_ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+            'remote_ip' => get_client_ip(),
         ]);
         dns_json_response(['ok' => false, 'msg' => '请求方式无效'], 401);
     }
     if (!$user || ($user['role'] ?? '') !== 'admin') {
         dns_log_write('app', 'error', 'DNS async hydrate unauthorized', [
             'account_id' => $selectedAccountId,
-            'remote_ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+            'remote_ip' => get_client_ip(),
         ]);
         dns_json_response(['ok' => false, 'msg' => '未登录或无权限'], 401);
     }

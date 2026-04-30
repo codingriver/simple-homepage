@@ -10,7 +10,7 @@ require_once __DIR__ . '/shared/header.php';
 .logs-wrap {
   display: flex;
   gap: 16px;
-  min-height: calc(100vh - 160px);
+  height: calc(100vh - 160px);
 }
 .logs-sidebar {
   width: 240px;
@@ -20,7 +20,7 @@ require_once __DIR__ . '/shared/header.php';
   border-radius: var(--r);
   padding: 12px 0;
   overflow-y: auto;
-  max-height: calc(100vh - 160px);
+  height: calc(100vh - 160px);
 }
 .logs-category {
   padding: 8px 16px;
@@ -124,6 +124,11 @@ require_once __DIR__ . '/shared/header.php';
   color: var(--tx);
   font-size: 13px;
   outline: none;
+  width: auto;
+  min-width: 0;
+}
+#logPagination {
+  margin-left: auto;
 }
 .logs-toolbar .btn {
   white-space: nowrap;
@@ -132,6 +137,9 @@ require_once __DIR__ . '/shared/header.php';
   flex: 1;
   position: relative;
   min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .logs-empty {
   position: absolute;
@@ -140,10 +148,13 @@ require_once __DIR__ . '/shared/header.php';
   right: 0;
   bottom: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   color: var(--tm);
   font-size: 13px;
+  text-align: center;
+  z-index: 2;
 }
 .logs-load-more {
   position: absolute;
@@ -157,6 +168,78 @@ require_once __DIR__ . '/shared/header.php';
   font-size: 12px;
   color: var(--tm);
   white-space: nowrap;
+}
+.log-preview {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--tx);
+  background: var(--sf2);
+}
+.log-preview::-webkit-scrollbar { width: 8px; }
+.log-preview::-webkit-scrollbar-track { background: transparent; }
+.log-preview::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 4px; }
+.log-line {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+}
+.log-line:hover {
+  background: var(--sf3);
+}
+.log-line-num {
+  color: var(--tm);
+  font-size: 12px;
+  text-align: right;
+  min-width: 48px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.log-line-text {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.log-line-text mark {
+  background: rgba(255, 204, 68, 0.25);
+  color: var(--yellow);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+.log-no-match {
+  padding: 40px;
+  text-align: center;
+  color: var(--tm);
+}
+.log-pagination {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.log-pagination .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.log-pagination input[type="number"] {
+  width: 56px;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: var(--tx);
+  font-size: 12px;
+}
+.log-pagination select {
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: var(--tx);
+  font-size: 12px;
 }
 </style>
 
@@ -174,24 +257,40 @@ require_once __DIR__ . '/shared/header.php';
     <div class="logs-toolbar">
       <div class="logs-title" id="currentLogTitle">请选择日志</div>
       <div class="logs-status" id="logStatus"></div>
-      <div class="logs-search">
+      <div class="logs-search" id="logSearchWrap" style="display:none">
         <svg viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.442.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
         <input type="text" id="logKeyword" placeholder="过滤当前内容…" oninput="filterLog()">
       </div>
-      <select id="logLimit" onchange="reloadCurrentLog()">
+      <select id="logLimit" onchange="reloadCurrentLog()" style="display:none">
         <option value="100">100 行</option>
         <option value="500" selected>500 行</option>
         <option value="1000">1000 行</option>
         <option value="5000">5000 行</option>
       </select>
-      <button class="btn btn-secondary btn-sm" onclick="reloadCurrentLog()">🔄 刷新</button>
+      <button class="btn btn-secondary btn-sm" id="logRefreshBtn" onclick="reloadCurrentLog()" style="display:none">🔄 刷新</button>
       <button class="btn btn-sm" id="btnDownload" onclick="downloadLog()" style="background:var(--ac-dim);border:1px solid var(--ac);color:var(--ac2);display:none">⬇️ 下载</button>
       <button class="btn btn-sm" id="btnClear" onclick="clearCurrentLog()" style="background:rgba(255,85,102,.1);border:1px solid rgba(255,85,102,.35);color:#ff5566;display:none">🗑 清空</button>
+      <button class="btn btn-sm" id="btnAceView" onclick="openAceLogViewer()" style="background:var(--sf3);border:1px solid var(--bd2);color:var(--tx2);display:none" title="在编辑器中打开">📑 编辑器</button>
+      <div class="log-pagination" id="logPagination">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <button type="button" class="btn" id="log-btn-first" onclick="logGoPage(1)">⏮ 首页</button>
+          <button type="button" class="btn" id="log-btn-prev" onclick="logGoPage(logState.currentPage - 1)">◀ 上一页</button>
+          <span class="footer-info">第 <span id="log-page-current">1</span> / <span id="log-page-total">1</span> 页</span>
+          <input type="number" id="log-page-input" min="1" placeholder="页码" onkeydown="if(event.key==='Enter')logGoPage(this.value)">
+          <button type="button" class="btn" onclick="logGoPage(document.getElementById('log-page-input').value)">跳转</button>
+          <button type="button" class="btn" id="log-btn-next" onclick="logGoPage(logState.currentPage + 1)">下一页 ▶</button>
+          <button type="button" class="btn" id="log-btn-last" onclick="logGoPage(logState.totalPages)">末页 ⏭</button>
+        </div>
+      </div>
     </div>
 
     <div class="logs-editor-wrap">
-      <div class="logs-empty" id="logEmpty">请在左侧选择一个日志文件</div>
-      <!-- 日志内容通过 Ace Editor 弹窗展示 -->
+      <div class="logs-empty" id="logEmpty">
+        <div style="font-size:32px;margin-bottom:12px">📄</div>
+        <div>请在左侧选择一个日志文件</div>
+        <div style="font-size:12px;color:var(--tm);margin-top:6px">点击左侧日志源开始浏览</div>
+      </div>
+      <div class="log-preview" id="logPreview" style="display:none"></div>
     </div>
   </main>
 </div>
@@ -261,57 +360,61 @@ require_once __DIR__ . '/shared/header.php';
     return { text: displayLines.join('\n'), filtered: kw !== '', displayCount: displayLines.length };
   }
 
-  function updateEditorContent() {
-    var result = buildLogText();
-    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
-      NavAceEditor.setValue(result.text);
-    }
-    updateFooterState();
+  function escRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // 构建底部栏 HTML
-  function buildFooterHtml() {
-    var s = sources[currentKey] || {};
-    var showClear = s.exists && s.clearable;
-    return '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
-      + '<span class="footer-info" id="log-footer-info">共 0 行</span>'
-      + '<span class="footer-sep"></span>'
-      + '<select id="log-footer-limit" onchange="logChangeLimit(this.value)" style="width:90px">'
-      + '<option value="200">200 行/页</option>'
-      + '<option value="500" selected>500 行/页</option>'
-      + '<option value="1000">1000 行/页</option>'
-      + '<option value="2000">2000 行/页</option>'
-      + '</select>'
-      + '<span class="footer-sep"></span>'
-      + '<button type="button" class="btn" id="log-btn-first" onclick="logGoPage(1)">⏮ 首页</button>'
-      + '<button type="button" class="btn" id="log-btn-prev" onclick="logGoPage(logState.currentPage - 1)">◀ 上一页</button>'
-      + '<span class="footer-info">第 <span id="log-page-current">1</span> / <span id="log-page-total">1</span> 页</span>'
-      + '<input type="number" id="log-page-input" min="1" placeholder="页码" onkeydown="if(event.key===\'Enter\')logGoPage(this.value)">'
-      + '<button type="button" class="btn" onclick="logGoPage(document.getElementById(\'log-page-input\').value)">跳转</button>'
-      + '<button type="button" class="btn" id="log-btn-next" onclick="logGoPage(logState.currentPage + 1)">下一页 ▶</button>'
-      + '<button type="button" class="btn" id="log-btn-last" onclick="logGoPage(logState.totalPages)">末页 ⏭</button>'
-      + (showClear ? '<span class="footer-sep"></span><button type="button" class="btn" onclick="clearCurrentLog()" style="color:var(--red)">🗑 清空</button>' : '')
-      + '</div>';
+  function highlightText(text, kw) {
+    if (!kw) return esc(text);
+    var re = new RegExp('(' + escRegExp(kw) + ')', 'gi');
+    return esc(text).replace(re, '<mark>$1</mark>');
+  }
+
+  function renderLogContent() {
+    var preview = document.getElementById('logPreview');
+    var kw = (document.getElementById('logKeyword').value || '').trim().toLowerCase();
+    var offset = logState.offset || 0;
+    var html = '';
+
+    if (!currentLines.length) {
+      preview.innerHTML = '<div class="log-no-match">暂无内容</div>';
+      updateFooterState();
+      return;
+    }
+
+    currentLines.forEach(function(line, i) {
+      if (kw && line.toLowerCase().indexOf(kw) === -1) {
+        return;
+      }
+      var lineNum = offset + i + 1;
+      html += '<div class="log-line">'
+        + '<span class="log-line-num">' + lineNum + '</span>'
+        + '<span class="log-line-text">' + highlightText(line, kw) + '</span>'
+        + '</div>';
+    });
+
+    if (!html) {
+      html = '<div class="log-no-match">没有匹配的内容</div>';
+    }
+
+    preview.innerHTML = html;
+    updateFooterState();
   }
 
   function updateFooterState() {
     var curEl = document.getElementById('log-page-current');
     var totEl = document.getElementById('log-page-total');
-    var infoEl = document.getElementById('log-footer-info');
     var firstBtn = document.getElementById('log-btn-first');
     var prevBtn = document.getElementById('log-btn-prev');
     var nextBtn = document.getElementById('log-btn-next');
     var lastBtn = document.getElementById('log-btn-last');
-    var limitSel = document.getElementById('log-footer-limit');
 
     if (curEl) curEl.textContent = logState.currentPage;
     if (totEl) totEl.textContent = logState.totalPages;
-    if (infoEl) infoEl.textContent = '共 ' + logState.totalLines + ' 行';
     if (firstBtn) firstBtn.disabled = logState.currentPage <= 1;
     if (prevBtn) prevBtn.disabled = logState.currentPage <= 1;
     if (nextBtn) nextBtn.disabled = logState.currentPage >= logState.totalPages;
     if (lastBtn) lastBtn.disabled = logState.currentPage >= logState.totalPages;
-    if (limitSel) limitSel.value = String(logState.limit);
   }
 
   window.logGoPage = function(page) {
@@ -348,33 +451,17 @@ require_once __DIR__ . '/shared/header.php';
 
     var s = sources[key];
     document.getElementById('currentLogTitle').innerHTML = esc(s.label)
-      + '<small>' + (s.exists ? (s.lines + ' 行 · ' + formatBytes(s.size)) : '文件不存在') + '</small>';
+      + '<small>' + (s.exists ? formatBytes(s.size) : '文件不存在') + '</small>';
 
+    document.getElementById('logSearchWrap').style.display = '';
+    document.getElementById('logLimit').style.display = '';
+    document.getElementById('logRefreshBtn').style.display = '';
     document.getElementById('btnDownload').style.display = s.exists ? 'inline-flex' : 'none';
     document.getElementById('btnClear').style.display = (s.exists && s.clearable) ? 'inline-flex' : 'none';
+    document.getElementById('btnAceView').style.display = s.exists ? 'inline-flex' : 'none';
     document.getElementById('logEmpty').style.display = 'none';
-
-    var logTitle = '日志查看 · ' + s.label;
-    if (s.path) logTitle += ' · ' + s.path;
-    NavAceEditor.open({
-      title: logTitle,
-      mode: 'text',
-      value: '加载中…',
-      readOnly: true,
-      wrapMode: true,
-      footerHtml: buildFooterHtml(),
-      buttons: {
-        left: [],
-        right: [
-          { text: '关闭', action: 'close' }
-        ]
-      },
-      onAction: function(action) {
-        if (action === 'close') {
-          NavAceEditor.close();
-        }
-      }
-    });
+    document.getElementById('logPreview').style.display = 'block';
+    document.getElementById('logPagination').style.display = 'flex';
 
     loadLogPage(key, 1, logState.limit);
   };
@@ -392,9 +479,9 @@ require_once __DIR__ . '/shared/header.php';
         isLoading = false;
         if (!d.ok) {
           setStatus('加载失败');
-          if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
-            NavAceEditor.setValue('加载失败：' + (d.msg || ''));
-          }
+          currentLines = [];
+          logState.offset = 0;
+          renderLogContent();
           return;
         }
         currentLines = d.lines || [];
@@ -402,41 +489,129 @@ require_once __DIR__ . '/shared/header.php';
         logState.totalPages = d.total_pages || 1;
         logState.currentPage = d.page || 1;
         logState.limit = d.limit || limit;
-        updateEditorContent();
+        logState.offset = d.offset || 0;
+        renderLogContent();
         // 切换页码后滚动条回到最顶部
-        if (typeof NavAceEditor !== 'undefined' && NavAceEditor.gotoLine) {
-          NavAceEditor.gotoLine(1, 0, false);
-        }
+        var preview = document.getElementById('logPreview');
+        if (preview) preview.scrollTop = 0;
         var result = buildLogText();
         if (result.filtered) {
           setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
         } else {
-          setStatus('第 ' + logState.currentPage + ' / ' + logState.totalPages + ' 页 · 共 ' + logState.totalLines + ' 行');
+          setStatus('共 ' + logState.totalLines + ' 行');
         }
       })
       .catch(function(){
         isLoading = false;
         setStatus('请求异常');
-        if (typeof NavAceEditor !== 'undefined' && NavAceEditor.setValue) {
-          NavAceEditor.setValue('请求异常');
-        }
+        currentLines = [];
+        logState.offset = 0;
+        renderLogContent();
+        var preview = document.getElementById('logPreview');
+        if (preview) preview.scrollTop = 0;
       });
   }
 
   window.reloadCurrentLog = function() {
     if (!currentKey) return;
     logState.currentPage = 1;
+    logState.limit = parseInt(document.getElementById('logLimit').value, 10) || 500;
     loadLogPage(currentKey, 1, logState.limit);
   };
 
   window.filterLog = function() {
-    updateEditorContent();
+    renderLogContent();
     var result = buildLogText();
     if (result.filtered) {
       setStatus('过滤后 ' + result.displayCount + ' / ' + currentLines.length + ' 行');
     } else {
-      setStatus('第 ' + logState.currentPage + ' / ' + logState.totalPages + ' 页 · 共 ' + logState.totalLines + ' 行');
+      setStatus('共 ' + logState.totalLines + ' 行');
     }
+  };
+
+  // ── Ace 弹窗日志查看器状态（与右侧预览区独立）──
+  var aceLogState = { key: '', page: 1, pages: 1, limit: 500 };
+
+  window.aceLogGoPage = function(page) {
+    if (!aceLogState.key) return;
+    page = parseInt(page, 10);
+    if (isNaN(page) || page < 1) page = 1;
+    if (page > aceLogState.pages) page = aceLogState.pages;
+    if (page === aceLogState.page) return;
+    aceLogState.page = page;
+    aceLogLoadPage(page);
+  };
+
+  function aceLogLoadPage(page) {
+    if (!aceLogState.key) return;
+    NavAceEditor.setValue('加载中…');
+    var url = 'logs_api.php?action=read&type=' + encodeURIComponent(aceLogState.key)
+      + '&page=' + encodeURIComponent(page)
+      + '&limit=' + encodeURIComponent(aceLogState.limit);
+    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d.ok) {
+          NavAceEditor.setValue('加载失败：' + (d.msg || ''));
+          return;
+        }
+        aceLogState.pages = d.total_pages || 1;
+        aceLogState.page = d.page || 1;
+        aceLogState.limit = d.limit || aceLogState.limit;
+
+        var lines = d.lines || [];
+        var text = lines.join('\n');
+        NavAceEditor.setValue(text);
+
+        var infoEl = document.getElementById('ace-log-info');
+        var pageLabelEl = document.getElementById('ace-log-page-label');
+        var prevBtn = document.getElementById('ace-log-prev');
+        var nextBtn = document.getElementById('ace-log-next');
+        var lastBtn = document.getElementById('ace-log-last-btn');
+
+        if (infoEl) infoEl.textContent = '共 ' + d.total_lines + ' 行，每页 ' + aceLogState.limit + ' 行';
+        if (pageLabelEl) pageLabelEl.textContent = '第 ' + aceLogState.page + ' / ' + aceLogState.pages + ' 页';
+        if (prevBtn) prevBtn.disabled = aceLogState.page <= 1;
+        if (nextBtn) nextBtn.disabled = aceLogState.page >= aceLogState.pages;
+        if (lastBtn) lastBtn.disabled = aceLogState.page >= aceLogState.pages;
+      })
+      .catch(function(){
+        NavAceEditor.setValue('请求异常');
+      });
+  }
+
+  window.openAceLogViewer = function() {
+    if (!currentKey) return;
+    var s = sources[currentKey] || {};
+    var logTitle = '日志查看 · ' + s.label;
+    if (s.path) logTitle += ' · ' + s.path;
+
+    aceLogState.key = currentKey;
+    aceLogState.page = logState.currentPage;
+    aceLogState.pages = logState.totalPages;
+    aceLogState.limit = logState.limit;
+
+    var footerHtml = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
+      + '<span id="ace-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
+      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-prev" onclick="aceLogGoPage(aceLogState.page - 1)">◀ 上一页</button>'
+      + '<span id="ace-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 ' + aceLogState.page + ' / ' + aceLogState.pages + ' 页</span>'
+      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-next" onclick="aceLogGoPage(aceLogState.page + 1)">下一页 ▶</button>'
+      + '<button type="button" class="btn btn-sm btn-secondary" onclick="aceLogGoPage(1)" title="第一页">⏮</button>'
+      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-last-btn" onclick="aceLogGoPage(aceLogState.pages)" title="最后一页">⏭</button>'
+      + '</div>';
+
+    NavAceEditor.open({
+      title: logTitle,
+      mode: 'text',
+      value: '加载中…',
+      readOnly: true,
+      wrapMode: true,
+      footerHtml: footerHtml,
+      buttons: { left: [], right: [] },
+      onAction: function(action) {}
+    });
+
+    aceLogLoadPage(aceLogState.page);
   };
 
   window.clearCurrentLog = function() {
@@ -489,7 +664,7 @@ require_once __DIR__ . '/shared/header.php';
           if (currentKey) {
             var s = sources[currentKey];
             document.getElementById('currentLogTitle').innerHTML = esc(s.label)
-              + '<small>' + (s.exists ? (s.lines + ' 行 · ' + formatBytes(s.size)) : '文件不存在') + '</small>';
+              + '<small>' + (s.exists ? formatBytes(s.size) : '文件不存在') + '</small>';
             document.querySelectorAll('.logs-item').forEach(function(el) {
               el.classList.toggle('active', el.dataset.key === currentKey);
             });

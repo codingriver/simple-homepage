@@ -96,7 +96,7 @@ docker compose version    # Docker Compose version v2.x.x
 | 配置文件（容器内路径）| 来源 | 作用 |
 |---|---|---|
 | `/etc/nginx/nginx.conf` | `docker/nginx.conf` | Nginx 主配置（worker、日志、MIME、**全局 proxy 参数**）|
-| `/etc/nginx/http.d/nav.conf` | `docker/nginx-site.conf` | 站点配置（auth_request、PHP 转发、安全规则、**反代 location 内置完整参数**）|
+| `/etc/nginx/http.d/nav.conf` | `nginx-conf/docker-site.conf` | 站点配置（auth_request、PHP 转发、安全规则、**反代 location 内置完整参数**）|
 | `/etc/nginx/conf.d/nav-proxy.conf` | 容器启动时自动创建（空文件）| 反代配置（由后台自动管理，include 到 server 块内）|
 | `/etc/nginx/http.d/nav-proxy-domains.conf` | 容器启动时自动创建（空文件）| 子域反代配置（由后台自动管理）|
 | `/usr/local/etc/php-fpm.d/nav.conf` | `docker/php-fpm.conf` | PHP-FPM 进程池配置 |
@@ -123,7 +123,7 @@ docker compose version    # Docker Compose version v2.x.x
 
 `nginx.conf` 在 `http {}` 块内统一设置全局反代参数：`proxy_connect_timeout 10s`、`proxy_send_timeout 60s`、`proxy_read_timeout 60s`、`proxy_buffering on` 等。
 
-`nginx-site.conf` 的每个 proxy `location` 块自动继承，无需重复配置。同时通过 `$connection_upgrade` map 自动支持 WebSocket。
+`nginx-conf/docker-site.conf` 的每个 proxy `location` 块自动继承，无需重复配置。同时通过 `$connection_upgrade` map 自动支持 WebSocket。
 
 > ⚠️ **权限说明**：`/var/lib/nginx/tmp/` 在 Dockerfile 构建时已 `chown -R navwww:navwww`。若出现文件上传 500 错误，请检查该目录归属是否为 `navwww`。
 

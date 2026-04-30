@@ -112,6 +112,18 @@ function sites_handle_post(array &$sites_data): array {
         }
 
         save_sites($sites_data);
+
+        // 新站点/代理目标变更时，后台异步预抓取 favicon
+        $trigger_domain = '';
+        if ($type === 'proxy') {
+            $trigger_domain = parse_url($site['proxy_target'] ?? '', PHP_URL_HOST) ?? '';
+        } else {
+            $trigger_domain = parse_url($site['url'] ?? '', PHP_URL_HOST) ?? '';
+        }
+        if ($trigger_domain !== '') {
+            favicon_trigger_sync($trigger_domain);
+        }
+
         audit_log('site_save', ['gid' => $gid, 'sid' => $sid, 'name' => $name]);
         flash_set('success', '站点已保存');
         return ['ok' => true, 'msg' => '站点已保存'];

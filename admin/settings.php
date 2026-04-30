@@ -73,21 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg['bg_color'] = $bg_color;
             $cfg['theme'] = in_array($_POST['theme'] ?? 'dark', ['dark','light','auto']) ? ($_POST['theme'] ?? 'dark') : 'dark';
             $cfg['custom_css'] = trim((string)($_POST['custom_css'] ?? ''));
-            // ── 文件系统访问白名单 ──
-            $fsRootsRaw = trim((string)($_POST['fs_allowed_roots'] ?? ''));
-            if ($fsRootsRaw === '') {
-                $cfg['fs_allowed_roots'] = [];
-            } else {
-                $fsRoots = [];
-                foreach (explode("\n", $fsRootsRaw) as $line) {
-                    $line = trim($line);
-                    if ($line === '' || $line[0] !== '/') {
-                        continue;
-                    }
-                    $fsRoots[] = $line;
-                }
-                $cfg['fs_allowed_roots'] = $fsRoots;
-            }
+
             if (!empty($_FILES['bg_image']['tmp_name'])) {
                 $file = $_FILES['bg_image'];
                 if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -134,6 +120,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             save_config($cfg);
             audit_log('save_settings', ['site_name' => $cfg['site_name']]);
             flash_set('success', '设置已保存');
+            header('Location: settings.php'); exit;
+        }
+
+        /* ------ 清空计划任务 ------ */
+        if ($action === 'clear_scheduled_tasks') {
+            require_once __DIR__ . '/shared/cron_lib.php';
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
+            backup_create('auto_clear_scheduled_tasks');
+            $result = scheduled_tasks_clear_manual_tasks();
+            audit_log('clear_scheduled_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
+            flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条普通计划任务，DDNS 系统调度器已自动保留/重建');
+            header('Location: settings.php'); exit;
+        }
+
+        /* ------ 清空 DDNS 任务 ------ */
+        if ($action === 'clear_ddns_tasks') {
+            require_once __DIR__ . '/shared/ddns_lib.php';
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            @set_time_limit(0);
+            backup_create('auto_clear_ddns_tasks');
+            $result = ddns_clear_all_tasks();
+            audit_log('clear_ddns_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
+            flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条 DDNS 任务，并同步清理日志与系统调度器');
             header('Location: settings.php'); exit;
         }
 }
@@ -205,15 +219,7 @@ $cfg = auth_get_config();
         <textarea name="custom_css" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:13px;outline:none;font-family:monospace" placeholder="/* 例如：body { font-family: 'LXGW WenKai', sans-serif; } */"><?= htmlspecialchars($cfg['custom_css']??'') ?></textarea>
         <div class="form-hint" style="margin-top:6px">支持任意 CSS，会以内联 &lt;style&gt; 方式注入到导航首页。错误语法可能导致页面样式异常，请谨慎使用。</div>
       </div>
-      <div class="form-group" style="grid-column:1/-1">
-        <label>文件系统访问白名单根目录</label>
-        <textarea name="fs_allowed_roots" rows="4" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:13px;outline:none;font-family:monospace" placeholder="留空表示不限制（默认）&#10;每行一个绝对路径，例如：&#10;/var/www/nav/data&#10;/etc/nginx&#10;/var/log"><?= htmlspecialchars(implode("\n", (array)($cfg['fs_allowed_roots'] ?? []))) ?></textarea>
-        <div class="form-hint" style="margin-top:6px">
-          <b>留空</b>：不限制文件管理器的访问范围（默认）。<br>
-          <b>填写路径</b>：仅允许访问以这些路径开头的目录和文件。<br>
-          <span style="color:#ff6b6b">⚠️ 限制过严可能导致文件管理器无法正常访问常用目录。</span>
-        </div>
-      </div>
+
       <!-- ══ 卡片外观设置（合并容器）══ -->
       <div class="form-group" style="grid-column:1/-1">
         <label style="font-weight:700;font-size:13px;color:var(--ac2);margin-bottom:10px;display:block">🃏 卡片外观设置</label>

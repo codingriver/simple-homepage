@@ -23,6 +23,8 @@ if (PHP_SAPI === 'cli' && getenv('NAV_REQUEST_TIMING_CLI') !== '1') {
     return;
 }
 
+require_once __DIR__ . '/auth.php';
+
 if (!defined('DATA_DIR')) {
     // Attempt to infer DATA_DIR from this file location
     define('DATA_DIR', dirname(__DIR__) . '/data');
@@ -72,7 +74,7 @@ function nav_request_timing_write(string $phase, float $elapsedSec, int $httpCod
     if (strlen($uri) > 400) {
         $uri = substr($uri, 0, 400) . '...';
     }
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    $ip = get_client_ip();
     $script = $_SERVER['SCRIPT_NAME'] ?? '';
     $ts = date('Y-m-d H:i:s');
 

@@ -2,18 +2,11 @@
 require_once __DIR__ . '/shared/functions.php';
 
 $targets = nginx_editable_targets();
-$target = trim((string)($_GET['target'] ?? 'main'));
-if (!isset($targets[$target])) $target = 'main';
 
-$tab = trim((string)($_GET['tab'] ?? (($target === 'proxy_path' || $target === 'proxy_domain' || $target === 'proxy_params_simple' || $target === 'proxy_params_full') ? 'proxy' : $target)));
-if (!in_array($tab, ['main', 'http', 'proxy'], true)) $tab = 'main';
-
+// 保留默认值，供 AJAX 回退使用
 $encOptions = ['utf-8' => 'UTF-8', 'gb18030' => 'GB18030', 'iso-8859-1' => 'ISO-8859-1'];
-$langOptions = ['nginx' => 'Nginx', 'php' => 'PHP', 'json' => 'JSON', 'yaml' => 'YAML', 'sh' => 'Shell', 'ini' => 'INI', 'text' => 'Plain Text'];
-$encoding = strtolower(trim((string)($_GET['encoding'] ?? 'utf-8')));
-if (!isset($encOptions[$encoding])) $encoding = 'utf-8';
-$lang = strtolower(trim((string)($_GET['lang'] ?? 'nginx')));
-if (!isset($langOptions[$lang])) $lang = 'nginx';
+$encoding = 'utf-8';
+$lang = 'nginx';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $current_user = auth_get_current_user();
@@ -64,33 +57,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       echo $content; exit;
   }
 
-  // ── 自动生成代理配置并写入 + reload ──
-  if ($action === 'nginx_apply' || $action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
-      $do_reload = ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload');
-      $result = nginx_apply_proxy_conf($do_reload);
+  // ── 生成代理配置并 reload（同时保存模板模式） ──
+  if ($action === 'nginx_reload' || $action === 'nginx_apply_and_reload') {
+      // 如模板模式有变化，先保存
+      $newMode = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+      $cfg = load_config();
+      if (($cfg['proxy_params_mode'] ?? 'simple') !== $newMode) {
+          $cfg['proxy_params_mode'] = $newMode;
+          save_config($cfg);
+          audit_log('save_proxy_params_mode', ['mode' => $newMode]);
+      }
 
+      $result = nginx_apply_proxy_conf(true);
       if (!$result['ok']) {
           flash_set('error', $result['msg']);
-          header('Location: nginx.php#proxy'); exit;
+          header('Location: nginx.php'); exit;
       }
-
-      if ($do_reload) {
-          nginx_mark_applied();
-      }
-      audit_log('nginx_apply', ['reload' => $do_reload, 'ok' => $result['ok']]);
+      nginx_mark_applied();
+      audit_log('nginx_apply', ['reload' => true, 'ok' => true]);
       flash_set('success', $result['msg']);
-      $redirect = ($action === 'nginx_apply_and_reload') ? 'nginx.php' : 'nginx.php#proxy';
-      header('Location: ' . $redirect); exit;
-  }
-
-  // ── 保存反代参数模式 ──
-  if ($action === 'save_proxy_params_mode') {
-      $cfg = load_config();
-      $cfg['proxy_params_mode'] = ($_POST['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
-      save_config($cfg);
-      audit_log('save_proxy_params_mode', ['mode' => $cfg['proxy_params_mode']]);
-      flash_set('success', '反代参数模式已保存');
-      header('Location: nginx.php#proxy'); exit;
+      header('Location: nginx.php'); exit;
   }
 
   $ptarget = trim((string)($_POST['target'] ?? 'main'));
@@ -99,12 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: nginx.php');
     exit;
   }
-  $ptab = trim((string)($_POST['tab'] ?? 'main'));
-  if (!in_array($ptab, ['main', 'http', 'proxy'], true)) $ptab = 'main';
   $penc = strtolower(trim((string)($_POST['encoding'] ?? $encoding)));
   if (!isset($encOptions[$penc])) $penc = 'utf-8';
   $plang = strtolower(trim((string)($_POST['language_mode'] ?? $lang)));
-  if (!isset($langOptions[$plang])) $plang = 'nginx';
 
   $isAjax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
 
@@ -116,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($converted === false) {
         if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '编码转换失败，请检查字符与编码是否兼容'], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '编码转换失败，请检查字符与编码是否兼容');
-        header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+        header('Location: nginx.php');
         exit;
       }
       $write = $converted;
@@ -126,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$saved['ok']) {
       if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => $saved['msg']], JSON_UNESCAPED_UNICODE); exit; }
       flash_set('error', $saved['msg']);
-      header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+      header('Location: nginx.php');
       exit;
     }
 
@@ -135,28 +118,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (!$test['ok']) {
         if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '语法检测失败，已保存但未 Reload：' . $test['msg']], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '语法检测失败，已保存但未 Reload：' . $test['msg']);
-        header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+        header('Location: nginx.php');
         exit;
       }
       $reload = nginx_reload();
       if (!$reload['ok']) {
         if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '已保存但 Reload 失败：' . $reload['msg']], JSON_UNESCAPED_UNICODE); exit; }
         flash_set('error', '已保存但 Reload 失败：' . $reload['msg']);
-        header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+        header('Location: nginx.php');
         exit;
       }
       nginx_mark_applied();
       audit_log('nginx_save_reload', ['target' => $ptarget]);
       if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => '保存并 Reload 成功'], JSON_UNESCAPED_UNICODE); exit; }
       flash_set('success', '保存并 Reload 成功');
-      header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+      header('Location: nginx.php');
       exit;
     }
 
     audit_log('nginx_save', ['target' => $ptarget]);
     if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => '配置已保存：' . ($targets[$ptarget]['label'] ?? $ptarget)], JSON_UNESCAPED_UNICODE); exit; }
     flash_set('success', '配置已保存：' . ($targets[$ptarget]['label'] ?? $ptarget));
-    header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+    header('Location: nginx.php');
     exit;
   }
 
@@ -166,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (trim((string)$test['test_output']) !== '') $msg .= '｜' . $test['test_output'];
     if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE); exit; }
     flash_set($test['ok'] ? 'success' : 'error', $msg);
-    header('Location: nginx.php?' . http_build_query(['target' => $ptarget, 'tab' => $ptab, 'encoding' => $penc, 'lang' => $plang]));
+    header('Location: nginx.php');
     exit;
   }
 
@@ -185,77 +168,137 @@ $page_title = 'Nginx 管理';
 require_once __DIR__ . '/shared/header.php';
 
 $cap = nginx_reload_capability();
+
+// 读取所有可编辑目标内容
 $editorDataMap = [];
 foreach ($targets as $k => $meta) {
   $rr = nginx_read_target($k);
+  $path = (string)($meta['path'] ?? '');
+  $mtime = '';
+  if ($path && is_file($path)) {
+    $mt = @filemtime($path);
+    if ($mt !== false) $mtime = date('Y-m-d H:i:s', $mt);
+  }
   if (!$rr['ok']) {
     $editorDataMap[$k] = [
       'ok' => false,
       'label' => (string)($meta['label'] ?? $k),
-      'path' => (string)($meta['path'] ?? ''),
+      'path' => $path,
+      'mtime' => $mtime,
       'content' => '',
       'error' => (string)$rr['msg'],
     ];
     continue;
   }
-  $rawContent = (string)$rr['content'];
-  if ($encoding === 'utf-8') {
-    $decodedContent = $rawContent;
-  } else {
-    $decoded = @iconv(strtoupper($encoding), 'UTF-8//IGNORE', $rawContent);
-    $decodedContent = ($decoded === false) ? $rawContent : $decoded;
-  }
   $editorDataMap[$k] = [
     'ok' => true,
     'label' => (string)($meta['label'] ?? $k),
     'path' => (string)$rr['path'],
-    'content' => $decodedContent,
+    'mtime' => $mtime,
+    'content' => (string)$rr['content'],
     'error' => '',
   ];
 }
 
-$currentEditor = $editorDataMap[$target] ?? [
-  'label' => (string)($targets[$target]['label'] ?? $target),
-  'path' => (string)($targets[$target]['path'] ?? ''),
-  'content' => '',
-  'error' => '读取配置失败',
-];
-$editorContent = (string)($currentEditor['content'] ?? '');
-$editorPath = (string)($currentEditor['path'] ?? '');
-$editorError = (string)($currentEditor['error'] ?? '');
-?>
-<style>
-.ngx-editor-launch{display:flex;justify-content:flex-end;margin-bottom:8px}
-</style>
-
-<div class="card">
-  <div class="card-title">🧩 Nginx 编辑器状态</div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--tm)">执行方式</div><div style="margin-top:4px"><span class="badge <?= $cap['ok'] ? 'badge-green' : 'badge-gray' ?>"><?= htmlspecialchars($cap['method']) ?></span></div></div>
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--tm)">Nginx 可执行路径</div><div style="margin-top:4px;font-family:var(--mono)"><?= htmlspecialchars($cap['nginx_bin']) ?></div></div>
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:var(--tm)">语法检查能力</div><div style="margin-top:4px;color:<?= $cap['ok'] ? 'var(--green)' : 'var(--yellow)' ?>"><?= htmlspecialchars($cap['msg']) ?></div></div>
-  </div>
-</div>
-
-<?php
+// 代理配置状态
 $proxy_conf_path = nginx_proxy_conf_path();
-$conf_exists     = file_exists($proxy_conf_path);
-$conf_mtime      = $conf_exists ? date('Y-m-d H:i:s', filemtime($proxy_conf_path)) : null;
+$conf_exists = file_exists($proxy_conf_path);
+$conf_mtime = $conf_exists ? date('Y-m-d H:i:s', filemtime($proxy_conf_path)) : null;
 $proxy_count = 0;
 foreach (load_sites()['groups'] ?? [] as $g)
-    foreach ($g['sites'] ?? [] as $s)
-        if (($s['type'] ?? '') === 'proxy') $proxy_count++;
-?>
+  foreach ($g['sites'] ?? [] as $s)
+    if (($s['type'] ?? '') === 'proxy') $proxy_count++;
 
+$cfg = load_config();
+$ppm = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
+?>
+<style>
+.ngx-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--sf);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.ngx-status-bar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ngx-config-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bd);
+}
+.ngx-config-item:last-child {
+  border-bottom: none;
+}
+.ngx-config-item .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ngx-config-item .meta .path {
+  font-size: 12px;
+  color: var(--tm);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ngx-ppm-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--sf);
+  color: var(--tx);
+  cursor: pointer;
+  transition: all .2s;
+}
+.ngx-ppm-btn.active {
+  border-color: var(--ac);
+  background: rgba(99,179,237,.12);
+  color: var(--ac);
+}
+.ngx-ppm-btn:hover:not(.active) {
+  border-color: var(--ac2);
+}
+</style>
+
+<!-- 状态栏 -->
+<div class="ngx-status-bar">
+  <span>
+    <span class="badge <?= $cap['ok'] ? 'badge-green' : 'badge-yellow' ?>"><?= htmlspecialchars($cap['method']) ?></span>
+    <?php if ($cap['ok']): ?>
+    <span style="color:var(--green)">已就绪</span>
+    <?php else: ?>
+    <span style="color:var(--yellow)">未就绪</span>
+    <?php endif; ?>
+  </span>
+  <span style="color:var(--tm);font-family:var(--mono)"><?= htmlspecialchars($cap['nginx_bin']) ?></span>
+  <span style="color:var(--tm)"><?= $proxy_count ?> 个代理站点</span>
+</div>
+
+<!-- 代理配置生成 -->
 <div class="card" id="proxy">
-  <div class="card-title">🔀 Nginx 代理配置生成
+  <div class="card-title">🔀 代理配置生成
     <span style="font-size:11px;color:var(--tm);font-weight:400;margin-left:8px">基于站点数据自动生成</span>
   </div>
 
-  <!-- Reload 执行环境：首屏不 exec，进入本区域时异步检测 -->
   <div id="nginx-sudo-banner" style="min-height:0"></div>
 
-  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:18px">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:16px">
     <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;flex:1;min-width:200px">
       <div style="font-size:11px;color:var(--tm);margin-bottom:4px">配置文件</div>
       <div style="font-size:13px;font-family:monospace"><?= htmlspecialchars($proxy_conf_path) ?></div>
@@ -268,121 +311,61 @@ foreach (load_sites()['groups'] ?? [] as $g)
         <?php endif; ?>
       </div>
     </div>
-    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;min-width:120px">
+    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:14px 18px;min-width:120px;text-align:center">
       <div style="font-size:11px;color:var(--tm);margin-bottom:4px">Proxy 站点数</div>
       <div style="font-size:28px;font-weight:700;color:var(--ac2)"><?= $proxy_count ?></div>
     </div>
   </div>
 
-  <!-- 反代参数模式选择 -->
-  <?php $ppm = $cfg['proxy_params_mode'] ?? 'simple'; ?>
-  <div style="margin-bottom:16px;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px 18px">
-    <div style="font-size:12px;color:var(--tm);margin-bottom:10px;font-weight:600">📦 反代参数模板</div>
-    <form method="POST" id="proxy-params-mode-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="save_proxy_params_mode">
-      <label data-ppm-card="simple" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='simple'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='simple'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
-        <input type="radio" name="proxy_params_mode" value="simple" <?= $ppm==='simple'?'checked':'' ?> id="ppm_simple" style="margin-top:2px;accent-color:var(--ac)">
-        <div>
-          <div style="font-size:13px;font-weight:700;color:var(--tx)">⚡ 精简模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（14 条参数 · 超时 60s）</span></div>
-          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">HTTP/1.1、WebSocket 升级、Host / IP / Proto 透传、连接 10s + 读写 60s 超时、基础缓冲。<br>适合普通 Web 应用，<b>默认推荐</b>，小白首选。</div>
-        </div>
-      </label>
-      <label data-ppm-card="full" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;flex:1;min-width:220px;background:<?= $ppm==='full'?'rgba(99,179,237,.08)':'var(--sf)' ?>;border:2px solid <?= $ppm==='full'?'var(--ac)':'var(--bd)' ?>;border-radius:8px;padding:12px;transition:all .2s">
-        <input type="radio" name="proxy_params_mode" value="full" <?= $ppm==='full'?'checked':'' ?> id="ppm_full" style="margin-top:2px;accent-color:var(--ac)">
-        <div>
-          <div style="font-size:13px;font-weight:700;color:var(--tx)">🔥 完整模式 <span style="font-size:11px;font-weight:400;color:var(--tm);">（60+ 条参数 · 超时 86400s）</span></div>
-          <div style="font-size:11px;color:var(--tm);margin-top:4px;line-height:1.6">WebSocket 全头透传、断点续传、Cookie / Auth / CORS 透传、流媒体无缓冲、无限超时（86400s）、全量响应头直通。<br>适合视频流、大文件、SSH 隧道、长连接等复杂场景。</div>
-        </div>
-      </label>
-      <div style="display:flex;flex-direction:column;gap:8px;align-self:center">
-        <button type="submit" class="btn btn-primary" style="white-space:nowrap">💾 保存模式</button>
-        <?php if ($proxy_count > 0): ?>
-        <span style="font-size:11px;color:var(--tm);text-align:center">保存后需 Reload<br>才能生效</span>
-        <?php endif; ?>
-      </div>
-    </form>
-    <div class="form-hint" style="margin-top:8px">
-      切换模式后需点击下方「生成配置并 Reload Nginx」重新生成配置文件才会生效。<?php if ($proxy_count > 0): ?> <span style="color:#fbbf24">当前有 <?= $proxy_count ?> 个代理站点，切换后请及时 Reload。</span><?php endif; ?>
+  <!-- 反代参数模板 -->
+  <div style="margin-bottom:16px">
+    <div style="font-size:12px;color:var(--tm);margin-bottom:8px;font-weight:600">反代参数模板</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="ngx-ppm-btn <?= $ppm === 'simple' ? 'active' : '' ?>" data-ppm="simple">⚡ 精简模式</button>
+      <button type="button" class="ngx-ppm-btn <?= $ppm === 'full' ? 'active' : '' ?>" data-ppm="full">🔥 完整模式</button>
+    </div>
+    <div id="ppm-desc" style="font-size:12px;color:var(--tm);margin-top:8px;line-height:1.5">
+      <?php if ($ppm === 'simple'): ?>
+      精简模式：14 条参数，超时 60s，适合普通 Web 应用（默认推荐）。
+      <?php else: ?>
+      完整模式：60+ 条参数，超时 86400s，适合视频流、大文件、长连接等复杂场景。
+      <?php endif; ?>
+    </div>
+    <div id="ppm-hint" style="font-size:12px;color:var(--tm);margin-top:6px;line-height:1.5">
+      💡 切换模板后需点击「生成配置并 Reload」才能生效。
     </div>
   </div>
 
   <!-- 操作按钮 -->
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <form method="POST" id="nginx-reload-form" style="display:inline"><?= csrf_field() ?>
       <input type="hidden" name="action" value="nginx_reload">
-      <button class="btn btn-primary" id="nginx-reload-btn">
-        🔄 生成配置并 Reload Nginx
-      </button>
-    </form>
-    <form method="POST" style="display:inline"><?= csrf_field() ?>
-      <input type="hidden" name="action" value="nginx_apply">
-      <button class="btn btn-secondary">📝 仅生成配置文件（不 reload）</button>
+      <input type="hidden" name="proxy_params_mode" id="proxy-params-mode-input" value="<?= $ppm ?>">
+      <button class="btn btn-primary" id="nginx-reload-btn">🔄 生成配置并 Reload</button>
     </form>
     <form method="POST" style="display:inline"><?= csrf_field() ?>
       <input type="hidden" name="action" value="gen_nginx">
-      <button class="btn btn-secondary">⬇ 下载配置文件</button>
+      <button class="btn btn-secondary">⬇ 下载配置</button>
     </form>
-  </div>
-
-  <!-- 配置文件预览 -->
-  <?php if ($conf_exists): ?>
-  <details style="margin-top:4px">
-    <summary style="cursor:pointer;font-size:13px;color:var(--tm);user-select:none">
-      查看当前配置文件内容 ▸
-    </summary>
-    <pre style="margin-top:10px;background:var(--bg);border:1px solid var(--bd);
-border-radius:8px;padding:14px;font-size:11px;font-family:monospace;color:#a5f3a5;
-overflow-x:auto;max-height:300px;overflow-y:auto"><?=
-      htmlspecialchars(@file_get_contents($proxy_conf_path) ?: '（读取失败）')
-    ?></pre>
-  </details>
-  <?php endif; ?>
-
-  <div class="alert alert-info" style="margin-top:16px">
-    ℹ️ 点击「生成配置并 Reload」将自动写入
-    <code style="font-size:11px">/etc/nginx/conf.d/nav-proxy.conf</code>
-    并执行 Nginx 语法检测与 Reload。
-    语法检测失败时会中止 reload 并显示错误信息。
-  </div>
-  <div id="nginx-reload-note" class="form-hint" style="margin-top:10px">按钮始终可点击；环境检测未通过时，提交后会显示明确错误原因。</div>
-</div>
-
-<div class="card" id="nginx-nav-card">
-  <div class="card-title">🗂 Nginx 配置导航</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a class="btn <?= $tab === 'main' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-main="1" data-tab="main" data-target="main" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'main', 'target' => 'main', 'encoding' => $encoding, 'lang' => $lang])) ?>">主配置</a>
-    <a class="btn <?= $tab === 'http' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-main="1" data-tab="http" data-target="http" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'http', 'target' => 'http', 'encoding' => $encoding, 'lang' => $lang])) ?>">HTTP 模块</a>
-    <a class="btn <?= $tab === 'proxy' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-main="1" data-tab="proxy" data-target="proxy_path" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'proxy', 'target' => 'proxy_path', 'encoding' => $encoding, 'lang' => $lang])) ?>">反代配置</a>
-  </div>
-  <div id="nginx-proxy-subnav" style="margin-top:12px;display:<?= $tab === 'proxy' ? 'flex' : 'none' ?>;gap:8px;flex-wrap:wrap">
-    <a class="btn btn-sm <?= $target === 'proxy_path' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-proxy="1" data-tab="proxy" data-target="proxy_path" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'proxy', 'target' => 'proxy_path', 'encoding' => $encoding, 'lang' => $lang])) ?>">路径模式</a>
-    <a class="btn btn-sm <?= $target === 'proxy_domain' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-proxy="1" data-tab="proxy" data-target="proxy_domain" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'proxy', 'target' => 'proxy_domain', 'encoding' => $encoding, 'lang' => $lang])) ?>">子域名模式</a>
-    <a class="btn btn-sm <?= $target === 'proxy_params_simple' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-proxy="1" data-tab="proxy" data-target="proxy_params_simple" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'proxy', 'target' => 'proxy_params_simple', 'encoding' => $encoding, 'lang' => $lang])) ?>">参数模板（精简）</a>
-    <a class="btn btn-sm <?= $target === 'proxy_params_full' ? 'btn-primary' : 'btn-secondary' ?>" data-nav-proxy="1" data-tab="proxy" data-target="proxy_params_full" href="nginx.php?<?= htmlspecialchars(http_build_query(['tab' => 'proxy', 'target' => 'proxy_params_full', 'encoding' => $encoding, 'lang' => $lang])) ?>">参数模板（完整）</a>
+    <span id="nginx-reload-note" class="form-hint" style="margin:0">按钮始终可点击；失败时会显示具体原因。</span>
   </div>
 </div>
 
+<!-- Nginx 配置编辑 -->
 <div class="card">
-  <div class="card-title">📝 文本编辑器（Ace）</div>
-  <div class="ngx-editor-launch"><button type="button" class="btn btn-primary" id="open-editor-modal-btn">打开文本编辑器</button></div>
-  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px">
-    <div>
-      <div style="font-size:12px;color:var(--tm)">当前编辑</div>
-      <div style="font-size:13px" id="editor-target-label"><?= htmlspecialchars($targets[$target]['label'] ?? $target) ?></div>
+  <div class="card-title">📝 Nginx 配置编辑</div>
+  <?php foreach ($editorDataMap as $k => $item): ?>
+  <div class="ngx-config-item">
+    <div class="meta">
+      <span style="font-weight:600;color:var(--tx)"><?= htmlspecialchars($item['label']) ?></span>
+      <span class="path"><?= htmlspecialchars($item['path']) ?><?php if ($item['mtime']): ?> · <?= htmlspecialchars($item['mtime']) ?><?php endif; ?></span>
+      <?php if (!$item['ok']): ?>
+      <span class="badge badge-red" style="font-size:11px">读取失败</span>
+      <?php endif; ?>
     </div>
-    <div style="font-family:var(--mono);font-size:12px;color:var(--tm)" id="editor-target-path"><?= htmlspecialchars($editorPath) ?></div>
+    <button type="button" class="btn btn-sm btn-secondary" data-edit-target="<?= htmlspecialchars($k) ?>" <?= !$item['ok'] ? 'disabled' : '' ?>>编辑</button>
   </div>
-  <?php if ($editorError !== ''): ?><div class="alert alert-error" id="editor-error"><?= htmlspecialchars($editorError) ?></div><?php else: ?><div class="alert alert-error" id="editor-error" style="display:none"></div><?php endif; ?>
-
-  <form method="POST" id="nginx-editor-form">
-    <?= csrf_field() ?>
-    <input type="hidden" name="target" id="nginx-editor-target" value="<?= htmlspecialchars($target) ?>">
-    <input type="hidden" name="tab" id="nginx-editor-tab" value="<?= htmlspecialchars($tab) ?>">
-    <input type="hidden" name="encoding" id="nginx-editor-encoding" value="<?= htmlspecialchars($encoding) ?>">
-    <input type="hidden" name="language_mode" id="nginx-editor-lang" value="<?= htmlspecialchars($lang) ?>">
-    <textarea name="content" id="nginx-editor-content" style="display:none"><?= htmlspecialchars($editorContent) ?></textarea>
-  </form>
+  <?php endforeach; ?>
 </div>
 
 <script src="assets/ace/ace.js"></script>
@@ -390,125 +373,17 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
 <?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
 <script>
 (function(){
-  var form=document.getElementById('nginx-editor-form');
-  var hidden=document.getElementById('nginx-editor-content');
-  var encInput=document.getElementById('nginx-editor-encoding');
-  var langInput=document.getElementById('nginx-editor-lang');
-  var targetInput=document.getElementById('nginx-editor-target');
-  var tabInput=document.getElementById('nginx-editor-tab');
-  var targetLabelEl=document.getElementById('editor-target-label');
-  var targetPathEl=document.getElementById('editor-target-path');
-  var errorEl=document.getElementById('editor-error');
-  var navCard=document.getElementById('nginx-nav-card');
-  var subnav=document.getElementById('nginx-proxy-subnav');
-  var openModalBtn=document.getElementById('open-editor-modal-btn');
-  if(!form||!hidden) return;
-
   var editorDataMap = <?= json_encode($editorDataMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
-  var currentTarget = <?= json_encode($target, JSON_UNESCAPED_UNICODE) ?>;
-  var currentTab = <?= json_encode($tab, JSON_UNESCAPED_UNICODE) ?>;
 
-  function setEditorError(msg){
-    if(!errorEl) return;
-    if(msg){ errorEl.textContent=msg; errorEl.style.display='block'; }
-    else { errorEl.textContent=''; errorEl.style.display='none'; }
-  }
-
-  function doNginxSave(action, value){
-    var serverAction = action;
-    if (action === 'save_reload') serverAction = 'save_and_reload';
-    if (action === 'syntax') serverAction = 'syntax_preview';
-
-    var payload = new URLSearchParams();
-    payload.append('action', serverAction);
-    payload.append('content', value);
-    payload.append('target', document.getElementById('nginx-editor-target').value);
-    payload.append('tab', document.getElementById('nginx-editor-tab').value);
-    payload.append('encoding', document.getElementById('nginx-editor-encoding').value);
-    payload.append('language_mode', document.getElementById('nginx-editor-lang').value);
-    payload.append('_csrf', window._csrf);
-
-    var allBtns = document.querySelectorAll('#nav-ace-toolbar-actions button, #nav-ace-actions-left button, #nav-ace-actions-right button');
-    allBtns.forEach(function(b){ b.disabled = true; });
-
-    fetch('nginx.php', {
-      method: 'POST',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      body: payload
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      allBtns.forEach(function(b){ b.disabled = false; });
-      if(data.ok){
-        NavAceEditor.markClean();
-        showToast(data.msg, 'success');
-      }else{
-        showToast(data.msg || '操作失败', 'error');
-      }
-    })
-    .catch(function(){
-      allBtns.forEach(function(b){ b.disabled = false; });
-      showToast('请求失败，请检查网络', 'error');
-    });
-  }
-
-  function activateButtons(selector, activeTarget){
-    document.querySelectorAll(selector).forEach(function(btn){
-      var isActive=(btn.getAttribute('data-target')===activeTarget);
-      btn.classList.toggle('btn-primary', isActive);
-      btn.classList.toggle('btn-secondary', !isActive);
-    });
-  }
-
-  function activateMainTab(tab){
-    document.querySelectorAll('[data-nav-main="1"]').forEach(function(btn){
-      var isActive=(btn.getAttribute('data-tab')===tab);
-      btn.classList.toggle('btn-primary', isActive);
-      btn.classList.toggle('btn-secondary', !isActive);
-    });
-  }
-
-  function renderTarget(target, tab){
-    var item=editorDataMap[target]||null;
-    if(!item) return;
-
-    currentTarget=target;
-    currentTab=tab;
-    if(targetInput) targetInput.value=target;
-    if(tabInput) tabInput.value=tab;
-    if(targetLabelEl) targetLabelEl.textContent=item.label||target;
-    if(targetPathEl) targetPathEl.textContent=item.path||'';
-    setEditorError(item.error||'');
-
-    // 若弹窗已打开，同步更新编辑器内容
-    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.getValue) {
-      var langNow = item.lang || 'nginx';
-      NavAceEditor.setValue(item.content || '', langNow);
-      var title = '文本编辑器 · ' + (item.label || target);
-      if (item.path) title += ' · ' + item.path;
-      NavAceEditor.setTitle(title);
-      NavAceEditor.markClean();
-      if (langInput) langInput.value = langNow;
-    }
-
-    if(tab==='proxy'){
-      if(subnav) subnav.style.display='flex';
-      activateButtons('[data-nav-proxy="1"]', target);
-    }else{
-      if(subnav) subnav.style.display='none';
-    }
-    activateMainTab(tab);
-  }
-
-  function openNginxEditor(){
-    var item=editorDataMap[currentTarget]||{};
-    var currentLang=item.lang||'nginx';
-    var title = '文本编辑器 · ' + (item.label || currentTarget);
-    if (item.path) title += ' · ' + item.path;
+  // ── 打开指定目标的编辑器 ──
+  function openEditorForTarget(target) {
+    var item = editorDataMap[target];
+    if (!item || !item.ok) return;
+    var title = item.label + ' · ' + item.path;
     NavAceEditor.open({
       title: title,
-      mode: currentLang,
-      value: item.content||'',
+      mode: 'nginx',
+      value: item.content || '',
       wrapMode: true,
       buttons: {
         left: [
@@ -521,162 +396,198 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
           { text: '保存并 Reload', class: 'btn-secondary', action: 'save_reload' }
         ]
       },
-      onAction: function(action, value){
-        if(action==='close'){
+      onAction: function(action, value) {
+        if (action === 'close') {
           NavAceEditor.close();
           return;
         }
-        if(action==='save'||action==='save_reload'||action==='syntax'){
-          if(action==='save_reload'){
+        if (action === 'save' || action === 'save_reload' || action === 'syntax') {
+          if (action === 'save_reload') {
             NavConfirm.open({
               title: '保存并 Reload Nginx',
               message: '确认保存并 Reload Nginx？',
               confirmText: '确认',
               cancelText: '取消',
               danger: false,
-              onConfirm: function(){ doNginxSave(action, value); }
+              onConfirm: function() { doNginxSave(action, value, target); }
             });
             return;
           }
-          doNginxSave(action, value);
+          doNginxSave(action, value, target);
         }
-      },
-      onClose: function(){
-        setEditorError('');
       }
     });
   }
 
-  if(navCard){
-    navCard.addEventListener('click', function(e){
-      var btn=e.target.closest('a[data-target]');
-      if(!btn) return;
-      e.preventDefault();
-      var target=btn.getAttribute('data-target')||'main';
-      var tab=btn.getAttribute('data-tab')||'main';
-      renderTarget(target, tab);
-      if(typeof NavAceEditor!=='undefined'&&NavAceEditor.focus){
-        setTimeout(function(){ NavAceEditor.focus(); }, 10);
+  // ── 保存 / 语法检查 AJAX ──
+  function doNginxSave(action, value, target) {
+    var serverAction = action;
+    if (action === 'save_reload') serverAction = 'save_and_reload';
+    if (action === 'syntax') serverAction = 'syntax_preview';
+
+    var payload = new URLSearchParams();
+    payload.append('action', serverAction);
+    payload.append('content', value);
+    payload.append('target', target);
+    payload.append('encoding', 'utf-8');
+    payload.append('language_mode', 'nginx');
+    payload.append('_csrf', window._csrf);
+
+    var allBtns = document.querySelectorAll('#nav-ace-toolbar-actions button, #nav-ace-actions-left button, #nav-ace-actions-right button');
+    allBtns.forEach(function(b) { b.disabled = true; });
+
+    fetch('nginx.php', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: payload
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      allBtns.forEach(function(b) { b.disabled = false; });
+      if (data.ok) {
+        NavAceEditor.markClean();
+        showToast(data.msg, 'success');
+        // 更新本地缓存内容
+        if (editorDataMap[target]) {
+          editorDataMap[target].content = value;
+        }
+      } else {
+        showToast(data.msg || '操作失败', 'error');
       }
+    })
+    .catch(function() {
+      allBtns.forEach(function(b) { b.disabled = false; });
+      showToast('请求失败，请检查网络', 'error');
     });
   }
 
-  if(openModalBtn) openModalBtn.addEventListener('click', openNginxEditor);
-
-  window.addEventListener('beforeunload',function(e){
-    if(typeof NavAceEditor!=='undefined'&&NavAceEditor.isDirty&&NavAceEditor.isDirty()){
-      e.preventDefault(); e.returnValue='';
-    }
+  // ── 绑定编辑按钮 ──
+  document.querySelectorAll('[data-edit-target]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var target = this.getAttribute('data-edit-target');
+      openEditorForTarget(target);
+    });
   });
 
-  renderTarget(currentTarget, currentTab);
-})();
+  // ── 反代参数模板切换 ──
+  var ppmDescEl = document.getElementById('ppm-desc');
+  var ppmHintEl = document.getElementById('ppm-hint');
+  var ppmInput = document.getElementById('proxy-params-mode-input');
+  var initialPpm = <?= json_encode($ppm, JSON_UNESCAPED_UNICODE) ?>;
+  var ppmDescriptions = {
+    simple: '精简模式：14 条参数，超时 60s，适合普通 Web 应用（默认推荐）。',
+    full:   '完整模式：60+ 条参数，超时 86400s，适合视频流、大文件、长连接等复杂场景。'
+  };
 
-// ── 反代参数模式选择卡片联动 ──
-function selectPPM(val) {
-    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
-    radios.forEach(function(radio) {
-        if (val) {
-            radio.checked = radio.value === val;
-        }
-        var card = radio.closest('[data-ppm-card]');
-        if (!card) return;
-        var isSelected = !!radio.checked;
-        card.style.borderColor = isSelected ? 'var(--ac)' : 'var(--bd)';
-        card.style.background  = isSelected ? 'rgba(99,179,237,.08)' : 'var(--sf)';
+  function updatePpmUI(mode) {
+    document.querySelectorAll('[data-ppm]').forEach(function(btn) {
+      var isActive = btn.getAttribute('data-ppm') === mode;
+      btn.classList.toggle('active', isActive);
     });
-}
+    if (ppmDescEl) ppmDescEl.textContent = ppmDescriptions[mode] || '';
+    if (ppmInput) ppmInput.value = mode;
+    if (ppmHintEl) {
+      if (mode !== initialPpm) {
+        ppmHintEl.innerHTML = '⚠️ <b>模板已切换</b>，需点击「生成配置并 Reload」才能生效。';
+        ppmHintEl.style.color = '#fbbf24';
+      } else {
+        ppmHintEl.innerHTML = '💡 切换模板后需点击「生成配置并 Reload」才能生效。';
+        ppmHintEl.style.color = 'var(--tm)';
+      }
+    }
+  }
 
-document.addEventListener('DOMContentLoaded', function() {
-    var radios = document.querySelectorAll('input[name="proxy_params_mode"]');
-    radios.forEach(function(radio) {
-        radio.addEventListener('change', function() {
-            selectPPM();
-        });
-        var card = radio.closest('[data-ppm-card]');
-        if (!card) return;
-        card.addEventListener('click', function() {
-            radio.checked = true;
-            selectPPM();
-        });
+  document.querySelectorAll('[data-ppm]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      updatePpmUI(this.getAttribute('data-ppm'));
     });
-    selectPPM();
-});
+  });
 
-// ── Nginx 代理配置生成环境检测 ──
-(function initNginxLazy() {
-    var nginxReloadForm = document.getElementById('nginx-reload-form');
+  // ── 生成配置表单提交状态 ──
+  (function initNginxReloadForm() {
+    var form = document.getElementById('nginx-reload-form');
+    var btn = document.getElementById('nginx-reload-btn');
+    var note = document.getElementById('nginx-reload-note');
+    var submitting = false;
+
+    if (!form) return;
+    form.addEventListener('submit', function() {
+      if (submitting) return false;
+      submitting = true;
+      if (btn) { btn.disabled = true; btn.textContent = '处理中...'; }
+      if (note) note.textContent = '正在生成配置并触发 Nginx Reload，请稍候...';
+    });
+  })();
+
+  // ── Nginx sudo 环境异步检测 ──
+  (function initNginxLazy() {
     var nginxReloadBtn = document.getElementById('nginx-reload-btn');
     var nginxReloadNote = document.getElementById('nginx-reload-note');
-    var nginxSubmitting = false;
 
     function setNginxReloadUi(state, note) {
-        if (nginxReloadBtn) {
-            if (state === 'submitting') {
-                nginxReloadBtn.disabled = true;
-                nginxReloadBtn.textContent = '处理中...';
-            } else {
-                nginxReloadBtn.disabled = false;
-                nginxReloadBtn.textContent = '🔄 生成配置并 Reload Nginx';
-            }
+      if (nginxReloadBtn) {
+        if (state === 'submitting') {
+          nginxReloadBtn.disabled = true;
+          nginxReloadBtn.textContent = '处理中...';
+        } else {
+          nginxReloadBtn.disabled = false;
+          nginxReloadBtn.textContent = '🔄 生成配置并 Reload';
         }
-        if (nginxReloadNote && note) {
-            nginxReloadNote.textContent = note;
-        }
-    }
-
-    if (nginxReloadForm) {
-        nginxReloadForm.addEventListener('submit', function() {
-            if (nginxSubmitting) return false;
-            nginxSubmitting = true;
-            setNginxReloadUi('submitting', '正在生成配置并触发 Nginx Reload，请稍候...');
-        });
+      }
+      if (nginxReloadNote && note) {
+        nginxReloadNote.textContent = note;
+      }
     }
 
     var nginxLoaded = false;
     function loadNginxSudoOnce() {
-        if (nginxLoaded) return;
-        nginxLoaded = true;
-        var el = document.getElementById('nginx-sudo-banner');
-        if (!el) return;
-        setNginxReloadUi('checking', '正在检测 Nginx reload 运行环境...');
-        fetch('settings_ajax.php?action=nginx_sudo', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            .then(function(r){ return r.json(); })
-            .then(function(d){
-                if (!d.ok) {
-                    setNginxReloadUi('ready', '环境检测失败，但仍可尝试提交，失败时会显示具体原因。');
-                    return;
-                }
-                if (d.reload_ok) {
-                    el.innerHTML = '';
-                    setNginxReloadUi('ready', d.message || '环境检测通过，可以直接生成配置并 Reload。');
-                    return;
-                }
-                var html = '<div class="alert alert-warn">⚠️ ' + escHtml(d.message || '未检测到可用的 Nginx reload 执行权限。');
-                if (d.sudo_hint) {
-                    html += '<br>请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre>';
-                }
-                html += '</div>';
-                el.innerHTML = html;
-                setNginxReloadUi('warn', '环境检测未通过，点击按钮后会返回明确错误；也可以先按上方提示补齐执行权限。');
-            })
-            .catch(function(){
-                setNginxReloadUi('ready', '环境检测请求失败，但仍可尝试提交，失败时会显示具体原因。');
-            });
+      if (nginxLoaded) return;
+      nginxLoaded = true;
+      var el = document.getElementById('nginx-sudo-banner');
+      if (!el) return;
+      fetch('settings_ajax.php?action=nginx_sudo', { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (!d.ok) {
+            if (nginxReloadNote) nginxReloadNote.textContent = '环境检测失败，但仍可尝试提交，失败时会显示具体原因。';
+            return;
+          }
+          if (d.reload_ok) {
+            el.innerHTML = '';
+            if (nginxReloadNote) nginxReloadNote.textContent = d.message || '环境检测通过，可以直接生成配置并 Reload。';
+            return;
+          }
+          var html = '<div class="alert alert-warn">⚠️ ' + escHtml(d.message || '未检测到可用的 Nginx reload 执行权限。');
+          if (d.sudo_hint) {
+            html += '<br>请在服务器上执行以下命令配置白名单：<pre style="margin-top:8px;background:var(--bg);padding:10px;border-radius:6px;font-size:12px;overflow-x:auto">' + escHtml(d.sudo_hint) + '</pre>';
+          }
+          html += '</div>';
+          el.innerHTML = html;
+          if (nginxReloadNote) nginxReloadNote.textContent = '环境检测未通过，点击按钮后会返回明确错误；也可以先按上方提示补齐执行权限。';
+        })
+        .catch(function() {
+          if (nginxReloadNote) nginxReloadNote.textContent = '环境检测请求失败，但仍可尝试提交，失败时会显示具体原因。';
+        });
     }
 
-    var nginx = document.getElementById('proxy');
-    if (window.IntersectionObserver) {
-        if (nginx) {
-            var io2 = new IntersectionObserver(function(entries){
-                entries.forEach(function(e){ if (e.isIntersecting) loadNginxSudoOnce(); });
-            }, { rootMargin: '80px' });
-            io2.observe(nginx);
-        }
-    } else {
-        if (nginx) loadNginxSudoOnce();
+    var proxyCard = document.getElementById('proxy');
+    if (window.IntersectionObserver && proxyCard) {
+      var io = new IntersectionObserver(function(entries) {
+        entries.forEach(function(e) { if (e.isIntersecting) loadNginxSudoOnce(); });
+      }, { rootMargin: '80px' });
+      io.observe(proxyCard);
+    } else if (proxyCard) {
+      loadNginxSudoOnce();
     }
-    if (location.hash === '#proxy') loadNginxSudoOnce();
+  })();
+
+  // ── 离开页面前确认未保存内容 ──
+  window.addEventListener('beforeunload', function(e) {
+    if (typeof NavAceEditor !== 'undefined' && NavAceEditor.isDirty && NavAceEditor.isDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 })();
 </script>
 

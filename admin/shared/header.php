@@ -364,11 +364,7 @@ function submitConfirmForm(btn, options) {
 <div class="alert <?= htmlspecialchars($flash_css) ?>" style="<?= $flash['type']==='warn' ? 'display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap' : '' ?>">
   <span style="flex:1"><?= $flash_icon ?> <?= htmlspecialchars($flash['msg']) ?></span>
 <?php if ($flash['type'] === 'warn' && ($current_admin['role'] ?? '') === 'admin'): ?>
-  <form method="POST" action="settings.php" style="margin:0;flex-shrink:0">
-    <?= csrf_field() ?>
-    <input type="hidden" name="action" value="nginx_apply_and_reload">
-    <button type="submit" style="background:rgba(251,191,36,.18);border:1px solid rgba(251,191,36,.5);color:#fbbf24;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:600">🔄 立即生成配置并 Reload Nginx</button>
-  </form>
+  <a href="nginx.php" style="background:rgba(251,191,36,.18);border:1px solid rgba(251,191,36,.5);color:#fbbf24;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;flex-shrink:0">🔄 前往 Nginx 管理</a>
 <?php endif; ?>
 </div>
 <script>showToast(<?= json_encode($flash['msg']) ?>, <?= json_encode($flash_toast_type) ?>);</script>
@@ -382,15 +378,11 @@ function submitConfirmForm(btn, options) {
       以下代理站点配置已修改但尚未生效：
       <strong><?= implode('、', array_map(function($s){ return htmlspecialchars($s['name']); }, $_pending_proxy)) ?></strong>
     <?php else: ?>
-      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点相关变更尚未在 Nginx 生效，请及时 Reload Nginx。
+      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点配置已修改但尚未生效，请及时前往「Nginx 管理」点击「🔄 生成配置并 Reload」。
     <?php endif; ?>
   </span>
   <?php if (($current_admin['role'] ?? '') === 'admin'): ?>
-  <form method="POST" action="settings.php" style="margin:0">
-    <?= csrf_field() ?>
-    <input type="hidden" name="action" value="nginx_apply_and_reload">
-    <button type="submit" style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.5);color:#f87171;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap">🔄 生成配置并 Reload Nginx</button>
-  </form>
+  <a href="nginx.php" style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.5);color:#f87171;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center">🔄 前往 Nginx 管理</a>
   <?php endif; ?>
 </div>
 <?php endif; ?>
