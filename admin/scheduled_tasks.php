@@ -165,6 +165,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: scheduled_tasks.php'); exit;
     }
 
+    /* ------ 保存脚本（AJAX） ------ */
+    if ($action === 'save_script') {
+        if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'XMLHttpRequest') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => '非法请求'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $id  = trim((string)($_POST['id'] ?? ''));
+        $cmd = task_normalize_editor_contents((string)($_POST['command'] ?? ''));
+        if ($id === '') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => '无效的任务 ID'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if (cron_is_ddns_dispatcher_id($id)) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => 'DDNS 调度器由系统自动维护，不能手动编辑'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $lock = scheduled_tasks_lock_exclusive();
+        $data = load_scheduled_tasks();
+        $task = null;
+        foreach ($data['tasks'] ?? [] as &$t) {
+            if (($t['id'] ?? '') === $id) {
+                $t['command'] = $cmd;
+                $task = $t;
+                break;
+            }
+        }
+        unset($t);
+        if (!$task) {
+            scheduled_tasks_unlock($lock);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => '任务不存在'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $result = task_write_script_file($task, $cmd, $data['tasks'] ?? []);
+        if (!$result['ok']) {
+            scheduled_tasks_unlock($lock);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => $result['msg']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        save_scheduled_tasks($data, $lock);
+        scheduled_tasks_unlock($lock);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => true, 'msg' => '脚本已保存到文件'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
 }
 
 $page_title = '计划任务';
@@ -334,12 +385,11 @@ $CSRF = csrf_field();
 
         <!-- 停止 -->
         <?php if (!empty($t['_running'])): ?>
-        <form method="POST" style="display:inline"
-          onsubmit="return confirm('确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？');">
+        <form method="POST" style="display:inline" data-confirm-title="停止任务" data-confirm-message="确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_stop">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="submit" class="btn btn-sm btn-danger" data-task-stop-btn>⏹ 停止</button>
+          <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn onclick="submitConfirmForm(this)">⏹ 停止</button>
         </form>
         <?php endif; ?>
 
@@ -360,12 +410,16 @@ $CSRF = csrf_field();
 
         <!-- 删除 -->
         <?php if (empty($t['_is_system'])): ?>
-        <form method="POST" style="display:inline"
-          onsubmit="return confirmDeleteTask(<?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+        <form method="POST" style="display:inline" data-confirm-title="删除任务" data-confirm-message="确定删除任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？
+
+• 会删除该任务对应的日志
+• 不会删除共享工作目录 data/tasks
+
+此操作不可恢复。">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="task_delete">
           <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="submit" class="btn btn-sm btn-danger">✕ 删除</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">✕ 删除</button>
         </form>
         <?php else: ?>
         <button type="button" class="btn btn-sm btn-danger" disabled style="opacity:.55;cursor:not-allowed">✕ 系统维护</button>
@@ -462,12 +516,11 @@ $CSRF = csrf_field();
           <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">自动维护</button>
           <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
           <?php if (!empty($t['_running'])): ?>
-          <form method="POST" style="display:inline"
-            onsubmit="return confirm('确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？');">
+          <form method="POST" style="display:inline" data-confirm-title="停止任务" data-confirm-message="确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="task_stop">
             <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-            <button type="submit" class="btn btn-sm btn-danger" data-task-stop-btn>⏹ 停止</button>
+            <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn onclick="submitConfirmForm(this)">⏹ 停止</button>
           </form>
           <?php endif; ?>
           <form method="POST" style="display:inline">
@@ -549,7 +602,7 @@ $CSRF = csrf_field();
         <div class="form-group" style="margin-top:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
             <label style="margin:0">命令 / 脚本</label>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="openTaskCommandEditor()">📝 打开编辑器</button>
+            <button type="button" id="btn-open-editor" class="btn btn-sm btn-secondary" onclick="openTaskCommandEditor()">📝 打开编辑器</button>
           </div>
           <textarea name="command" id="fm-command" rows="20"
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
@@ -609,6 +662,12 @@ function openTaskModal(task) {
   document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
 
+  // 新建任务时隐藏编辑器入口（无 task_id，无法直接写文件）
+  var btnEditor = document.getElementById('btn-open-editor');
+  if (btnEditor) {
+    btnEditor.style.display = isNew ? 'none' : '';
+  }
+
   // 工作目录说明
   var workdirHint = document.getElementById('fm-workdir-hint');
   var workdirEl   = document.getElementById('fm-workdir');
@@ -654,10 +713,43 @@ function openTaskCommandEditor() {
         return;
       }
       if (action === 'save') {
-        document.getElementById('fm-command').value = value;
-        NavAceEditor.markClean();
-        NavAceEditor.close();
-        showToast('脚本内容已更新', 'success');
+        var taskId = document.getElementById('fm-id').value;
+        if (!taskId) {
+          showToast('请先保存任务后再编辑脚本', 'error');
+          return;
+        }
+        NavAceEditor.setButtonDisabled('save', true);
+        fetch('scheduled_tasks.php', {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({
+            action: 'save_script',
+            id: taskId,
+            command: value,
+            _csrf: CSRF_TOKEN
+          })
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          NavAceEditor.setButtonDisabled('save', false);
+          if (data.ok) {
+            document.getElementById('fm-command').value = value;
+            if (window._currentEditingTask) {
+              window._currentEditingTask.command = value;
+            }
+            NavAceEditor.markClean();
+            showToast(data.msg || '脚本已保存到文件', 'success');
+          } else {
+            showToast(data.msg || '保存失败', 'error');
+          }
+        })
+        .catch(function(){
+          NavAceEditor.setButtonDisabled('save', false);
+          showToast('请求失败，请检查网络', 'error');
+        });
       }
     }
   });
@@ -805,14 +897,21 @@ function updateTaskRowStatus(task) {
       var stopForm = document.createElement('form');
       stopForm.method = 'POST';
       stopForm.style.display = 'inline';
-      stopForm.onsubmit = function() {
-        return confirm('确定停止任务？');
-      };
       stopForm.innerHTML =
         '<input type="hidden" name="_csrf" value="' + String(CSRF_TOKEN).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">' +
         '<input type="hidden" name="action" value="task_stop">' +
         '<input type="hidden" name="id" value="' + String(task.id).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">' +
-        '<button type="submit" class="btn btn-sm btn-danger" data-task-stop-btn>⏹ 停止</button>';
+        '<button type="button" class="btn btn-sm btn-danger" data-task-stop-btn>⏹ 停止</button>';
+      stopForm.querySelector('button').addEventListener('click', function() {
+        NavConfirm.open({
+          title: '停止任务',
+          message: '确定停止任务？',
+          confirmText: '确认',
+          cancelText: '取消',
+          danger: true,
+          onConfirm: function() { stopForm.submit(); }
+        });
+      });
       runBtn.parentNode.insertBefore(stopForm, runBtn);
     }
   } else {
@@ -972,40 +1071,43 @@ function closeLogModal() {
 
 function clearCurrentLog() {
   if (!logState.id) return;
-  if (!confirm('确定清空当前任务日志？此操作不可恢复。')) return;
-  stopTaskStatusPolling();
-  NavAceEditor.setButtonDisabled('clear', true);
-  fetch('scheduled_tasks.php', {
-    method: 'POST',
-    headers: {
-      'X-Requested-With': 'XMLHttpRequest',
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: new URLSearchParams({
-      action: 'task_log_clear',
-      id: logState.id,
-      _csrf: CSRF_TOKEN
-    })
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(data){
-    NavAceEditor.setButtonDisabled('clear', false);
-    if (data.ok) {
-      showToast(data.msg || '日志已清空', 'success');
-      logLoadPage(1, false);
-    } else {
-      showToast(data.msg || '清空失败', 'error');
+  NavConfirm.open({
+    title: '清空日志',
+    message: '确定清空当前任务日志？此操作不可恢复。',
+    confirmText: '清空',
+    cancelText: '取消',
+    danger: true,
+    onConfirm: function() {
+      stopTaskStatusPolling();
+      NavAceEditor.setButtonDisabled('clear', true);
+      fetch('scheduled_tasks.php', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          action: 'task_log_clear',
+          id: logState.id,
+          _csrf: CSRF_TOKEN
+        })
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        NavAceEditor.setButtonDisabled('clear', false);
+        if (data.ok) {
+          showToast(data.msg || '日志已清空', 'success');
+          logLoadPage(1, false);
+        } else {
+          showToast(data.msg || '清空失败', 'error');
+        }
+      })
+      .catch(function(){
+        NavAceEditor.setButtonDisabled('clear', false);
+        showToast('请求失败，请检查网络', 'error');
+      });
     }
-  })
-  .catch(function(){
-    NavAceEditor.setButtonDisabled('clear', false);
-    showToast('请求失败，请检查网络', 'error');
   });
-}
-function confirmDeleteTask(name) {
-  var lines = ['确定删除任务「' + name + '」？', '', '• 会删除该任务对应的日志', '• 不会删除共享工作目录 data/tasks'];
-  lines.push('', '此操作不可恢复。');
-  return confirm(lines.join('\n'));
 }
 function copyTaskWorkdir(path) {
   if (!path) return;
@@ -1095,10 +1197,10 @@ function logLoadPage(p, jumpToLast, options) {
     下列操作会先自动创建备份，再执行清空。清空计划任务不会删除 <code>data/tasks/</code> 目录中的其他共享文件，只会删除系统管理的任务脚本、任务日志和锁文件。
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="POST" onsubmit="return confirm('确认清空全部普通计划任务？\n\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\n不会删除 data/tasks 目录里的其他共享文件。');">
+    <form method="POST" data-confirm-title="清空计划任务" data-confirm-message="确认清空全部普通计划任务？\n\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\n不会删除 data/tasks 目录里的其他共享文件。">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="clear_scheduled_tasks">
-      <button class="btn btn-danger" type="submit">🗑 清空计划任务</button>
+      <button class="btn btn-danger" type="button" onclick="submitConfirmForm(this)">🗑 清空计划任务</button>
     </form>
   </div>
 </div>

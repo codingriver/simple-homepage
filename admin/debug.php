@@ -143,18 +143,18 @@ $build_info = nav_read_build_info();
 <div class="card" id="debug">
   <div class="card-title">🛠 调试工具</div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-    <form method="POST" style="display:inline" onsubmit="return confirm('确认清除当前浏览器的登录 Cookie？清除后将跳转到登录页。')"><?= csrf_field() ?>
+    <form method="POST" style="display:inline" data-confirm-title="清除 Cookie" data-confirm-message="确认清除当前浏览器的登录 Cookie？清除后将跳转到登录页。"><?= csrf_field() ?>
       <input type="hidden" name="action" value="clear_cookie">
-      <button class="btn" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:#ff6b6b">🍪 清除当前 Cookie</button>
+      <button type="button" class="btn" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:#ff6b6b" onclick="submitConfirmForm(this)">🍪 清除当前 Cookie</button>
     </form>
 
     <?php $de_on = debug_get_display_errors(); ?>
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       <label style="font-size:13px;color:var(--tm)">display_errors</label>
-      <form method="POST" style="display:inline" onsubmit="return confirm(this.querySelector('[name=display_errors]').value==='1'?'开启 display_errors 会将 PHP 错误直接输出到页面，仅调试时使用，确认开启？':'确认关闭 display_errors？')"><?= csrf_field() ?>
+      <form method="POST" style="display:inline" id="toggle-de-form"><?= csrf_field() ?>
         <input type="hidden" name="action" value="toggle_display_errors">
         <input type="hidden" name="display_errors" value="<?= $de_on ? '0' : '1' ?>">
-        <button type="submit" style="display:flex;align-items:center;gap:10px;background:<?= $de_on ? 'rgba(251,191,36,.1)' : 'rgba(30,32,44,.8)' ?>;border:2px solid <?= $de_on ? '#fbbf24' : 'var(--bd)' ?>;border-radius:50px;padding:6px 16px 6px 8px;cursor:pointer;transition:all .2s">
+        <button type="button" onclick="confirmToggleDisplayErrors(this)" style="display:flex;align-items:center;gap:10px;background:<?= $de_on ? 'rgba(251,191,36,.1)' : 'rgba(30,32,44,.8)' ?>;border:2px solid <?= $de_on ? '#fbbf24' : 'var(--bd)' ?>;border-radius:50px;padding:6px 16px 6px 8px;cursor:pointer;transition:all .2s">
           <!-- Toggle 滑块 -->
           <span style="display:inline-flex;align-items:center;width:36px;height:20px;background:<?= $de_on ? '#fbbf24' : 'var(--bd)' ?>;border-radius:10px;position:relative;transition:background .2s">
             <span style="position:absolute;<?= $de_on ? 'right:2px' : 'left:2px' ?>;top:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:all .2s"></span>
@@ -170,5 +170,22 @@ $build_info = nav_read_build_info();
       <b>display_errors</b>：点击 Toggle 切换状态。开启后 PHP 错误直接输出到页面，方便调试；<span style="color:#ff6b6b">生产环境请保持关闭</span>。
     </div>
 </div>
+
+<script>
+function confirmToggleDisplayErrors(btn) {
+    var form = btn.closest('form');
+    var de = form.querySelector('[name=display_errors]').value;
+    NavConfirm.open({
+        title: '切换 display_errors',
+        message: de === '1'
+            ? '开启 display_errors 会将 PHP 错误直接输出到页面，仅调试时使用，确认开启？'
+            : '确认关闭 display_errors？',
+        confirmText: '确认',
+        cancelText: '取消',
+        danger: false,
+        onConfirm: function() { form.submit(); }
+    });
+}
+</script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

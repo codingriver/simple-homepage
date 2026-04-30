@@ -214,19 +214,17 @@ function trigger_badge(string $t): string {
       <td>
         <a href="?download=<?= urlencode($bk['filename']) ?>"
            class="btn btn-sm btn-secondary">⬇ 下载</a>
-        <form method="POST" style="display:inline"
-              onsubmit="return confirm('确认恢复此备份？当前配置将被覆盖（会自动备份当前状态）')">
+        <form method="POST" style="display:inline" data-confirm-title="恢复备份" data-confirm-message="确认恢复此备份？当前配置将被覆盖（会自动备份当前状态）">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="restore">
           <input type="hidden" name="filename" value="<?= htmlspecialchars($bk['filename']) ?>">
-          <button type="submit" class="btn btn-sm btn-secondary">🔄 恢复</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="submitConfirmForm(this, {danger: false})">🔄 恢复</button>
         </form>
-        <form method="POST" style="display:inline"
-              onsubmit="return confirm('确认删除此备份？')">
+        <form method="POST" style="display:inline" data-confirm-title="删除备份" data-confirm-message="确认删除此备份？">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="delete">
           <input type="hidden" name="filename" value="<?= htmlspecialchars($bk['filename']) ?>">
-          <button type="submit" class="btn btn-sm btn-danger">删除</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
         </form>
       </td>
     </tr>
@@ -287,11 +285,19 @@ function handleImportFile(input) {
                 input.value = '';
                 return;
             }
-            if (!confirm('确认导入？' + formatLabel + '，当前配置将被覆盖（自动备份）')) {
-                input.value = '';
-                return;
-            }
-            document.getElementById('importForm').submit();
+            NavConfirm.open({
+                title: '导入配置',
+                message: '确认导入？' + formatLabel + '，当前配置将被覆盖（自动备份）',
+                confirmText: '确认导入',
+                cancelText: '取消',
+                danger: true,
+                onConfirm: function() {
+                    document.getElementById('importForm').submit();
+                },
+                onCancel: function() {
+                    input.value = '';
+                }
+            });
         } catch(err) {
             showToast('JSON 格式解析错误：' + err.message, 'error');
             input.value = '';

@@ -414,6 +414,44 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
     else { errorEl.textContent=''; errorEl.style.display='none'; }
   }
 
+  function doNginxSave(action, value){
+    var serverAction = action;
+    if (action === 'save_reload') serverAction = 'save_and_reload';
+    if (action === 'syntax') serverAction = 'syntax_preview';
+
+    var payload = new URLSearchParams();
+    payload.append('action', serverAction);
+    payload.append('content', value);
+    payload.append('target', document.getElementById('nginx-editor-target').value);
+    payload.append('tab', document.getElementById('nginx-editor-tab').value);
+    payload.append('encoding', document.getElementById('nginx-editor-encoding').value);
+    payload.append('language_mode', document.getElementById('nginx-editor-lang').value);
+    payload.append('_csrf', window._csrf);
+
+    var allBtns = document.querySelectorAll('#nav-ace-toolbar-actions button, #nav-ace-actions-left button, #nav-ace-actions-right button');
+    allBtns.forEach(function(b){ b.disabled = true; });
+
+    fetch('nginx.php', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: payload
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      allBtns.forEach(function(b){ b.disabled = false; });
+      if(data.ok){
+        NavAceEditor.markClean();
+        showToast(data.msg, 'success');
+      }else{
+        showToast(data.msg || '操作失败', 'error');
+      }
+    })
+    .catch(function(){
+      allBtns.forEach(function(b){ b.disabled = false; });
+      showToast('请求失败，请检查网络', 'error');
+    });
+  }
+
   function activateButtons(selector, activeTarget){
     document.querySelectorAll(selector).forEach(function(btn){
       var isActive=(btn.getAttribute('data-target')===activeTarget);
@@ -490,45 +528,17 @@ overflow-x:auto;max-height:300px;overflow-y:auto"><?=
         }
         if(action==='save'||action==='save_reload'||action==='syntax'){
           if(action==='save_reload'){
-            if(!confirm('确认保存并 Reload Nginx？')) return;
+            NavConfirm.open({
+              title: '保存并 Reload Nginx',
+              message: '确认保存并 Reload Nginx？',
+              confirmText: '确认',
+              cancelText: '取消',
+              danger: false,
+              onConfirm: function(){ doNginxSave(action, value); }
+            });
+            return;
           }
-          // 映射前端 action 到后端 action
-          var serverAction = action;
-          if (action === 'save_reload') serverAction = 'save_and_reload';
-          if (action === 'syntax') serverAction = 'syntax_preview';
-
-          var payload = new URLSearchParams();
-          payload.append('action', serverAction);
-          payload.append('content', value);
-          payload.append('target', document.getElementById('nginx-editor-target').value);
-          payload.append('tab', document.getElementById('nginx-editor-tab').value);
-          payload.append('encoding', document.getElementById('nginx-editor-encoding').value);
-          payload.append('language_mode', document.getElementById('nginx-editor-lang').value);
-          payload.append('_csrf', window._csrf);
-
-          // 禁用按钮防止重复提交
-          var allBtns = document.querySelectorAll('#nav-ace-toolbar-actions button, #nav-ace-actions-left button, #nav-ace-actions-right button');
-          allBtns.forEach(function(b){ b.disabled = true; });
-
-          fetch('nginx.php', {
-            method: 'POST',
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            body: payload
-          })
-          .then(function(r){ return r.json(); })
-          .then(function(data){
-            allBtns.forEach(function(b){ b.disabled = false; });
-            if(data.ok){
-              NavAceEditor.markClean();
-              showToast(data.msg, 'success');
-            }else{
-              showToast(data.msg || '操作失败', 'error');
-            }
-          })
-          .catch(function(){
-            allBtns.forEach(function(b){ b.disabled = false; });
-            showToast('请求失败，请检查网络', 'error');
-          });
+          doNginxSave(action, value);
         }
       },
       onClose: function(){

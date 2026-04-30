@@ -579,7 +579,11 @@ function ddns_fetch_cf_164746(array $source): array {
         }, $cells[1] ?? []);
         $ip = trim((string)($cells[0] ?? ''));
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            continue;
+            preg_match('/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/', $ip, $m);
+            $ip = $m[1] ?? '';
+            if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                continue;
+            }
         }
         $lossRaw = (string)($cells[3] ?? '0');
         $latencyRaw = (string)($cells[4] ?? '0');

@@ -329,15 +329,15 @@ $cfg = auth_get_config();
     下列操作会先自动创建备份，再执行清空。清空计划任务不会删除 <code>data/tasks/</code> 目录中的其他共享文件，只会删除系统管理的任务脚本、任务日志和锁文件。
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="POST" onsubmit="return confirm('确认清空全部普通计划任务？\\n\\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\\n不会删除 data/tasks 目录里的其他共享文件。');">
+    <form method="POST" data-confirm-title="清空计划任务" data-confirm-message="确认清空全部普通计划任务？\n\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\n不会删除 data/tasks 目录里的其他共享文件。">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="clear_scheduled_tasks">
-      <button class="btn btn-danger" type="submit">🗑 清空计划任务</button>
+      <button class="btn btn-danger" type="button" onclick="submitConfirmForm(this)">🗑 清空计划任务</button>
     </form>
-    <form method="POST" onsubmit="return confirm('确认清空全部 DDNS 任务？\\n\\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。');">
+    <form method="POST" data-confirm-title="清空 DDNS 任务" data-confirm-message="确认清空全部 DDNS 任务？\n\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="clear_ddns_tasks">
-      <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
+      <button class="btn btn-danger" type="button" onclick="submitConfirmForm(this)">🗑 清空 DDNS 任务</button>
     </form>
   </div>
 </div>

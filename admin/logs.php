@@ -441,28 +441,36 @@ require_once __DIR__ . '/shared/header.php';
 
   window.clearCurrentLog = function() {
     if (!currentKey) return;
-    if (!confirm('确认清空「' + sources[currentKey].label + '」？此操作不可恢复。')) return;
-    var form = new FormData();
-    form.append('action', 'clear');
-    form.append('type', currentKey);
-    form.append('_csrf', window.DEBUG_CSRF || '');
-    setStatus('清空中…');
-    fetch('logs_api.php', {
-      method: 'POST',
-      body: form,
-      headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function(r){ return r.json(); }).then(function(d){
-      if (d.ok) {
-        showToast('已清空', 'success');
-        reloadCurrentLog();
-        refreshSidebar();
-      } else {
-        showToast(d.msg || '清空失败', 'error');
-        setStatus('清空失败');
+    NavConfirm.open({
+      title: '清空日志',
+      message: '确认清空「' + sources[currentKey].label + '」？此操作不可恢复。',
+      confirmText: '清空',
+      cancelText: '取消',
+      danger: true,
+      onConfirm: function() {
+        var form = new FormData();
+        form.append('action', 'clear');
+        form.append('type', currentKey);
+        form.append('_csrf', window.DEBUG_CSRF || '');
+        setStatus('清空中…');
+        fetch('logs_api.php', {
+          method: 'POST',
+          body: form,
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function(r){ return r.json(); }).then(function(d){
+          if (d.ok) {
+            showToast('已清空', 'success');
+            reloadCurrentLog();
+            refreshSidebar();
+          } else {
+            showToast(d.msg || '清空失败', 'error');
+            setStatus('清空失败');
+          }
+        }).catch(function(){
+          showToast('请求失败', 'error');
+          setStatus('请求失败');
+        });
       }
-    }).catch(function(){
-      showToast('请求失败', 'error');
-      setStatus('请求失败');
     });
   };
 

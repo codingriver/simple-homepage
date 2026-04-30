@@ -52,6 +52,7 @@ $nav_items = [
     ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知管理'],
     ['file' => 'health_check.php',  'icon' => '💚', 'label' => '健康检测'],
     ['file' => 'backups.php',       'icon' => '💾', 'label' => '备份恢复'],
+    ['file' => 'api_tokens.php','icon' => '🔑', 'label' => 'API Token'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'sessions.php', 'icon' => '📱', 'label' => '会话管理'],
     ['file' => 'logs.php',     'icon' => '📄', 'label' => '日志中心'],
@@ -200,6 +201,106 @@ function navCreateAsyncStatus(options) {
         finish: finish,
         run: run
     };
+}
+</script>
+
+<!-- 全站统一确认弹窗 -->
+<div id="nav-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;align-items:center;justify-content:center;">
+  <div style="background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:24px 28px;min-width:320px;max-width:480px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.4);">
+    <div id="nav-confirm-title" style="font-weight:700;font-size:15px;margin-bottom:10px;color:var(--tx);"></div>
+    <div id="nav-confirm-message" style="font-size:13px;color:var(--tx2);line-height:1.6;margin-bottom:20px;white-space:pre-line"></div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button type="button" id="nav-confirm-cancel" class="btn btn-secondary" style="font-size:13px;padding:6px 14px;">取消</button>
+      <button type="button" id="nav-confirm-ok" class="btn btn-primary" style="font-size:13px;padding:6px 14px;">确认</button>
+    </div>
+  </div>
+</div>
+<script>
+var NavConfirm = (function(){
+    var modal = null, titleEl = null, msgEl = null, okBtn = null, cancelBtn = null;
+    var onConfirmCb = null, onCancelCb = null;
+    var mouseDownTarget = null;
+
+    function init() {
+        if (modal) return;
+        modal = document.getElementById('nav-confirm-modal');
+        if (!modal) return;
+        titleEl = document.getElementById('nav-confirm-title');
+        msgEl = document.getElementById('nav-confirm-message');
+        okBtn = document.getElementById('nav-confirm-ok');
+        cancelBtn = document.getElementById('nav-confirm-cancel');
+
+        okBtn.addEventListener('click', function(){
+            var cb = onConfirmCb;
+            close();
+            if (typeof cb === 'function') cb();
+        });
+        cancelBtn.addEventListener('click', function(){
+            var cb = onCancelCb;
+            close();
+            if (typeof cb === 'function') cb();
+        });
+        modal.addEventListener('mousedown', function(e){ mouseDownTarget = e.target; });
+        modal.addEventListener('click', function(e){
+            if (e.target === modal && mouseDownTarget === modal) {
+                var cb = onCancelCb;
+                close();
+                if (typeof cb === 'function') cb();
+            }
+        });
+        document.addEventListener('keydown', function(e){
+            if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+                var cb = onCancelCb;
+                close();
+                if (typeof cb === 'function') cb();
+            }
+        });
+    }
+
+    function open(options) {
+        init();
+        if (!modal) return;
+        options = options || {};
+        onConfirmCb = options.onConfirm || null;
+        onCancelCb = options.onCancel || null;
+
+        titleEl.textContent = options.title || '确认操作';
+        msgEl.textContent = String(options.message || '').split('\\n').join('\n');
+        okBtn.textContent = options.confirmText || '确认';
+        cancelBtn.textContent = options.cancelText || '取消';
+
+        if (options.danger) {
+            okBtn.className = 'btn btn-danger';
+        } else {
+            okBtn.className = 'btn btn-primary';
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    function close() {
+        if (modal) modal.style.display = 'none';
+        onConfirmCb = null;
+        onCancelCb = null;
+    }
+
+    return { open: open, close: close };
+})();
+
+function submitConfirmForm(btn, options) {
+    options = options || {};
+    var form = btn.closest('form');
+    if (!form) return;
+    var title = options.title || form.getAttribute('data-confirm-title') || '确认操作';
+    var message = options.message || form.getAttribute('data-confirm-message') || '';
+    NavConfirm.open({
+        title: title,
+        message: message,
+        confirmText: options.confirmText || '确认',
+        cancelText: options.cancelText || '取消',
+        danger: options.danger !== false,
+        onConfirm: function() { form.submit(); }
+    });
 }
 </script>
 

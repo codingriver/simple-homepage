@@ -398,14 +398,22 @@ function closeDdnsLogModal() {
 
 async function clearCurrentDdnsLog() {
   if (!ddnsLogState.id) return;
-  if (!confirm('确定清空当前 DDNS 任务日志？此操作不可恢复。')) return;
-  var res = await postAjax('log_clear', {id: ddnsLogState.id});
-  if (!res.ok) {
-    showToast(res.msg || '清空日志失败', 'error');
-    return;
-  }
-  showToast(res.msg || '日志已清空', 'success');
-  ddnsLogLoadPage(1, false);
+  NavConfirm.open({
+    title: '清空日志',
+    message: '确定清空当前 DDNS 任务日志？此操作不可恢复。',
+    confirmText: '清空',
+    cancelText: '取消',
+    danger: true,
+    onConfirm: async function() {
+      var res = await postAjax('log_clear', {id: ddnsLogState.id});
+      if (!res.ok) {
+        showToast(res.msg || '清空日志失败', 'error');
+        return;
+      }
+      showToast(res.msg || '日志已清空', 'success');
+      ddnsLogLoadPage(1, false);
+    }
+  });
 }
 
 async function ddnsLogLoadPage(p, jumpToLast) {
@@ -630,16 +638,24 @@ async function toggleTask(id) {
 }
 
 async function deleteTask(id, name) {
-  if (!confirm('确认删除任务「' + name + '」吗？')) return;
-  var res = await postAjax('delete', {id: id});
-  if (!res.ok) {
-    showToast(res.msg || '删除失败', 'error');
-    return;
-  }
-  delete DDNS_TASKS[id];
-  DDNS_ROWS = DDNS_ROWS.filter(function(row){ return row.id !== id; });
-  renderRows();
-  showToast(res.msg || '任务已删除', 'success');
+  NavConfirm.open({
+    title: '删除任务',
+    message: '确认删除任务「' + name + '」吗？',
+    confirmText: '删除',
+    cancelText: '取消',
+    danger: true,
+    onConfirm: async function() {
+      var res = await postAjax('delete', {id: id});
+      if (!res.ok) {
+        showToast(res.msg || '删除失败', 'error');
+        return;
+      }
+      delete DDNS_TASKS[id];
+      DDNS_ROWS = DDNS_ROWS.filter(function(row){ return row.id !== id; });
+      renderRows();
+      showToast(res.msg || '任务已删除', 'success');
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function(){
@@ -660,10 +676,10 @@ document.addEventListener('DOMContentLoaded', function(){
     下列操作会先自动创建备份，再执行清空。会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="POST" onsubmit="return confirm('确认清空全部 DDNS 任务？\n\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。');">
+    <form method="POST" data-confirm-title="清空 DDNS 任务" data-confirm-message="确认清空全部 DDNS 任务？\n\n会删除 DDNS 任务定义、每个任务日志、全局 DDNS 日志，并移除自动生成的 DDNS 调度器。">
       <?= csrf_field() ?>
       <input type="hidden" name="action" value="clear_ddns_tasks">
-      <button class="btn btn-danger" type="submit">🗑 清空 DDNS 任务</button>
+      <button class="btn btn-danger" type="button" onclick="submitConfirmForm(this)">🗑 清空 DDNS 任务</button>
     </form>
   </div>
 </div>

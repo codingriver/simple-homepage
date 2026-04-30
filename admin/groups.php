@@ -187,12 +187,11 @@ $groups     = $sites_data['groups'] ?? [];
       <td>
         <button class="btn btn-sm btn-secondary"
           onclick='openForm(<?= htmlspecialchars(json_encode($g), ENT_QUOTES) ?>)'>编辑</button>
-        <form method="POST" style="display:inline"
-              onsubmit="return confirm('确认删除该分组及其所有站点？')">
+        <form method="POST" style="display:inline" data-confirm-title="删除分组" data-confirm-message="确认删除该分组及其所有站点？">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="delete">
           <input type="hidden" name="gid" value="<?= htmlspecialchars($g['id']) ?>">
-          <button type="submit" class="btn btn-sm btn-danger">删除</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
         </form>
       </td>
     </tr>

@@ -586,10 +586,21 @@
 
       // 未保存确认
       if (config.confirmOnClose !== false && dirty) {
-        if (!confirm('编辑器中有未保存的修改，确认关闭？')) return;
+        NavConfirm.open({
+          title: '关闭编辑器',
+          message: '编辑器中有未保存的修改，确认关闭？',
+          confirmText: '关闭',
+          cancelText: '取消',
+          danger: false,
+          onConfirm: function() { doCloseEditor(); }
+        });
+        return;
       }
 
-      els.modal.classList.remove('open');
+      doCloseEditor();
+    },
+
+    function doCloseEditor() {
       closeGotoBar();
       if (isFullscreen) toggleFullscreen();
       if (els.footer) {
@@ -603,7 +614,7 @@
         try { config.onClose(); } catch(e) {}
       }
       config = {};
-    },
+    }
 
     getValue: function() {
       return editor ? editor.getValue() : '';

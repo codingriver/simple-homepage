@@ -888,14 +888,14 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
           <td>
             <div style="display:flex;gap:6px">
               <button type="button" class="btn btn-sm btn-secondary" onclick="openRecordModal('<?= htmlspecialchars($rid) ?>')">编辑</button>
-              <form method="POST" onsubmit="return confirm('确认删除这条记录吗？')">
+              <form method="POST" data-confirm-title="删除记录" data-confirm-message="确认删除这条记录吗？">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="record_delete">
                 <input type="hidden" name="account_id" value="<?= htmlspecialchars($selectedAccountId) ?>">
                 <input type="hidden" name="zone_id" value="<?= htmlspecialchars($selectedZoneId) ?>">
                 <input type="hidden" name="zone_name" value="<?= htmlspecialchars($selectedZoneName) ?>">
                 <input type="hidden" name="record_id" value="<?= htmlspecialchars($rid) ?>">
-                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
               </form>
             </div>
           </td>
@@ -950,11 +950,11 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
           <div class="dns-account-row-actions">
             <a href="dns.php?<?= htmlspecialchars(http_build_query(['account'=>$aid])) ?>" class="btn btn-sm btn-secondary" onclick="closeModal('account-mgr-modal')">选择</a>
             <button type="button" class="btn btn-sm btn-secondary" onclick="openAccountForm('<?= htmlspecialchars($aid) ?>')">编辑</button>
-            <form method="POST" onsubmit="return confirm('确认删除该账号吗？')">
+            <form method="POST" data-confirm-title="删除账号" data-confirm-message="确认删除该账号吗？">
               <?= csrf_field() ?>
               <input type="hidden" name="action" value="delete_account">
               <input type="hidden" name="account_id" value="<?= htmlspecialchars($aid) ?>">
-              <button type="submit" class="btn btn-sm btn-danger">删除</button>
+              <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
             </form>
           </div>
         </div>
@@ -1733,77 +1733,84 @@ if (batchDeleteForm) {
       showToast('请先选择要删除的记录', 'error');
       return;
     }
-    if (!window.confirm('确认删除选中的 ' + recordIds.length + ' 条记录吗？')) {
-      return;
-    }
-
-    var submitBtn = document.getElementById('batch-delete-btn');
-    var statusEl = document.getElementById('batch-delete-status');
-    var originalText = submitBtn ? submitBtn.textContent : '删除选中';
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = '删除中...';
-    }
-    if (chkAll) chkAll.disabled = true;
-    document.querySelectorAll('.rec-chk').forEach(function(input) {
-      input.disabled = true;
+    NavConfirm.open({
+      title: '批量删除记录',
+      message: '确认删除选中的 ' + recordIds.length + ' 条记录吗？',
+      confirmText: '删除',
+      cancelText: '取消',
+      danger: true,
+      onConfirm: function() { doBatchDeleteRecords(recordIds); }
     });
-
-    var successCount = 0;
-    var failed = [];
-    try {
-      for (var start = 0; start < recordIds.length; start += DNS_BATCH_DELETE_CHUNK_SIZE) {
-        var chunk = recordIds.slice(start, start + DNS_BATCH_DELETE_CHUNK_SIZE);
-        if (statusEl) {
-          statusEl.textContent = '正在删除 ' + Math.min(start + 1, recordIds.length) + '-' + Math.min(start + chunk.length, recordIds.length) + ' / ' + recordIds.length;
-        }
-        var formData = new FormData(batchDeleteForm);
-        formData.delete('record_ids[]');
-        chunk.forEach(function(id) {
-          formData.append('record_ids[]', id);
-        });
-
-        var response = await fetch('dns.php', {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          credentials: 'same-origin',
-          body: formData,
-        });
-        var result = await response.json().catch(function() {
-          return null;
-        });
-        if (!response.ok || !result || !result.ok) {
-          throw new Error((result && result.msg) ? result.msg : ('批量删除失败（HTTP ' + response.status + '）'));
-        }
-        var data = result.data || {};
-        successCount += Number(data.success_count || 0);
-        failed = failed.concat(Array.isArray(data.failed) ? data.failed : []);
-      }
-
-      var failedCount = failed.length;
-      showToast('批量删除完成：成功 ' + successCount + '，失败 ' + failedCount, failedCount > 0 ? 'warning' : 'success');
-      var next = new URL(window.location.href);
-      next.searchParams.set('hydrate', '1');
-      next.searchParams.set('account', <?= json_encode($selectedAccountId, JSON_HEX_TAG) ?>);
-      next.searchParams.set('zone', <?= json_encode($selectedZoneId, JSON_HEX_TAG) ?>);
-      next.searchParams.set('zone_name', <?= json_encode($selectedZoneName, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?>);
-      window.location.replace(next.toString());
-    } catch (error) {
-      if (statusEl) {
-        statusEl.textContent = '';
-      }
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalText || '删除选中';
-      }
-      if (chkAll) chkAll.disabled = false;
-      document.querySelectorAll('.rec-chk').forEach(function(input) {
-        input.disabled = false;
-      });
-      showToast((error && error.message) ? error.message : '批量删除失败，请稍后重试', 'error');
-      updateCheckedCount();
-    }
   });
+}
+
+async function doBatchDeleteRecords(recordIds) {
+  var submitBtn = document.getElementById('batch-delete-btn');
+  var statusEl = document.getElementById('batch-delete-status');
+  var originalText = submitBtn ? submitBtn.textContent : '删除选中';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '删除中...';
+  }
+  if (chkAll) chkAll.disabled = true;
+  document.querySelectorAll('.rec-chk').forEach(function(input) {
+    input.disabled = true;
+  });
+
+  var successCount = 0;
+  var failed = [];
+  try {
+    for (var start = 0; start < recordIds.length; start += DNS_BATCH_DELETE_CHUNK_SIZE) {
+      var chunk = recordIds.slice(start, start + DNS_BATCH_DELETE_CHUNK_SIZE);
+      if (statusEl) {
+        statusEl.textContent = '正在删除 ' + Math.min(start + 1, recordIds.length) + '-' + Math.min(start + chunk.length, recordIds.length) + ' / ' + recordIds.length;
+      }
+      var formData = new FormData(batchDeleteForm);
+      formData.delete('record_ids[]');
+      chunk.forEach(function(id) {
+        formData.append('record_ids[]', id);
+      });
+
+      var response = await fetch('dns.php', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+        body: formData,
+      });
+      var result = await response.json().catch(function() {
+        return null;
+      });
+      if (!response.ok || !result || !result.ok) {
+        throw new Error((result && result.msg) ? result.msg : ('批量删除失败（HTTP ' + response.status + '）'));
+      }
+      var data = result.data || {};
+      successCount += Number(data.success_count || 0);
+      failed = failed.concat(Array.isArray(data.failed) ? data.failed : []);
+    }
+
+    var failedCount = failed.length;
+    showToast('批量删除完成：成功 ' + successCount + '，失败 ' + failedCount, failedCount > 0 ? 'warning' : 'success');
+    var next = new URL(window.location.href);
+    next.searchParams.set('hydrate', '1');
+    next.searchParams.set('account', <?= json_encode($selectedAccountId, JSON_HEX_TAG) ?>);
+    next.searchParams.set('zone', <?= json_encode($selectedZoneId, JSON_HEX_TAG) ?>);
+    next.searchParams.set('zone_name', <?= json_encode($selectedZoneName, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?>);
+    window.location.replace(next.toString());
+  } catch (error) {
+    if (statusEl) {
+      statusEl.textContent = '';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText || '删除选中';
+    }
+    if (chkAll) chkAll.disabled = false;
+    document.querySelectorAll('.rec-chk').forEach(function(input) {
+      input.disabled = false;
+    });
+    showToast((error && error.message) ? error.message : '批量删除失败，请稍后重试', 'error');
+    updateCheckedCount();
+  }
 }
 
 // 批量导出

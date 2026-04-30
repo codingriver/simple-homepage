@@ -286,12 +286,12 @@ $groups_json = json_encode(
       <td>
         <button class="btn btn-sm btn-secondary"
           onclick='openForm(<?= htmlspecialchars(json_encode($s),ENT_QUOTES) ?>, "<?= htmlspecialchars($grp['id'],ENT_QUOTES) ?>")'>编辑</button>
-        <form method="POST" style="display:inline" onsubmit="return confirm('确认删除该站点？')">
+        <form method="POST" style="display:inline" data-confirm-title="删除站点" data-confirm-message="确认删除该站点？">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="delete">
           <input type="hidden" name="gid" value="<?= htmlspecialchars($grp['id']) ?>">
           <input type="hidden" name="sid" value="<?= htmlspecialchars($s['id']) ?>">
-          <button type="submit" class="btn btn-sm btn-danger">删除</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
         </form>
       </td>
     </tr>

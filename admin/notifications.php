@@ -52,7 +52,7 @@ $cfg = auth_get_config();
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="save_webhook">
     <div class="form-grid">
-      <div class="form-group" style="grid-column:1/-1;display:flex;align-items:center;gap:14px">
+      <div class="form-group" style="grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:14px">
         <label style="margin:0">启用 Webhook 通知</label>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
           <input type="checkbox" name="webhook_enabled" value="1" <?= ($cfg['webhook_enabled']??'0')==='1'?'checked':'' ?>
@@ -117,8 +117,16 @@ function syncWebhookType() {
     document.getElementById('wh_tg_chat').style.display = t === 'telegram' ? 'block' : 'none';
 }
 function testWebhook() {
-    if (!confirm('发送一条测试 Webhook 消息？')) return;
-    document.getElementById('webhookTestForm').submit();
+    NavConfirm.open({
+        title: '测试 Webhook',
+        message: '发送一条测试 Webhook 消息？',
+        confirmText: '发送',
+        cancelText: '取消',
+        danger: false,
+        onConfirm: function() {
+            document.getElementById('webhookTestForm').submit();
+        }
+    });
 }
 </script>
 

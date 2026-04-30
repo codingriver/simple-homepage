@@ -66,16 +66,24 @@ $filterUsername = trim($_GET['username'] ?? '');
     wrap.querySelectorAll('.revoke-form').forEach(function(form){
       form.addEventListener('submit', function(e){
         e.preventDefault();
-        if (!confirm('确认强制下线该会话？')) return;
-        var fd = new FormData(form);
-        fetch('sessions_api.php?action=revoke', {
-          method: 'POST',
-          body: fd,
-          headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        }).then(function(r){ return r.json(); }).then(function(d){
-          showToast(d.ok ? '会话已强制下线' : (d.msg || '操作失败'), d.ok ? 'success' : 'error');
-          if (d.ok) load();
-        }).catch(function(){ showToast('请求失败', 'error'); });
+        NavConfirm.open({
+          title: '强制下线',
+          message: '确认强制下线该会话？',
+          confirmText: '确认',
+          cancelText: '取消',
+          danger: true,
+          onConfirm: function() {
+            var fd = new FormData(form);
+            fetch('sessions_api.php?action=revoke', {
+              method: 'POST',
+              body: fd,
+              headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function(r){ return r.json(); }).then(function(d){
+              showToast(d.ok ? '会话已强制下线' : (d.msg || '操作失败'), d.ok ? 'success' : 'error');
+              if (d.ok) load();
+            }).catch(function(){ showToast('请求失败', 'error'); });
+          }
+        });
       });
     });
   }

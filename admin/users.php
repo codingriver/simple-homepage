@@ -15,35 +15,6 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   csrf_check();$act=$_POST['act']??'';
   $postAction = $_POST['action'] ?? '';
 
-  // ── API Token 管理 ──
-  if ($postAction === 'generate_api_token') {
-      $name = trim($_POST['token_name'] ?? '');
-      if ($name === '') {
-          flash_set('error', 'Token 名称不能为空');
-          header('Location: users.php#api-tokens'); exit;
-      }
-      $token = api_token_generate($name);
-      audit_log('generate_api_token', ['name' => $name]);
-      if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-      $_SESSION['_api_token_new'] = $token;
-      flash_set('success', 'API Token 已生成');
-      header('Location: users.php#api-tokens'); exit;
-  }
-  if ($postAction === 'delete_api_token') {
-      $tk = $_POST['token'] ?? '';
-      $tokens = api_tokens_load();
-      if (isset($tokens[$tk])) {
-          $name = $tokens[$tk]['name'] ?? '';
-          unset($tokens[$tk]);
-          api_tokens_save($tokens);
-          audit_log('delete_api_token', ['name' => $name]);
-          flash_set('success', 'API Token 已删除');
-      } else {
-          flash_set('error', 'Token 不存在');
-      }
-      header('Location: users.php#api-tokens'); exit;
-  }
-
   if($act==='save'){
     $un=trim($_POST['username']??'');$pw=trim($_POST['password']??'');
     $role=$_POST['role']??'user';$orig=trim($_POST['orig_username']??'');
@@ -144,78 +115,14 @@ $flash_msg=flash_get();
     <a href="users.php?action=edit&uname=<?=urlencode($un)?>" class="btn btn-sm btn-secondary">编辑</a>
     <a href="sessions.php?username=<?=urlencode($un)?>" class="btn btn-sm btn-secondary">查看会话</a>
     <?php if($un!==$current_admin['username']):?>
-    <form method="POST" style="display:inline" onsubmit="return confirm('确认删除用户？')"><?=csrf_field()?>
+    <form method="POST" style="display:inline" data-confirm-title="删除用户" data-confirm-message="确认删除用户「<?= htmlspecialchars($un) ?>」？"><?=csrf_field()?>
       <input type="hidden" name="act" value="delete">
       <input type="hidden" name="del_user" value="<?=htmlspecialchars($un)?>">
-      <button type="submit" class="btn btn-sm btn-danger">删除</button>
+      <button type="button" class="btn btn-sm btn-danger" onclick="submitConfirmForm(this)">删除</button>
     </form><?php endif;?>
   </td>
 </tr><?php endforeach;?>
 </tbody></table></div></div>
-
-<!-- API Token 管理 -->
-<div class="card" id="api-tokens">
-  <div class="card-title">🔑 API Token 管理</div>
-  <?php $apiTokens = api_tokens_load(); ?>
-  <?php if (!empty($apiTokens)): ?>
-  <div style="margin-bottom:14px">
-    <table class="data-table" style="width:100%">
-      <thead><tr><th>名称</th><th>Token</th><th>创建时间</th><th>操作</th></tr></thead>
-      <tbody>
-      <?php foreach ($apiTokens as $tk => $meta): ?>
-      <tr>
-        <td><?= htmlspecialchars($meta['name'] ?? '') ?></td>
-        <td><code style="font-size:12px"><?= htmlspecialchars(api_token_mask($tk)) ?></code></td>
-        <td style="font-size:12px;color:var(--tm)"><?= htmlspecialchars($meta['created_at'] ?? '') ?></td>
-        <td>
-          <form method="POST" style="display:inline" onsubmit="return confirm('确认删除该 Token？')">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="delete_api_token">
-            <input type="hidden" name="token" value="<?= htmlspecialchars($tk) ?>">
-            <button type="submit" class="btn btn-sm btn-danger">删除</button>
-          </form>
-        </td>
-      </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
-  </div>
-  <?php else: ?>
-  <p style="color:var(--tm);font-size:13px;margin-bottom:14px">暂无 API Token，点击下方按钮生成。</p>
-  <?php endif; ?>
-
-  <form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <?= csrf_field() ?>
-    <input type="hidden" name="action" value="generate_api_token">
-    <input type="text" name="token_name" placeholder="Token 名称（如：HomeAssistant）" required
-           style="flex:1;min-width:200px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;color:var(--tx);font-size:14px">
-    <button type="submit" class="btn btn-primary">生成 Token</button>
-  </form>
-
-  <?php if (!empty($_SESSION['_api_token_new'])): ?>
-  <div class="alert alert-success" style="margin-top:14px">
-    <div style="font-weight:700;margin-bottom:6px">✅ Token 生成成功，请立即复制保存（仅显示一次）</div>
-    <code id="newApiToken" style="display:block;background:var(--bg);padding:8px 10px;border-radius:6px;font-size:12px;word-break:break-all"><?= htmlspecialchars($_SESSION['_api_token_new']) ?></code>
-    <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="copyApiToken()">复制</button>
-  </div>
-  <?php unset($_SESSION['_api_token_new']); ?>
-  <?php endif; ?>
-
-  <div class="form-hint" style="margin-top:10px">
-    使用方式：<code>GET /api/sites.php?token=&lt;TOKEN&gt;</code> 或 Header <code>Authorization: Bearer &lt;TOKEN&gt;</code>
-  </div>
-</div>
-<script>
-function copyApiToken() {
-    var el = document.getElementById('newApiToken');
-    if (!el) return;
-    navigator.clipboard.writeText(el.textContent).then(function(){
-        showToast('已复制到剪贴板', 'success');
-    }).catch(function(){
-        showToast('复制失败', 'error');
-    });
-}
-</script>
 
 <?php endif;?>
 <?php require_once __DIR__.'/shared/footer.php';?>
