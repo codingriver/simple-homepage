@@ -563,6 +563,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
 
 require_once __DIR__ . '/shared/header.php';
 
+$dnsApiPort = getenv('NAV_PORT');
+if ($dnsApiPort === false || $dnsApiPort === '' || !ctype_digit($dnsApiPort)) {
+    $dnsApiPort = '58080';
+}
+
 $dnsHydrate = ((string)($_GET['hydrate'] ?? '') === '1');
 
 // 加载 Zone 列表（默认异步，hydrate=1 时服务端渲染完整数据）
@@ -1056,56 +1061,156 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 
 <!-- ═══ 本机 DNS API 说明弹窗 ═══ -->
 <div id="dns-api-modal" class="dns-modal">
-  <div class="dns-modal-card" style="width:min(880px,96vw);max-height:92vh">
+  <div class="dns-modal-card" style="width:min(920px,96vw);max-height:92vh">
     <div class="dns-modal-head">
       <span class="dns-modal-title">本机 DNS API</span>
       <button class="dns-modal-close" onclick="closeModal('dns-api-modal')" type="button" aria-label="关闭">×</button>
     </div>
     <div class="dns-modal-body" style="max-height:calc(92vh - 56px);overflow-y:auto">
-      <p style="color:var(--tx2);font-size:13px;line-height:1.75;margin:0 0 12px">
-        仅允许容器内 <code style="font-size:12px">127.0.0.1</code> / <code style="font-size:12px">::1</code> 访问；无需填写账号 ID 与 zone，系统根据已配置的 DNS 账号自动匹配域名。
-        支持 <strong>A / AAAA / CNAME</strong>；不传 <code>type</code> 时按记录值自动推断（IPv4→A，IPv6→AAAA，否则 CNAME）。
-        记录已存在则更新，不存在则创建；值未变化时跳过更新。返回 JSON：<code style="font-size:12px">code</code> 为 <code style="font-size:12px">0</code> 成功，<code style="font-size:12px">-1</code> 失败。
-        <strong>GET</strong> 与 <strong>POST</strong> 均可；参数可在 Query 或表单/JSON（POST 时正文覆盖 URL 同名参数）。<code style="font-size:12px">query</code> 只读当前解析，便于调试。
-      </p>
-      <p style="color:var(--tx2);font-size:13px;line-height:1.75;margin:0 0 16px;padding:12px 14px;background:rgba(0,212,170,.06);border:1px solid var(--bd);border-radius:var(--r)">
-        <strong style="color:var(--tx)">与计划任务配合：</strong>在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入该任务的运行日志（界面「日志」或文件 <code style="font-size:11px">data/tasks/对应脚本同名.log</code>）。下方脚本用 <code style="font-size:12px">log()</code> 把关键步骤同时写入终端与可选文件 <code style="font-size:12px">ddns_manual.log</code>，便于排查。
-      </p>
+
+      <!-- 接口地址 -->
+      <div style="margin:0 0 14px;padding:10px 14px;background:rgba(0,212,170,.06);border:1px solid var(--bd);border-radius:var(--r)">
+        <strong style="color:var(--tx);font-size:13px">接口地址：</strong>
+        <code style="font-size:12px">http://127.0.0.1:<?= htmlspecialchars($dnsApiPort) ?>/api/dns.php</code>
+        <span style="color:var(--tx2);font-size:12px">（仅容器内 127.0.0.1 / ::1 可访问）</span>
+      </div>
+
+      <!-- 一、支持的 API 列表 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">一、支持的 API</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
+        <thead>
+          <tr style="border-bottom:1px solid var(--bd)">
+            <th style="text-align:left;padding:6px 8px;color:var(--tm)">action</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--tm)">说明</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--tm)">方法</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--tm)">必填参数</th>
+            <th style="text-align:left;padding:6px 8px;color:var(--tm)">可选参数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--bd)">
+            <td style="padding:6px 8px"><code>query</code></td>
+            <td style="padding:6px 8px">查询某域名当前解析记录（只读）</td>
+            <td style="padding:6px 8px">GET / POST</td>
+            <td style="padding:6px 8px"><code>domain</code></td>
+            <td style="padding:6px 8px"><code>type</code>（A/AAAA/CNAME，默认查全部）</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--bd)">
+            <td style="padding:6px 8px"><code>update</code></td>
+            <td style="padding:6px 8px">单条更新/创建；存在则更新，不存在则创建，值不变则跳过</td>
+            <td style="padding:6px 8px">GET / POST</td>
+            <td style="padding:6px 8px"><code>domain</code>, <code>value</code></td>
+            <td style="padding:6px 8px"><code>type</code>（不传则自动推断）, <code>ttl</code></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px"><code>batch_update</code></td>
+            <td style="padding:6px 8px">批量更新多个域名到同一个 IP 值</td>
+            <td style="padding:6px 8px">GET / POST(JSON)</td>
+            <td style="padding:6px 8px"><code>value</code>, <code>domains</code></td>
+            <td style="padding:6px 8px"><code>type</code>, <code>ttl</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 二、通用规则 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">二、通用规则</h4>
+      <ul style="color:var(--tx2);font-size:12px;line-height:1.85;margin:0 0 14px;padding-left:18px">
+        <li>无需填写账号 ID 与 Zone，系统根据已配置的 DNS 账号<strong>自动匹配</strong>域名归属</li>
+        <li>支持记录类型：<strong>A / AAAA / CNAME</strong>；不传 <code>type</code> 时按 <code>value</code> 自动推断（IPv4→A，IPv6→AAAA，其余→CNAME）</li>
+        <li>返回 JSON：<code>code</code> 为 <code>0</code> 成功，<code>-1</code> 失败；<code>msg</code> 为文本说明</li>
+        <li>GET 与 POST 均可；POST 时参数支持 <code>application/x-www-form-urlencoded</code> 或 <code>application/json</code></li>
+        <li>POST 时正文参数<strong>覆盖</strong> URL Query 中的同名参数</li>
+      </ul>
+
+      <!-- 三、详细测试用例 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">三、测试用例</h4>
       <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
-        <div style="color:var(--tm);margin-bottom:8px">查询 query（GET，整段 URL 用引号包住）</div>
-        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A"
-curl -sS "http://127.0.0.1/api/dns.php?action=query&amp;domain=www.example.com"
-curl -sS "http://127.0.0.1/api/dns.php?action=query&amp;domain=www.example.com&amp;type=AAAA"</pre>
-        <div style="color:var(--tm);margin:14px 0 8px">单条 upsert（GET 或 POST）</div>
-        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1/api/dns.php?action=update&amp;domain=www.example.com&amp;value=1.2.3.4"
-curl -sS http://127.0.0.1/api/dns.php \
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ query — 查询单个域名</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ query — 查询多个域名（分别调用）</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=blog.example.com&amp;type=A"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=*.example.com&amp;type=A"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 GET 写法</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=1.2.3.4"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=1.2.3.4&amp;type=A&amp;ttl=120"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=2606:4700::6810:85e5&amp;type=AAAA"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 POST 表单写法</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
   -d "action=update" \
   -d "domain=www.example.com" \
-  -d "value=1.2.3.4"</pre>
-        <div style="color:var(--tm);margin:14px 0 8px">批量 batch_update（JSON POST 或 GET 逗号分隔 domains）</div>
-        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1/api/dns.php \
+  -d "value=1.2.3.4"
+
+curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
+  -d "action=update" \
+  -d "domain=www.example.com" \
+  -d "value=1.2.3.4" \
+  -d "type=A" \
+  -d "ttl=120"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 POST JSON 写法</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
   -H "Content-Type: application/json" \
-  -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com","www.example.com","*.example.com"]}'
-curl -sS "http://127.0.0.1/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com,www.example.com"</pre>
-        <div style="color:var(--tm);margin:14px 0 8px">计划任务脚本（每步 <code style="font-size:11px">log</code> 一行；可复制到计划任务「命令」）</div>
+  -d '{"action":"update","domain":"www.example.com","value":"1.2.3.4","type":"A","ttl":120}'</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — 多个域名 GET 写法（逗号分隔）</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com,www.example.com"
+curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com,www.example.com,*.example.com"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — 多个域名 POST JSON 写法（推荐）</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
+  -H "Content-Type: application/json" \
+  -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com"]}'
+
+curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
+  -H "Content-Type: application/json" \
+  -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com","www.example.com","*.example.com"]}'</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — POST 表单写法</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
+  -d "action=batch_update" \
+  -d "value=1.2.3.4" \
+  -d "domains=example.com,www.example.com,*.example.com"</pre>
+      </div>
+
+      <!-- 四、完整示例脚本 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">四、计划任务完整示例</h4>
+      <p style="color:var(--tx2);font-size:12px;line-height:1.75;margin:0 0 10px">
+        在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入任务运行日志。
+      </p>
+      <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
         <pre style="margin:0;white-space:pre-wrap;word-break:break-all">LOG=/var/www/nav/data/logs/ddns_manual.log
 log(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
+API="http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php"
+
 log "=== DDNS 开始 ==="
-log "执行: query（查当前 A 记录）"
-Q=$(curl -sS "http://127.0.0.1/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A") || { log "query 命令失败"; exit 1; }
+
+# 查询当前记录
+log "查询 www.example.com 当前 A 记录"
+Q=$(curl -sS "$API?action=query&amp;domain=www.example.com&amp;type=A") || { log "query 失败"; exit 1; }
 log "query 返回: $Q"
 
-log "执行: 获取公网 IP"
-IP=$(curl -sS --connect-timeout 5 https://api.ipify.org) || { log "获取公网 IP 失败"; exit 1; }
+# 获取公网 IP
+log "获取公网 IP"
+IP=$(curl -sS --connect-timeout 5 https://api.ipify.org) || { log "获取 IP 失败"; exit 1; }
 log "公网 IP: $IP"
 
-log "执行: batch_update"
-RESP=$(curl -sS http://127.0.0.1/api/dns.php -H "Content-Type: application/json" \
-  -d "{\"action\":\"batch_update\",\"value\":\"$IP\",\"domains\":[\"example.com\",\"www.example.com\"]}") || { log "batch_update 命令失败"; exit 1; }
+# 批量更新 3 个域名
+log "批量更新 example.com / www.example.com / *.example.com"
+RESP=$(curl -sS "$API" -H "Content-Type: application/json" \
+  -d "{\"action\":\"batch_update\",\"value\":\"$IP\",\"domains\":[\"example.com\",\"www.example.com\",\"*.example.com\"]}") || { log "batch_update 失败"; exit 1; }
 log "batch_update 返回: $RESP"
+
 log "=== DDNS 结束 ==="</pre>
       </div>
+
       <div class="form-actions" style="margin-top:18px;margin-bottom:0">
         <button type="button" class="btn btn-primary" onclick="closeModal('dns-api-modal')">关闭</button>
       </div>

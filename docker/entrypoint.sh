@@ -114,16 +114,6 @@ fi
 # 优先使用显式传入的 PUID/PGID；未传时自动按 /var/www/nav/data owner 对齐，避免递归 chown 挂载目录
 remap_nav_user
 
-# ── 将 NAV_PORT 注入 Nginx 站点配置 ──
-# nginx-conf/docker-site.conf（容器内为 /etc/nginx/http.d/nav.conf）中使用了 ${NAV_PORT} 占位，用 envsubst 替换
-if command -v envsubst >/dev/null 2>&1; then
-    envsubst '${NAV_PORT}' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp
-    mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf
-else
-    # 极端情况下 gettext-base 不可用时降级为 sed 替换
-    sed -i "s/\${NAV_PORT}/${NAV_PORT}/g" /etc/nginx/http.d/nav.conf
-fi
-
 echo "[entrypoint] Nginx 监听端口: ${NAV_PORT}"
 echo "[entrypoint] 时区: ${TZ}"
 echo "[entrypoint] 数据目录: /var/www/nav/data"
@@ -147,7 +137,7 @@ fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p /var/spool/cron/crontabs
-if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/favicon_cache /var/www/nav/data/bg /var/www/nav/data/nginx"; then
+if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/favicon_cache /var/www/nav/data/bg /var/www/nav/data/nginx /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
     echo "[entrypoint][ERROR] 无法在 /var/www/nav/data 下创建运行目录，请检查宿主机挂载目录权限，或设置 PUID/PGID 对齐。"
     exit 1
 fi
@@ -157,6 +147,8 @@ nav_require_writable_dir /var/www/nav/data/logs
 nav_require_writable_dir /var/www/nav/data/favicon_cache
 nav_require_writable_dir /var/www/nav/data/bg
 nav_require_writable_dir /var/www/nav/data/nginx
+nav_require_writable_dir /var/www/nav/data/php
+nav_require_writable_dir /var/www/nav/data/php-fpm
 
 # ── 开发模式标记（PHP-FPM 子进程可能读不到容器环境变量，用文件供 auth_dev_mode_enabled() 检测）──
 if [ "${NAV_DEV_MODE:-}" = "1" ] || [ "${NAV_DEV_MODE:-}" = "true" ]; then
@@ -188,9 +180,63 @@ chown navwww:navwww /etc/nginx/http.d/nav-proxy-domains.conf
 chmod 664 /etc/nginx/conf.d/nav-proxy.conf
 chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
 
-# ── 确保 Nginx 主配置对运行用户可写（后台编辑需要）──
-chown root:navwww /etc/nginx/nginx.conf
-chmod 664 /etc/nginx/nginx.conf
+# ── 系统配置文件持久化到 data 目录（容器重建后配置不丢失）──
+
+# Nginx 主配置
+if [ ! -f /var/www/nav/data/nginx/nginx.conf ]; then
+    cp /var/www/nav/docker/nginx.conf /var/www/nav/data/nginx/nginx.conf
+    echo "[entrypoint] Nginx 主配置已复制到 data/nginx/nginx.conf"
+fi
+if [ -f /etc/nginx/nginx.conf ] && [ ! -L /etc/nginx/nginx.conf ]; then
+    rm -f /etc/nginx/nginx.conf.bak.default
+    mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.default
+fi
+ln -sf /var/www/nav/data/nginx/nginx.conf /etc/nginx/nginx.conf
+chown root:navwww /var/www/nav/data/nginx/nginx.conf
+chmod 664 /var/www/nav/data/nginx/nginx.conf
+
+# Nginx 站点配置（首次复制到 data/ 时注入 NAV_PORT）
+if [ ! -f /var/www/nav/data/nginx/http.d/nav.conf ]; then
+    if command -v envsubst >/dev/null 2>&1; then
+        envsubst '${NAV_PORT}' < /var/www/nav/nginx-conf/docker-site.conf > /var/www/nav/data/nginx/http.d/nav.conf
+    else
+        sed "s/\${NAV_PORT}/${NAV_PORT}/g" /var/www/nav/nginx-conf/docker-site.conf > /var/www/nav/data/nginx/http.d/nav.conf
+    fi
+    echo "[entrypoint] Nginx 站点配置已复制到 data/nginx/http.d/nav.conf（端口: ${NAV_PORT}）"
+fi
+if [ -f /etc/nginx/http.d/nav.conf ] && [ ! -L /etc/nginx/http.d/nav.conf ]; then
+    rm -f /etc/nginx/http.d/nav.conf.bak.default
+    mv /etc/nginx/http.d/nav.conf /etc/nginx/http.d/nav.conf.bak.default
+fi
+ln -sf /var/www/nav/data/nginx/http.d/nav.conf /etc/nginx/http.d/nav.conf
+chown root:navwww /var/www/nav/data/nginx/http.d/nav.conf
+chmod 664 /var/www/nav/data/nginx/http.d/nav.conf
+
+# PHP 自定义配置
+if [ ! -f /var/www/nav/data/php/custom.ini ]; then
+    cp /var/www/nav/docker/php-custom.ini /var/www/nav/data/php/custom.ini
+    echo "[entrypoint] PHP 自定义配置已复制到 data/php/custom.ini"
+fi
+if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini ] && [ ! -L /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
+    rm -f /usr/local/etc/php/conf.d/99-nav-custom.ini.bak.default
+    mv /usr/local/etc/php/conf.d/99-nav-custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini.bak.default
+fi
+ln -sf /var/www/nav/data/php/custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini
+chown root:navwww /var/www/nav/data/php/custom.ini
+chmod 664 /var/www/nav/data/php/custom.ini
+
+# PHP-FPM 配置
+if [ ! -f /var/www/nav/data/php-fpm/nav.conf ]; then
+    cp /var/www/nav/docker/php-fpm.conf /var/www/nav/data/php-fpm/nav.conf
+    echo "[entrypoint] PHP-FPM 配置已复制到 data/php-fpm/nav.conf"
+fi
+if [ -f /usr/local/etc/php-fpm.d/nav.conf ] && [ ! -L /usr/local/etc/php-fpm.d/nav.conf ]; then
+    rm -f /usr/local/etc/php-fpm.d/nav.conf.bak.default
+    mv /usr/local/etc/php-fpm.d/nav.conf /usr/local/etc/php-fpm.d/nav.conf.bak.default
+fi
+ln -sf /var/www/nav/data/php-fpm/nav.conf /usr/local/etc/php-fpm.d/nav.conf
+chown root:navwww /var/www/nav/data/php-fpm/nav.conf
+chmod 664 /var/www/nav/data/php-fpm/nav.conf
 # ── 从镜像复制 Nginx 代理模板到数据目录（不存在/为空/不可读写时）──
 for tmpl in proxy-params-simple.conf proxy-params-full.conf proxy-template-path.conf proxy-template-domain.conf; do
     src="/var/www/nav/nginx-conf/$tmpl"
@@ -211,6 +257,83 @@ for tmpl in proxy-params-simple.conf proxy-params-full.conf proxy-template-path.
     fi
 done
 
+# ── 系统配置启动前校验与兼容模式切换 ──
+# 分别测试 Nginx 和 PHP-FPM（含 PHP ini）配置
+nginx_ok=0
+phpfpm_ok=0
+
+if nginx -t >/tmp/nginx-test.log 2>&1; then
+    nginx_ok=1
+else
+    echo "[entrypoint][WARN] Nginx data 配置校验失败"
+    cat /tmp/nginx-test.log
+fi
+
+if /usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/nav.conf >/tmp/phpfpm-test.log 2>&1; then
+    phpfpm_ok=1
+else
+    echo "[entrypoint][WARN] PHP-FPM data 配置校验失败"
+    cat /tmp/phpfpm-test.log
+fi
+
+if [ "$nginx_ok" = 1 ] && [ "$phpfpm_ok" = 1 ]; then
+    rm -f /var/www/nav/data/.compat_mode
+    echo "[entrypoint] 系统配置校验全部通过"
+else
+    # 有配置失败，进入兼容模式
+    mkdir -p /var/www/nav/data/logs
+    if [ "$nginx_ok" = 0 ]; then
+        cp /tmp/nginx-test.log /var/www/nav/data/logs/nginx_compat_error.log
+    fi
+    if [ "$phpfpm_ok" = 0 ]; then
+        cp /tmp/phpfpm-test.log /var/www/nav/data/logs/phpfpm_compat_error.log
+    fi
+    touch /var/www/nav/data/.compat_mode
+
+    # Nginx 回退
+    if [ "$nginx_ok" = 0 ]; then
+        echo "[entrypoint] 正在回退 Nginx 配置..."
+        if [ -L /etc/nginx/nginx.conf ]; then
+            mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.data
+            cp /var/www/nav/docker/nginx.conf /etc/nginx/nginx.conf
+        fi
+        if [ -L /etc/nginx/http.d/nav.conf ]; then
+            mv /etc/nginx/http.d/nav.conf /etc/nginx/http.d/nav.conf.data
+            cp /var/www/nav/nginx-conf/docker-site.conf /etc/nginx/http.d/nav.conf
+            envsubst '${NAV_PORT}' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp
+            mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf
+        fi
+    fi
+
+    # PHP-FPM / PHP ini 回退
+    if [ "$phpfpm_ok" = 0 ]; then
+        echo "[entrypoint] 正在回退 PHP-FPM / PHP 配置..."
+        if [ -L /usr/local/etc/php-fpm.d/nav.conf ]; then
+            mv /usr/local/etc/php-fpm.d/nav.conf /usr/local/etc/php-fpm.d/nav.conf.data
+            cp /var/www/nav/docker/php-fpm.conf /usr/local/etc/php-fpm.d/nav.conf
+        fi
+        if [ -L /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
+            mv /usr/local/etc/php/conf.d/99-nav-custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini.data
+            cp /var/www/nav/docker/php-custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini
+        fi
+    fi
+
+    # 再次校验内置配置
+    nginx_test_ok=0
+    phpfpm_test_ok=0
+    nginx -t >/tmp/nginx-test2.log 2>&1 && nginx_test_ok=1
+    /usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/nav.conf >/tmp/phpfpm-test2.log 2>&1 && phpfpm_test_ok=1
+
+    if [ "$nginx_test_ok" = 1 ] && [ "$phpfpm_test_ok" = 1 ]; then
+        echo "[entrypoint] 已切换到内置默认配置，服务可正常启动"
+    else
+        echo "[entrypoint][ERROR] 内置默认配置也无法启动，容器无法启动"
+        [ "$nginx_test_ok" = 1 ] || cat /tmp/nginx-test2.log
+        [ "$phpfpm_test_ok" = 1 ] || cat /tmp/phpfpm-test2.log
+        exit 1
+    fi
+fi
+
 # ── 根据持久化数据预生成反代配置（容器重建后 /etc/nginx 下的动态配置会丢失）──
 if [ -f /var/www/nav/data/sites.json ]; then
     su navwww -s /bin/sh -c 'php -r '\''require "/var/www/nav/admin/shared/functions.php"; $result = nginx_apply_proxy_conf(false); echo "[entrypoint] " . ($result["msg"] ?? "proxy config generate skipped") . PHP_EOL;'\''' || \
@@ -227,17 +350,47 @@ fi
 rm -f /etc/nginx/http.d/default.conf
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
-# ── 修正 PHP ini 文件权限（navwww 需要读写 display_errors 开关）──
-if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini ]; then
-    chown root:navwww /usr/local/etc/php/conf.d/99-nav-custom.ini
-    chmod 664 /usr/local/etc/php/conf.d/99-nav-custom.ini
-fi
-
 # ── 创建 nginx 操作包装脚本（供 PHP 后台调用）──
 printf '#!/bin/sh\nif [ ! -f /run/nginx/nginx.pid ]; then\n  echo "nginx pid not found"\n  exit 1\nfi\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
 chmod 755 /usr/local/bin/nginx-reload
 printf '#!/bin/sh\nexec /usr/sbin/nginx -t\n' > /usr/local/bin/nginx-test
 chmod 755 /usr/local/bin/nginx-test
+
+cat >/usr/local/bin/php-fpm-reload <<'RELOAD_EOF'
+#!/bin/sh
+# 尝试 graceful reload PHP-FPM
+
+# 方法1: supervisorctl signal (graceful, supervisor 4.0+)
+if supervisorctl signal USR2 php-fpm >/dev/null 2>&1; then
+    exit 0
+fi
+
+# 方法2: 通过 PID 文件发送 USR2
+pidfile="/run/php-fpm.pid"
+if [ -f "$pidfile" ]; then
+    if kill -USR2 "$(cat "$pidfile")" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+# 方法3: 通过 /proc 查找 master PID
+master_pid=""
+for p in /proc/[0-9]*; do
+    if [ -f "$p/cmdline" ] && grep -q "php-fpm: master process" "$p/cmdline" 2>/dev/null; then
+        master_pid=$(basename "$p")
+        break
+    fi
+done
+if [ -n "$master_pid" ]; then
+    if kill -USR2 "$master_pid" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+echo "php-fpm reload failed: unable to find process or send signal" >&2
+exit 1
+RELOAD_EOF
+chmod 755 /usr/local/bin/php-fpm-reload
 cat >/usr/local/bin/nav-task-compat <<'EOF'
 #!/bin/sh
 set -eu

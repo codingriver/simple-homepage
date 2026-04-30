@@ -144,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   if ($action === 'syntax_test') {
-    $test = nginx_test_config();
+    $test = nginx_test_config_isolated();
     $msg = $test['msg'];
     if (trim((string)$test['test_output']) !== '') $msg .= '｜' . $test['test_output'];
     if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE); exit; }
@@ -162,12 +162,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE);
     exit;
   }
+
+  // ── 查看兼容模式错误日志 ──
+  if ($action === 'view_compat_error') {
+      $lines = [];
+      $nginx_log = DATA_DIR . '/logs/nginx_compat_error.log';
+      $phpfpm_log = DATA_DIR . '/logs/phpfpm_compat_error.log';
+      if (file_exists($nginx_log) && filesize($nginx_log) > 0) {
+          $lines[] = '【Nginx 错误】';
+          $lines[] = file_get_contents($nginx_log);
+      }
+      if (file_exists($phpfpm_log) && filesize($phpfpm_log) > 0) {
+          $lines[] = '【PHP-FPM 错误】';
+          $lines[] = file_get_contents($phpfpm_log);
+      }
+      $content = empty($lines) ? '无错误记录' : implode("\n", $lines);
+      if ($isAjax) {
+          header('Content-Type: application/json; charset=utf-8');
+          echo json_encode(['ok' => true, 'content' => $content], JSON_UNESCAPED_UNICODE);
+          exit;
+      }
+      flash_set('info', nl2br(htmlspecialchars($content)));
+      header('Location: nginx.php');
+      exit;
+  }
+
+  // ── 切换为正常模式（恢复 data 配置）──
+  if ($action === 'restore_data_config') {
+      // 恢复全部 4 个 symlink（Nginx + Nginx 站点 + PHP-FPM + PHP ini）
+      $restore_cmds = [
+          'if [ -f /etc/nginx/nginx.conf.data ]; then rm -f /etc/nginx/nginx.conf; mv /etc/nginx/nginx.conf.data /etc/nginx/nginx.conf; fi',
+          'if [ -f /etc/nginx/http.d/nav.conf.data ]; then rm -f /etc/nginx/http.d/nav.conf; mv /etc/nginx/http.d/nav.conf.data /etc/nginx/http.d/nav.conf; fi',
+          'if [ -f /usr/local/etc/php-fpm.d/nav.conf.data ]; then rm -f /usr/local/etc/php-fpm.d/nav.conf; mv /usr/local/etc/php-fpm.d/nav.conf.data /usr/local/etc/php-fpm.d/nav.conf; fi',
+          'if [ -f /usr/local/etc/php/conf.d/99-nav-custom.ini.data ]; then rm -f /usr/local/etc/php/conf.d/99-nav-custom.ini; mv /usr/local/etc/php/conf.d/99-nav-custom.ini.data /usr/local/etc/php/conf.d/99-nav-custom.ini; fi',
+      ];
+      foreach ($restore_cmds as $cmd) {
+          admin_run_command($cmd);
+      }
+
+      // 验证 symlink 是否已正确恢复（防止因目录权限不足导致静默失败）
+      $expected_links = [
+          '/etc/nginx/nginx.conf' => '/var/www/nav/data/nginx/nginx.conf',
+          '/etc/nginx/http.d/nav.conf' => '/var/www/nav/data/nginx/http.d/nav.conf',
+          '/usr/local/etc/php-fpm.d/nav.conf' => '/var/www/nav/data/php-fpm/nav.conf',
+          '/usr/local/etc/php/conf.d/99-nav-custom.ini' => '/var/www/nav/data/php/custom.ini',
+      ];
+      $links_ok = true;
+      foreach ($expected_links as $link => $target) {
+          if (!is_link($link) || readlink($link) !== $target) {
+              $links_ok = false;
+              break;
+          }
+      }
+      if (!$links_ok) {
+          // 权限不足，回退到内置配置保持现状
+          admin_run_command('cp /var/www/nav/docker/nginx.conf /etc/nginx/nginx.conf');
+          admin_run_command('cp /var/www/nav/nginx-conf/docker-site.conf /etc/nginx/http.d/nav.conf');
+          admin_run_command('envsubst \'${NAV_PORT}\' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp && mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf');
+          admin_run_command('cp /var/www/nav/docker/php-fpm.conf /usr/local/etc/php-fpm.d/nav.conf');
+          admin_run_command('cp /var/www/nav/docker/php-custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini');
+          @touch(DATA_DIR . '/.compat_mode');
+          if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '恢复 data 配置失败：目录权限不足，请确保容器内 /etc/nginx/ 等目录对 navwww 可写'], JSON_UNESCAPED_UNICODE); exit; }
+          flash_set('error', '恢复 data 配置失败：目录权限不足，请确保容器内 /etc/nginx/ 等目录对 navwww 可写');
+          header('Location: nginx.php');
+          exit;
+      }
+
+      $nginx_test = nginx_test_config();
+      $phpfpm_test = php_fpm_test_config();
+      $all_ok = $nginx_test['ok'] && $phpfpm_test['ok'];
+
+      if ($all_ok) {
+          @unlink(DATA_DIR . '/.compat_mode');
+          $reload = nginx_reload();
+          $phpreload = php_fpm_reload();
+          if ($reload['ok'] && $phpreload['ok']) {
+              if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => 'data 配置校验通过，Nginx 与 PHP-FPM 已恢复'], JSON_UNESCAPED_UNICODE); exit; }
+              flash_set('success', '已切换为正常模式，Nginx 与 PHP-FPM 正在使用 data 目录配置');
+          } else {
+              $err = [];
+              if (!$reload['ok']) $err[] = 'Nginx: ' . $reload['msg'];
+              if (!$phpreload['ok']) $err[] = 'PHP-FPM: ' . $phpreload['msg'];
+              if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '校验通过但 reload 失败：' . implode('；', $err)], JSON_UNESCAPED_UNICODE); exit; }
+              flash_set('error', '配置校验通过但 reload 失败：' . implode('；', $err));
+          }
+      } else {
+          // 任意失败，全部回退到内置配置
+          admin_run_command('cp /var/www/nav/docker/nginx.conf /etc/nginx/nginx.conf');
+          admin_run_command('cp /var/www/nav/nginx-conf/docker-site.conf /etc/nginx/http.d/nav.conf');
+          admin_run_command('envsubst \'${NAV_PORT}\' < /etc/nginx/http.d/nav.conf > /tmp/nav.conf.tmp && mv /tmp/nav.conf.tmp /etc/nginx/http.d/nav.conf');
+          admin_run_command('cp /var/www/nav/docker/php-fpm.conf /usr/local/etc/php-fpm.d/nav.conf');
+          admin_run_command('cp /var/www/nav/docker/php-custom.ini /usr/local/etc/php/conf.d/99-nav-custom.ini');
+
+          @touch(DATA_DIR . '/.compat_mode');
+          $err_output = '';
+          if (!$nginx_test['ok']) {
+              $err_output .= "【Nginx 错误】\n" . $nginx_test['test_output'] . "\n";
+              file_put_contents(DATA_DIR . '/logs/nginx_compat_error.log', $nginx_test['test_output']);
+          }
+          if (!$phpfpm_test['ok']) {
+              $err_output .= "【PHP-FPM 错误】\n" . $phpfpm_test['test_output'] . "\n";
+              file_put_contents(DATA_DIR . '/logs/phpfpm_compat_error.log', $phpfpm_test['test_output']);
+          }
+          if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => '切换失败，已回退到兼容模式', 'test_output' => $err_output], JSON_UNESCAPED_UNICODE); exit; }
+          flash_set('error', '切换失败，已回退到兼容模式。错误详情：' . $err_output);
+      }
+      header('Location: nginx.php');
+      exit;
+  }
 }
 
 $page_title = 'Nginx 管理';
 require_once __DIR__ . '/shared/header.php';
 
 $cap = nginx_reload_capability();
+
+// 兼容模式检测
+$compat_mode = file_exists(DATA_DIR . '/.compat_mode');
+$compat_error = '';
+$nginx_err_log = DATA_DIR . '/logs/nginx_compat_error.log';
+$phpfpm_err_log = DATA_DIR . '/logs/phpfpm_compat_error.log';
+if ($compat_mode) {
+    if (file_exists($nginx_err_log)) $compat_error .= file_get_contents($nginx_err_log) . "\n";
+    if (file_exists($phpfpm_err_log)) $compat_error .= file_get_contents($phpfpm_err_log) . "\n";
+}
 
 // 读取所有可编辑目标内容
 $editorDataMap = [];
@@ -289,6 +407,99 @@ $ppm = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
   <span style="color:var(--tm);font-family:var(--mono)"><?= htmlspecialchars($cap['nginx_bin']) ?></span>
   <span style="color:var(--tm)"><?= $proxy_count ?> 个代理站点</span>
 </div>
+
+<?php if ($compat_mode): ?>
+<style>
+.compat-banner {
+  background: rgba(255, 193, 7, 0.08);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.compat-banner .title {
+  color: #ffc107;
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.compat-banner .actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.compat-banner .actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  background: var(--sf);
+  color: var(--tx);
+  cursor: pointer;
+}
+.compat-banner .actions button:hover {
+  border-color: var(--ac);
+}
+.compat-error-modal pre {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+</style>
+<div class="compat-banner">
+  <div class="title">⚠️ 当前处于 Nginx 兼容模式</div>
+  <div>data 目录下的系统配置（Nginx / PHP-FPM / PHP）校验失败，容器已自动切换到<strong>内置默认配置</strong>启动。你的 data 配置未被修改，可点击下方按钮查看错误并尝试恢复。</div>
+  <div class="actions">
+    <button type="button" onclick="showCompatError()">🔍 查看校验错误</button>
+    <button type="button" onclick="restoreDataConfig()">🔄 切换为正常模式</button>
+  </div>
+</div>
+<div id="compat-error-modal" style="display:none" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">系统配置校验错误详情 <button class="close" onclick="document.getElementById('compat-error-modal').style.display='none'">&times;</button></div>
+    <div class="modal-body compat-error-modal"><pre id="compat-error-content">加载中...</pre></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('compat-error-modal').style.display='none'">关闭</button>
+    </div>
+  </div>
+</div>
+<script>
+function showCompatError() {
+  fetch('nginx.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+    body: 'action=view_compat_error&_csrf=' + encodeURIComponent(window._csrf)
+  })
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById('compat-error-content').textContent = data.ok ? data.content : data.msg;
+    document.getElementById('compat-error-modal').style.display = 'flex';
+  });
+}
+function restoreDataConfig() {
+  if (!confirm('确定要切换为正常模式吗？\n系统将尝试使用 data 目录下的配置，如果校验失败会自动回退到兼容模式。')) return;
+  fetch('nginx.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+    body: 'action=restore_data_config&_csrf=' + encodeURIComponent(window._csrf)
+  })
+  .then(r => r.json())
+  .then(data => {
+    alert(data.msg);
+    if (data.ok) location.reload();
+  });
+}
+</script>
+<?php endif; ?>
 
 <!-- 代理配置生成 -->
 <div class="card" id="proxy">

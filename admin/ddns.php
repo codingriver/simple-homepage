@@ -97,6 +97,10 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
               <option value="vps789_cfip">vps789 Cloudflare 优选 IP</option>
               <option value="api4ce_cfip">4ce Cloudflare 优选 IP（三网）</option>
               <option value="uouin_cfip">uouin Cloudflare 优选 IP（三网）</option>
+              <option value="cf090227_line">090227 Cloudflare 优选 IP（三网）</option>
+              <option value="addressesapi_164746">addressesapi Cloudflare 优选 IP（全局带速度）</option>
+              <option value="ipdb030101_bestcf">ipdb030101 Cloudflare 优选 IP（全局）</option>
+              <option value="ymyuuu_ipdb_bestcf">ymyuuu-ipdb Cloudflare 优选 IP（全局）</option>
               <option value="cf164746_global">164746 Cloudflare 优选 IP（全局）</option>
               <option value="local_ipv4">本机公网 IPv4</option>
               <option value="local_ipv6">本机公网 IPv6</option>
@@ -128,6 +132,10 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
               <option value="">不启用回退</option>
               <option value="api4ce_cfip">4ce Cloudflare 优选 IP</option>
               <option value="uouin_cfip">uouin Cloudflare 优选 IP</option>
+              <option value="cf090227_line">090227 Cloudflare 优选 IP（三网）</option>
+              <option value="addressesapi_164746">addressesapi Cloudflare 优选 IP（全局带速度）</option>
+              <option value="ipdb030101_bestcf">ipdb030101 Cloudflare 优选 IP（全局）</option>
+              <option value="ymyuuu_ipdb_bestcf">ymyuuu-ipdb Cloudflare 优选 IP（全局）</option>
               <option value="cf164746_global">164746 Cloudflare 优选 IP（全局）</option>
               <option value="vps789_cfip">vps789 Cloudflare 优选 IP</option>
             </select>
@@ -210,6 +218,10 @@ var DDNS_SOURCE_HINTS = {
   vps789_cfip: 'vps789：现有稳定来源，支持三网线路；适合继续沿用。',
   api4ce_cfip: '4ce：JSON API，结构最适合当前 DDNS，推荐作为主来源。',
   uouin_cfip: 'uouin：HTML 表格抓取型来源，支持三网，适合作为备用源。',
+  cf090227_line: '090227：纯文本 IP 列表，支持三网线路；无延迟/丢包数据，建议配合 first 策略使用。',
+  addressesapi_164746: 'addressesapi：全局优选 IP，带速度数据（MB/s）；按速度排序，建议配合 best_score 策略。',
+  ipdb030101_bestcf: 'ipdb030101：全局优选 IP 纯文本列表；无元数据，建议配合 first 策略使用。',
+  ymyuuu_ipdb_bestcf: 'ymyuuu-ipdb：GitHub Raw 反代优选 IP 列表；无元数据，建议配合 first 策略使用。',
   cf164746_global: '164746：全局优选榜单，不区分三网；适合做全局 fallback。',
   local_ipv4: '本机公网 IPv4：直接获取当前出口 IPv4，不依赖第三方优选源。',
   local_ipv6: '本机公网 IPv6：直接获取当前出口 IPv6，不依赖第三方优选源。'
@@ -276,8 +288,8 @@ function renderRows() {
 
 function toggleSourceFields() {
   var type = document.getElementById('fm-source-type').value;
-  var needsLine = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip'].indexOf(type) !== -1;
-  var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf164746_global'].indexOf(type) !== -1;
+  var needsLine = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line'].indexOf(type) !== -1;
+  var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'].indexOf(type) !== -1;
   document.querySelectorAll('.vps789-only').forEach(function(el){ el.style.display = needsFilters ? '' : 'none'; });
   document.querySelectorAll('.line-only').forEach(function(el){ el.style.display = needsLine ? '' : 'none'; });
   var hint = document.getElementById('fm-source-hint');
@@ -484,6 +496,10 @@ function formatSourceLabel(type) {
     vps789_cfip: 'vps789 Cloudflare 优选 IP',
     api4ce_cfip: '4ce Cloudflare 优选 IP',
     uouin_cfip: 'uouin Cloudflare 优选 IP',
+    cf090227_line: '090227 Cloudflare 优选 IP（三网）',
+    addressesapi_164746: 'addressesapi Cloudflare 优选 IP（全局带速度）',
+    ipdb030101_bestcf: 'ipdb030101 Cloudflare 优选 IP（全局）',
+    ymyuuu_ipdb_bestcf: 'ymyuuu-ipdb Cloudflare 优选 IP（全局）',
     cf164746_global: '164746 Cloudflare 优选 IP（全局）',
     local_ipv4: '本机公网 IPv4',
     local_ipv6: '本机公网 IPv6'

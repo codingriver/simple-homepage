@@ -2051,6 +2051,79 @@ function nginx_test_config(): array {
  *
  * @return array{ok:bool,msg:string,test_output:string}
  */
+function php_fpm_test_config(): array {
+    $test = admin_run_command('/usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/nav.conf');
+    if ($test['ok']) {
+        return [
+            'ok' => true,
+            'msg' => 'PHP-FPM 配置语法检测通过',
+            'test_output' => $test['output'],
+        ];
+    }
+    return [
+        'ok' => false,
+        'msg' => 'PHP-FPM 配置语法检测失败',
+        'test_output' => $test['output'],
+    ];
+}
+
+function php_fpm_reload(): array {
+    if (!is_executable('/usr/local/bin/php-fpm-reload')) {
+        return [
+            'ok' => false,
+            'msg' => 'PHP-FPM reload 脚本不可用',
+            'test_output' => '',
+        ];
+    }
+    $reload = admin_run_command('/usr/local/bin/php-fpm-reload');
+    if ($reload['ok']) {
+        return [
+            'ok' => true,
+            'msg' => 'PHP-FPM 已 graceful reload',
+            'test_output' => $reload['output'],
+        ];
+    }
+    return [
+        'ok' => false,
+        'msg' => 'PHP-FPM reload 失败：' . $reload['output'],
+        'test_output' => $reload['output'],
+    ];
+}
+
+/**
+ * 隔离反代配置后执行 nginx -t
+ * 用于编辑系统配置时的语法检测，避免反代配置错误干扰结果
+ *
+ * @return array{ok:bool,msg:string,test_output:string}
+ */
+function nginx_test_config_isolated(): array {
+    $proxy_path = nginx_proxy_conf_path();
+    $domain_proxy_path = nginx_domain_proxy_conf_path();
+
+    $proxy_backup = file_exists($proxy_path) ? @file_get_contents($proxy_path) : null;
+    $domain_backup = file_exists($domain_proxy_path) ? @file_get_contents($domain_proxy_path) : null;
+
+    // 临时清空反代配置（保留空文件避免 include 报错）
+    if ($proxy_backup !== null) {
+        @file_put_contents($proxy_path, '', LOCK_EX);
+    }
+    if ($domain_backup !== null) {
+        @file_put_contents($domain_proxy_path, '', LOCK_EX);
+    }
+
+    $test = nginx_test_config();
+
+    // 恢复反代配置
+    if ($proxy_backup !== null) {
+        @file_put_contents($proxy_path, $proxy_backup, LOCK_EX);
+    }
+    if ($domain_backup !== null) {
+        @file_put_contents($domain_proxy_path, $domain_backup, LOCK_EX);
+    }
+
+    return $test;
+}
+
 function nginx_test_config_preview(string $target, string $content): array {
     $targets = nginx_editable_targets();
     if (!isset($targets[$target])) {
@@ -2085,8 +2158,8 @@ function nginx_test_config_preview(string $target, string $content): array {
         return ['ok' => false, 'msg' => '写入预览文件失败，请检查文件权限：' . $path, 'test_output' => ''];
     }
 
-    // 执行语法检测
-    $test = nginx_test_config();
+    // 执行语法检测（隔离反代配置，避免反代错误干扰系统配置检测）
+    $test = nginx_test_config_isolated();
 
     // 恢复原文件（无论检测成功与否）
     @file_put_contents($path, $backup, LOCK_EX);
