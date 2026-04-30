@@ -179,7 +179,6 @@ switch ($cmd) {
                         . "# 如需添加反代，在此文件中添加：\n"
                         . "# location /proxy-path/ {\n"
                         . "#     proxy_pass http://内网IP:端口/;\n"
-                        . "#     include /etc/nginx/proxy_params_full;\n"
                         . "# }\n",
                         LOCK_EX);
                     echo "         已清空反代配置（保留文件）: {$cf}\n";
@@ -194,7 +193,6 @@ switch ($cmd) {
             . "# 如需添加反代，在此文件中添加：\n"
             . "# location /proxy-path/ {\n"
             . "#     proxy_pass http://内网IP:端口/;\n"
-            . "#     include /etc/nginx/proxy_params_full;\n"
             . "# }\n";
         $nav_proxy_domains_placeholder = "# 子域名反代配置已由 manage_users.php reset 清空\n"
             . "# 如需添加子域名反代，在此文件中添加独立 server 块。\n";
