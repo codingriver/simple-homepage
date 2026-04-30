@@ -1816,6 +1816,12 @@ function nginx_validate_proxy_template(string $template, array $required): array
  */
 function nginx_main_conf_path(): string {
     $runtime = '/etc/nginx/nginx.conf';
+    if (is_link($runtime)) {
+        $real = @readlink($runtime);
+        if ($real !== false && is_file($real)) {
+            return $real;
+        }
+    }
     if (is_file($runtime)) {
         return $runtime;
     }
