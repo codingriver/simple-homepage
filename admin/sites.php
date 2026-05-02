@@ -41,7 +41,7 @@ function sites_handle_post(array &$sites_data): array {
         if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
         elseif (!$name) $err = '名称不能为空';
         elseif (!$gid)  $err = '请选择所属分组';
-        elseif ($type === 'proxy') {
+        elseif ($type === 'proxy_domain' || $type === 'proxy_path') {
             $target = trim($_POST['proxy_target'] ?? '');
             if (!is_allowed_proxy_target($target)) $err = '代理目标必须是 RFC1918 内网IPv4地址（防SSRF）';
         }
@@ -70,11 +70,13 @@ function sites_handle_post(array &$sites_data): array {
                 if (isset($oldSite[$k])) $site[$k] = $oldSite[$k];
             }
         }
-        if ($type === 'proxy') {
-            $site['proxy_mode']   = $_POST['proxy_mode']   ?? 'path';
+        if ($type === 'proxy_domain' || $type === 'proxy_path') {
             $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
-            $site['slug']         = trim($_POST['slug'] ?? $sid);
-            $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
+            if ($type === 'proxy_domain') {
+                $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
+            } else {
+                $site['slug'] = trim($_POST['slug'] ?? $sid);
+            }
         } else {
             $site['url'] = $url;
         }
@@ -115,7 +117,7 @@ function sites_handle_post(array &$sites_data): array {
 
         // 新站点/代理目标变更时，后台异步预抓取 favicon
         $trigger_domain = '';
-        if ($type === 'proxy') {
+        if ($type === 'proxy_domain' || $type === 'proxy_path') {
             $trigger_domain = parse_url($site['proxy_target'] ?? '', PHP_URL_HOST) ?? '';
         } else {
             $trigger_domain = parse_url($site['url'] ?? '', PHP_URL_HOST) ?? '';
@@ -273,7 +275,7 @@ $groups_json = json_encode(
     <thead><tr><th style="width:40px"></th><th>ID</th><th>名称</th><th>类型</th><th>地址/目标</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
     <?php foreach ($grp['sites'] as $s):
-      $h_url = ($s['type']??'') === 'proxy' ? ($s['proxy_target']??'') : ($s['url']??'');
+      $h_url = in_array(($s['type']??''), ['proxy','proxy_domain','proxy_path'], true) ? ($s['proxy_target']??'') : ($s['url']??'');
       $h_entry = $health_cache[$h_url] ?? null;
       if ($h_entry && (time() - ($h_entry['checked_at']??0)) < 600) {
           $h_status = $h_entry['status'] ?? 'unknown';
@@ -291,7 +293,7 @@ $groups_json = json_encode(
       <td style="cursor:move;text-align:center;color:var(--tm)">☰</td>
       <td><code style="font-size:12px"><?= htmlspecialchars($s['id']) ?></code></td>
       <td><?= htmlspecialchars($s['icon']??'') ?> <?= htmlspecialchars($s['name']) ?></td>
-      <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars($s['type']??'external') ?></span></td>
+      <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','proxy_domain'=>'badge-yellow','proxy_path'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars(['proxy_domain'=>'子域名代理','proxy_path'=>'子路径代理','proxy'=>'代理','internal'=>'内站','external'=>'外链'][$s['type']??'external']) ?></span></td>
       <td style="font-size:12px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></td>
       <td style="font-size:12px;white-space:nowrap"><?= $h_dot ?><?= $h_status==='up' && $h_ms!=='-' ? ' <span style="color:var(--tm);font-size:10px">('.$h_ms.'ms)</span>' : '' ?></td>
@@ -341,23 +343,25 @@ padding:28px;width:100%;max-width:520px;margin:auto">
         <select name="type" id="fi_type" onchange="toggleType(this.value)">
           <option value="external">外链 External</option>
           <option value="internal">内站 Internal</option>
-          <option value="proxy">代理 Proxy</option>
+          <option value="proxy_domain">代理子域名</option>
+          <option value="proxy_path">代理子路径</option>
         </select></div>
       <div class="form-group full" id="row_url"><label>目标URL</label>
         <input type="url" name="url" id="fi_url" placeholder="https://"></div>
-      <div id="proxy_fields" style="display:none;grid-column:1/-1">
+      <div id="proxy_domain_fields" style="display:none;grid-column:1/-1">
         <div class="form-grid">
-          <div class="form-group"><label>代理模式</label>
-            <select name="proxy_mode" id="fi_pmode">
-              <option value="path">路径前缀 /p/{slug}/</option>
-              <option value="domain">子域名 proxy_domain</option>
-            </select></div>
           <div class="form-group"><label>内网目标（防SSRF）</label>
             <input type="text" name="proxy_target" id="fi_ptarget" placeholder="http://192.168.1.x:port"></div>
-          <div class="form-group"><label>Slug（路径模式用）</label>
-            <input type="text" name="slug" id="fi_slug" placeholder="my-app"></div>
-          <div class="form-group"><label>代理域名（子域名模式）</label>
+          <div class="form-group"><label>代理域名</label>
             <input type="text" name="proxy_domain" id="fi_pdomain" placeholder="app.yourdomain.com"></div>
+        </div>
+      </div>
+      <div id="proxy_path_fields" style="display:none;grid-column:1/-1">
+        <div class="form-grid">
+          <div class="form-group"><label>内网目标（防SSRF）</label>
+            <input type="text" name="proxy_target" id="fi_ptarget_path" placeholder="http://192.168.1.x:port"></div>
+          <div class="form-group"><label>路径前缀 /p/{slug}/</label>
+            <input type="text" name="slug" id="fi_slug" placeholder="my-app"></div>
         </div>
       </div>
       <div class="form-group full"><label>备注</label>
@@ -381,8 +385,9 @@ function populateGroups(selGid) {
     }).join('');
 }
 function toggleType(t) {
-    document.getElementById('row_url').style.display    = t==='proxy' ? 'none' : '';
-    document.getElementById('proxy_fields').style.display = t==='proxy' ? 'grid' : 'none';
+    document.getElementById('row_url').style.display = (t==='proxy_domain' || t==='proxy_path') ? 'none' : '';
+    document.getElementById('proxy_domain_fields').style.display = t==='proxy_domain' ? 'grid' : 'none';
+    document.getElementById('proxy_path_fields').style.display = t==='proxy_path' ? 'grid' : 'none';
 }
 function openForm(s, gid) {
     document.getElementById('mtitle').textContent = s ? '编辑站点' : '添加站点';
@@ -392,14 +397,19 @@ function openForm(s, gid) {
     document.getElementById('fi_name').value   = s ? s.name : '';
     document.getElementById('fi_icon').value   = s ? (s.icon||'🔗') : '🔗';
     document.getElementById('fi_url').value    = s ? (s.url||'') : '';
-    document.getElementById('fi_type').value   = s ? (s.type||'external') : 'external';
-    document.getElementById('fi_pmode').value  = s ? (s.proxy_mode||'path') : 'path';
+    var stype = s ? (s.type||'external') : 'external';
+    // 兼容旧数据：type=proxy 时根据 proxy_mode 映射为新类型
+    if (stype === 'proxy') {
+        stype = (s.proxy_mode||'') === 'domain' ? 'proxy_domain' : 'proxy_path';
+    }
+    document.getElementById('fi_type').value   = stype;
     document.getElementById('fi_ptarget').value= s ? (s.proxy_target||'') : '';
+    document.getElementById('fi_ptarget_path').value = s ? (s.proxy_target||'') : '';
     document.getElementById('fi_slug').value   = s ? (s.slug||'') : '';
     document.getElementById('fi_pdomain').value= s ? (s.proxy_domain||'') : '';
     document.getElementById('fi_notes').value = s ? (s.notes||'') : '';
     populateGroups(gid||(groups.length?groups[0].id:''));
-    toggleType(s ? (s.type||'external') : 'external');
+    toggleType(stype);
     var sb=document.querySelector('#siteForm button[type=submit]');if(sb){sb.disabled=false;sb.textContent='保存';}
     modal.style.display='flex';
 }

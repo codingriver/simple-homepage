@@ -177,7 +177,7 @@ function renderHealthResults(data) {
             var url_short = s.url.length > 40 ? s.url.substring(0,40)+'…' : s.url;
             tbody += '<tr>'
                 + '<td>' + escHtml(s.name) + '</td>'
-                + '<td><span class="badge badge-' + (s.type==='proxy'?'yellow':s.type==='internal'?'purple':'gray') + '">' + escHtml(s.type) + '</span></td>'
+                + '<td><span class="badge badge-' + (s.type==='proxy'||s.type==='proxy_domain'||s.type==='proxy_path'?'yellow':s.type==='internal'?'purple':'gray') + '">' + escHtml(s.type==='proxy_domain'?'子域名代理':s.type==='proxy_path'?'子路径代理':s.type) + '</span></td>'
                 + '<td style="font-size:11px;font-family:monospace" title="' + escHtml(s.url) + '">' + escHtml(url_short) + '</td>'
                 + '<td>' + dot + ' ' + (h.status==='up'?'在线':'离线') + '</td>'
                 + '<td style="font-family:monospace">' + code + '</td>'

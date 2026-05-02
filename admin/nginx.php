@@ -25,10 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $lines      = ['# Nginx 代理配置 — 由导航站自动生成于 ' . date('Y-m-d H:i:s'), ''];
       foreach ($sites_data['groups'] as $grp) {
           foreach ($grp['sites'] ?? [] as $s) {
-              if (($s['type'] ?? '') !== 'proxy') continue;
+              if (!in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) continue;
               $target = $s['proxy_target'] ?? '';
               $name   = $s['name'] ?? $s['id'];
-              if (($s['proxy_mode'] ?? 'path') === 'path') {
+              if (($s['type'] ?? '') === 'proxy_path' || (($s['type'] ?? '') === 'proxy' && ($s['proxy_mode'] ?? 'path') === 'path')) {
                   $slug = $s['slug'] ?? $s['id'];
                   $lines[] = "# {$name}";
                   $lines[] = "location /p/{$slug}/ {";
@@ -315,6 +315,7 @@ foreach ($targets as $k => $meta) {
     'mtime' => $mtime,
     'content' => (string)$rr['content'],
     'error' => '',
+    'readonly' => !empty($meta['readonly']),
   ];
 }
 
@@ -325,7 +326,7 @@ $conf_mtime = $conf_exists ? date('Y-m-d H:i:s', filemtime($proxy_conf_path)) : 
 $proxy_count = 0;
 foreach (load_sites()['groups'] ?? [] as $g)
   foreach ($g['sites'] ?? [] as $s)
-    if (($s['type'] ?? '') === 'proxy') $proxy_count++;
+    if (in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) $proxy_count++;
 
 $cfg = load_config();
 $ppm = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
@@ -574,7 +575,11 @@ function restoreDataConfig() {
       <span class="badge badge-red" style="font-size:11px">读取失败</span>
       <?php endif; ?>
     </div>
+    <?php if (!empty($item['readonly'])): ?>
+    <button type="button" class="btn btn-sm btn-secondary" data-edit-target="<?= htmlspecialchars($k) ?>" <?= !$item['ok'] ? 'disabled' : '' ?>>查看</button>
+    <?php else: ?>
     <button type="button" class="btn btn-sm btn-secondary" data-edit-target="<?= htmlspecialchars($k) ?>" <?= !$item['ok'] ? 'disabled' : '' ?>>编辑</button>
+    <?php endif; ?>
   </div>
   <?php endforeach; ?>
 </div>
@@ -591,12 +596,21 @@ function restoreDataConfig() {
     var item = editorDataMap[target];
     if (!item || !item.ok) return;
     var title = item.label + ' · ' + item.path;
+    var isReadonly = !!item.readonly;
+    var footerHtml = isReadonly
+      ? '<div style="display:flex;align-items:center;justify-content:flex-start;gap:6px;width:100%;font-size:12px;color:var(--tm);"><span>⚠️ 此文件由后台自动管理，修改站点后会自动重新生成</span></div>'
+      : '';
     NavAceEditor.open({
       title: title,
       mode: 'nginx',
       value: item.content || '',
+      readOnly: isReadonly,
       wrapMode: true,
-      buttons: {
+      footerHtml: footerHtml || undefined,
+      buttons: isReadonly ? {
+        left: [],
+        right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
+      } : {
         left: [
           { type: 'dirty' },
           { text: '检查语法', class: 'btn-secondary', action: 'syntax' }
@@ -612,7 +626,7 @@ function restoreDataConfig() {
           NavAceEditor.close();
           return;
         }
-        if (action === 'save' || action === 'save_reload' || action === 'syntax') {
+        if (!isReadonly && (action === 'save' || action === 'save_reload' || action === 'syntax')) {
           if (action === 'save_reload') {
             NavConfirm.open({
               title: '保存并 Reload Nginx',

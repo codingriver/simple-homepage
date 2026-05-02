@@ -43,7 +43,7 @@ if ($action === 'health_sites_meta') {
             $sites[] = [
                 'name' => $s['name'] ?? '',
                 'type' => $s['type'] ?? 'external',
-                'url'  => ($s['type'] ?? '') === 'proxy' ? ($s['proxy_target'] ?? '') : ($s['url'] ?? ''),
+                'url'  => in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true) ? ($s['proxy_target'] ?? '') : ($s['url'] ?? ''),
             ];
         }
     }

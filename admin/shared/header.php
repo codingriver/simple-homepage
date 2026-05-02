@@ -69,7 +69,8 @@ $nav_items = array_values(array_filter($nav_items, static function(array $item):
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($page_title ?? '后台') ?> — <?= htmlspecialchars($site_name_admin) ?></title>
-<link rel="stylesheet" href="shared/admin.css">
+<?php $adminCssVer = file_exists(__DIR__ . '/admin.css') ? filemtime(__DIR__ . '/admin.css') : time(); ?>
+<link rel="stylesheet" href="shared/admin.css?v=<?= $adminCssVer ?>">
 <script src="/gesture-guard.js" defer></script>
 </head>
 <body>

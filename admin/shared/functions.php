@@ -966,7 +966,7 @@ function health_check_all(): array {
     foreach ($sites_data['groups'] as $grp) {
         foreach ($grp['sites'] ?? [] as $s) {
             // 构造要检测的 URL
-            if (($s['type'] ?? '') === 'proxy') {
+            if (in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) {
                 $url = $s['proxy_target'] ?? '';
             } else {
                 $url = $s['url'] ?? '';
@@ -992,7 +992,7 @@ function health_check_all(): array {
  * @return string  'up' | 'down' | 'unknown'
  */
 function health_get_status(array $site, array $cache): string {
-    $url = ($site['type'] ?? '') === 'proxy'
+    $url = in_array(($site['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)
         ? ($site['proxy_target'] ?? '')
         : ($site['url'] ?? '');
     if (!$url || !isset($cache[$url])) return 'unknown';
@@ -1254,7 +1254,7 @@ function nginx_generate_proxy_conf(): array {
 
     foreach ($groups as $grp) {
         foreach ($grp['sites'] ?? [] as $s) {
-            if (($s['type'] ?? '') !== 'proxy') continue;
+            if (!in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) continue;
             $target = rtrim($s['proxy_target'] ?? '', '/');
             // 校验 proxy_target 格式，防止配置注入（仅允许 http(s)://host:port/path 形式，禁止 ..）
             if (!preg_match('#^https?://[a-zA-Z0-9._-]+(:\d+)?(/[a-zA-Z0-9._~!$&\'()*+,;=:@/-]*)?$#', $target) || str_contains($target, '..')) {
@@ -1262,7 +1262,7 @@ function nginx_generate_proxy_conf(): array {
             }
             $name   = nginx_sanitize_config_literal($s['name'] ?? $s['id']);
 
-            if (($s['proxy_mode'] ?? 'path') === 'path') {
+            if (($s['type'] ?? '') === 'proxy_path' || (($s['type'] ?? '') === 'proxy' && ($s['proxy_mode'] ?? 'path') === 'path')) {
                 $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
                 if ($useTplPath) {
                     $path_blocks[] = nginx_render_proxy_template($tplPath, [
@@ -1852,10 +1852,12 @@ function nginx_editable_targets(): array {
         'proxy_path' => [
             'label' => 'Nginx 反代配置（路径模式）',
             'path' => nginx_proxy_conf_path(),
+            'readonly' => true,
         ],
         'proxy_domain' => [
             'label' => 'Nginx 反代配置（子域名模式）',
             'path' => nginx_domain_proxy_conf_path(),
+            'readonly' => true,
         ],
         'proxy_params_simple' => [
             'label' => 'Nginx 反代参数模板（精简模式）',
@@ -2266,7 +2268,8 @@ function nginx_mark_applied(): void {
  * @return array<string,mixed>|null
  */
 function nginx_effective_proxy_site_state(array $site): ?array {
-    if (($site['type'] ?? '') !== 'proxy') {
+    $stype = $site['type'] ?? '';
+    if (!in_array($stype, ['proxy','proxy_domain','proxy_path'], true)) {
         return null;
     }
 
@@ -2275,7 +2278,12 @@ function nginx_effective_proxy_site_state(array $site): ?array {
         return null;
     }
 
-    $mode = (($site['proxy_mode'] ?? 'path') === 'domain') ? 'domain' : 'path';
+    // 兼容旧数据：type=proxy 时根据 proxy_mode 判断
+    if ($stype === 'proxy') {
+        $mode = (($site['proxy_mode'] ?? 'path') === 'domain') ? 'domain' : 'path';
+    } else {
+        $mode = $stype === 'proxy_domain' ? 'domain' : 'path';
+    }
     $id = (string)($site['id'] ?? '');
     $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string)($site['slug'] ?? $id)));
 
@@ -2339,7 +2347,7 @@ function nginx_pending_sites(): array {
         $pending = [];
         foreach ($sitesData['groups'] ?? [] as $grp) {
             foreach ($grp['sites'] ?? [] as $site) {
-                if (($site['type'] ?? '') !== 'proxy') {
+                if (!in_array(($site['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) {
                     continue;
                 }
                 $pending[] = [
@@ -2368,7 +2376,7 @@ function nginx_pending_sites(): array {
     $sitesData = load_sites();
     foreach ($sitesData['groups'] ?? [] as $grp) {
         foreach ($grp['sites'] ?? [] as $site) {
-            if (($site['type'] ?? '') !== 'proxy') {
+            if (!in_array(($site['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) {
                 continue;
             }
             $id = (string)($site['id'] ?? '');

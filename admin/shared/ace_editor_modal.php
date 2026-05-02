@@ -12,7 +12,7 @@
 ?>
 
 <!-- ========== NavAceEditor 统一弹窗 ========== -->
-<div id="nav-ace-editor-modal" class="ngx-modal">
+<div id="nav-ace-editor-modal" class="ngx-modal" style="display:none">
   <div class="ngx-modal-card" id="nav-ace-modal-card">
     <div class="ngx-modal-head">
       <div class="ngx-modal-title-wrap">
@@ -180,6 +180,13 @@
     window.addEventListener('resize', function() {
       if (editor && els.modal && els.modal.classList.contains('open')) {
         editor.resize();
+      }
+    });
+
+    // 浏览器后退缓存（bfcache）恢复时，自动关闭残留的弹窗
+    window.addEventListener('pageshow', function(e) {
+      if (e.persisted && els.modal && els.modal.classList.contains('open')) {
+        doCloseEditor();
       }
     });
 
@@ -386,7 +393,10 @@
       try { config.onClose(); } catch(e) {}
     }
     config = {};
-    if (els.modal) els.modal.classList.remove('open');
+    if (els.modal) {
+      els.modal.classList.remove('open');
+      els.modal.style.display = 'none';
+    }
   }
 
   // ── 按钮辅助 ──
@@ -542,7 +552,7 @@
       // 标题
       if (els.title) els.title.textContent = options.title || '文本编辑器';
 
-      // 工具栏：只读模式隐藏部分控件
+      // 工具栏：只读模式隐藏
       if (els.toolbar) {
         els.toolbar.style.display = options.readOnly ? 'none' : '';
       }
@@ -593,7 +603,8 @@
       // 关闭可能残留的行号跳转栏
       closeGotoBar();
 
-      // 显示弹窗
+      // 显示弹窗（清除内联兜底样式，让 CSS 类选择器生效）
+      els.modal.style.display = '';
       els.modal.classList.add('open');
       setTimeout(function() {
         if (editor) { editor.resize(); editor.focus(); }

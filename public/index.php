@@ -99,7 +99,7 @@ function homepage_pending_proxy_sites(): array {
     $pending = [];
     foreach (($sites_data['groups'] ?? []) as $grp) {
         foreach (($grp['sites'] ?? []) as $s) {
-            if (($s['type'] ?? '') !== 'proxy') continue;
+            if (!in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true)) continue;
             $pending[] = [
                 'name' => $s['name'] ?? $s['id'] ?? '未命名代理站点',
             ];
@@ -133,17 +133,22 @@ function build_nav_url(array $site, string $token): string {
             if (($site['proxy_mode'] ?? '') === 'domain')
                 return 'https://'.($site['proxy_domain'] ?? '').'/';
             return '/p/'.($site['slug'] ?? '').'/';
+        case 'proxy_domain':
+            return 'https://'.($site['proxy_domain'] ?? '').'/';
+        case 'proxy_path':
+            return '/p/'.($site['slug'] ?? '').'/';
         default: return $site['url'] ?? '#';
     }
 }
 
 function homepage_render_site_card(array $site, array $group, string $href, string $token, array $health_cache, bool $showHealth): string {
     $type = (string)($site['type'] ?? 'external');
-    $typeClass = ['internal' => 'bi', 'proxy' => 'bp', 'external' => 'be'][$type] ?? 'be';
-    $typeLabel = ['internal' => '内站', 'proxy' => '代理', 'external' => '外链'][$type] ?? '外链';
+    $typeClass = ['internal' => 'bi', 'proxy' => 'bp', 'proxy_domain' => 'bp', 'proxy_path' => 'bp', 'external' => 'be'][$type] ?? 'be';
+    $typeLabel = ['internal' => '内站', 'proxy' => '代理', 'proxy_domain' => '子域名代理', 'proxy_path' => '子路径代理', 'external' => '外链'][$type] ?? '外链';
     $iconUrl = (string)($site['url'] ?? ($site['proxy_target'] ?? ''));
-    $domain = parse_url($iconUrl, PHP_URL_HOST) ?? '';
-    $healthUrl = $type === 'proxy' ? (string)($site['proxy_target'] ?? '') : (string)($site['url'] ?? '');
+    $parsedHost = parse_url($iconUrl, PHP_URL_HOST);
+    $domain = strtolower((string)($parsedHost ?: ''));
+    $healthUrl = in_array($type, ['proxy','proxy_domain','proxy_path'], true) ? (string)($site['proxy_target'] ?? '') : (string)($site['url'] ?? '');
     $healthEntry = $health_cache[$healthUrl] ?? null;
     $healthStatus = 'unknown';
     if ($healthEntry && (time() - ($healthEntry['checked_at'] ?? 0)) < 600) {
@@ -207,7 +212,7 @@ function homepage_render_site_card(array $site, array $group, string $href, stri
            alt="" loading="lazy">
       <span style="display:none"><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>
           <?php else: ?>
-      <img data-src="/favicon.php?url=<?= urlencode('https://' . $domain) ?>" src=""
+      <img data-src="/favicon.php?url=<?= urlencode('https://' . $domain) ?>" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
            onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
            alt="" loading="lazy">
       <span style="display:none"><?= htmlspecialchars((string)($site['icon'] ?? '🔗')) ?></span>

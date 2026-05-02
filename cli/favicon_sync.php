@@ -46,6 +46,7 @@ if ($singleDomain !== null) {
 
 $total = count($domains);
 $cached = 0;
+$cachedList = [];
 $expired = 0;
 $todo = [];
 
@@ -53,8 +54,28 @@ $todo = [];
 foreach ($domains as $domain) {
     $cache_file = $cache_dir . '/' . md5($domain) . '.ico';
     if (file_exists($cache_file)) {
-        if ((time() - filemtime($cache_file)) < 7 * 86400) {
+        $mtime = filemtime($cache_file);
+        $size = filesize($cache_file);
+        $ageDays = (int) ((time() - $mtime) / 86400);
+        $format = 'unknown';
+        $data = @file_get_contents($cache_file, false, null, 0, 16);
+        if ($data !== false) {
+            if (strpos($data, "\x89PNG") === 0) $format = 'png';
+            elseif (strpos($data, 'GIF') === 0) $format = 'gif';
+            elseif (strpos($data, "\xFF\xD8") === 0) $format = 'jpeg';
+            elseif (strpos($data, 'RIFF') === 0 && strpos(substr($data, 8, 4), 'WEBP') !== false) $format = 'webp';
+            elseif (stripos(ltrim(substr($data, 0, 64)), '<?xml') === 0 || stripos(ltrim(substr($data, 0, 64)), '<svg') === 0) $format = 'svg';
+            elseif (strpos($data, "\x00\x00\x01\x00") === 0) $format = 'ico';
+        }
+        if ((time() - $mtime) < 7 * 86400) {
             $cached++;
+            $cachedList[] = [
+                'domain' => $domain,
+                'file' => $cache_file,
+                'size' => $size,
+                'format' => $format,
+                'age_days' => $ageDays,
+            ];
         } else {
             $expired++;
             $todo[] = $domain;
@@ -74,6 +95,13 @@ if ($singleDomain !== null) {
 } else {
     echo "[{$ts()}] === Favicon Sync Start ===\n";
     echo "总站点: {$total} | 已缓存: {$cached} | 过期: {$expired} | 待抓取: " . count($todo) . "\n";
+    if ($cachedList !== []) {
+        echo "已缓存详情:\n";
+        foreach ($cachedList as $item) {
+            $sizeStr = $item['size'] < 1024 ? $item['size'] . ' B' : round($item['size'] / 1024, 1) . ' KB';
+            echo "  ✓ {$item['domain']} | {$item['format']} | {$sizeStr} | {$item['age_days']}天前 | " . basename($item['file']) . "\n";
+        }
+    }
     if ($todo !== []) {
         echo "待抓取域名: " . implode(', ', $todo) . "\n";
     } else {
@@ -90,7 +118,8 @@ $failDomains = [];
 foreach ($todo as $domain) {
     $cache_file = $cache_dir . '/' . md5($domain) . '.ico';
     $favicon_url = 'https://' . $domain . '/favicon.ico';
-    $data = favicon_fetch($favicon_url, 3);
+    $error = '';
+    $data = favicon_fetch($favicon_url, 3, $error);
 
     if (favicon_validate_data($data)) {
         file_put_contents($cache_file, $data, LOCK_EX);
@@ -100,7 +129,8 @@ foreach ($todo as $domain) {
     } else {
         $fail++;
         $failDomains[] = $domain;
-        echo "[{$ts()}] FAIL: {$domain}\n";
+        $errDetail = $error !== '' ? " ({$error})" : '';
+        echo "[{$ts()}] FAIL: {$domain}{$errDetail}\n";
     }
 }
 
@@ -112,7 +142,23 @@ if ($singleDomain !== null) {
 } else {
     echo "[{$ts()}] 结果: 成功 {$ok} | 失败 {$fail} | 跳过 {$cached} | 总计 {$total}\n";
     if ($okDomains !== []) {
-        echo "成功域名: " . implode(', ', $okDomains) . "\n";
+        echo "成功域名详情:\n";
+        foreach ($okDomains as $domain) {
+            $file = $cache_dir . '/' . md5($domain) . '.ico';
+            $size = file_exists($file) ? filesize($file) : 0;
+            $sizeStr = $size < 1024 ? $size . ' B' : round($size / 1024, 1) . ' KB';
+            $data = @file_get_contents($file, false, null, 0, 16);
+            $format = 'unknown';
+            if ($data !== false) {
+                if (strpos($data, "\x89PNG") === 0) $format = 'png';
+                elseif (strpos($data, 'GIF') === 0) $format = 'gif';
+                elseif (strpos($data, "\xFF\xD8") === 0) $format = 'jpeg';
+                elseif (strpos($data, 'RIFF') === 0 && strpos(substr($data, 8, 4), 'WEBP') !== false) $format = 'webp';
+                elseif (stripos(ltrim(substr($data, 0, 64)), '<?xml') === 0 || stripos(ltrim(substr($data, 0, 64)), '<svg') === 0) $format = 'svg';
+                elseif (strpos($data, "\x00\x00\x01\x00") === 0) $format = 'ico';
+            }
+            echo "  ✓ {$domain} | {$format} | {$sizeStr} | " . basename($file) . "\n";
+        }
     }
     if ($failDomains !== []) {
         echo "失败域名: " . implode(', ', $failDomains) . "\n";

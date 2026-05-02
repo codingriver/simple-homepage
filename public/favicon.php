@@ -18,12 +18,6 @@ require_once __DIR__ . '/../shared/favicon_lib.php';
 
 auth_check_setup();
 
-// 需要登录
-if (!auth_get_current_user()) {
-    http_response_code(401);
-    exit('Unauthorized');
-}
-
 $url = trim((string)($_GET['url'] ?? ''));
 if ($url === '') {
     http_response_code(400);
@@ -73,7 +67,7 @@ $cache_ttl  = 7 * 86400; // 7天
 if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) {
     $data = file_get_contents($cache_file);
     if ($data && strlen($data) > 0) {
-        header('Content-Type: image/x-icon');
+        header('Content-Type: ' . favicon_content_type($data));
         header('Cache-Control: public, max-age=604800');
         echo $data;
         exit;
@@ -81,7 +75,8 @@ if (file_exists($cache_file) && (time() - filemtime($cache_file)) < $cache_ttl) 
 }
 
 // 抓取远程 Favicon
-$data = favicon_fetch($favicon_url, 3);
+$error = '';
+$data = favicon_fetch($favicon_url, 3, $error);
 
 // 校验返回内容是否为图片（防止缓存 HTML 错误页）
 $valid = favicon_validate_data($data);
@@ -90,10 +85,10 @@ if ($valid) {
     // 保存缓存
     if (!is_dir($cache_dir)) mkdir($cache_dir, 0755, true);
     file_put_contents($cache_file, $data, LOCK_EX);
-    header('Content-Type: image/x-icon');
+    header('Content-Type: ' . favicon_content_type($data));
     header('Cache-Control: public, max-age=604800');
     echo $data;
 } else {
-    // 返回 204 No Content，前端降级显示 Emoji
-    http_response_code(204);
+    // 返回 404，触发前端 img onerror 降级显示 Emoji
+    http_response_code(404);
 }
