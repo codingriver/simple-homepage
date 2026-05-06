@@ -296,6 +296,7 @@ function ddns_normalize_task(array $input, ?array $existing = null): array {
             'pick_strategy' => $pick,
             'max_latency' => max(0, (int)($source['max_latency'] ?? 250)),
             'max_loss_rate' => max(0, (float)($source['max_loss_rate'] ?? 5)),
+            'api_key' => trim((string)($source['api_key'] ?? '')),
             'fallback_type' => in_array((string)($source['fallback_type'] ?? ''), ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'], true)
                 ? (string)$source['fallback_type']
                 : '',
@@ -543,7 +544,12 @@ function ddns_pick_best_candidate(array $rows, array $source): ?array {
 }
 
 function ddns_fetch_cf_api4ce(string $line, array $source): array {
-    $r = ddns_fetch_url('https://api.4ce.cn/api/bestCFIP', [
+    $url = 'https://api.4ce.cn/api/bestCFIP';
+    $apiKey = trim((string)($source['api_key'] ?? ''));
+    if ($apiKey !== '') {
+        $url .= (strpos($url, '?') === false ? '?' : '&') . 'apikey=' . urlencode($apiKey);
+    }
+    $r = ddns_fetch_url($url, [
         'task_id' => (string)($source['__task_log_id'] ?? ''),
         'step' => '4ce 来源请求',
     ]);
@@ -551,7 +557,13 @@ function ddns_fetch_cf_api4ce(string $line, array $source): array {
         return $r;
     }
     $raw = json_decode(trim((string)($r['body'] ?? '')), true);
-    if (!is_array($raw) || empty($raw['success']) || !is_array($raw['data']['v4'] ?? null)) {
+    if (!is_array($raw)) {
+        return ['ok' => false, 'msg' => '4ce 返回格式错误'];
+    }
+    if (empty($raw['success'])) {
+        return ['ok' => false, 'msg' => '4ce：' . ($raw['msg'] ?? '返回格式错误')];
+    }
+    if (!is_array($raw['data']['v4'] ?? null)) {
         return ['ok' => false, 'msg' => '4ce 返回格式错误'];
     }
     $rows = $raw['data']['v4'][$line] ?? [];

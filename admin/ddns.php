@@ -111,6 +111,10 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
               <option value="local_ipv6">本机公网 IPv6</option>
             </select>
           </div>
+          <div class="form-group api4ce-only">
+            <label>4ce API Key</label>
+            <input type="text" id="fm-api-key" placeholder="在 4ce.cn 获取的 API Key">
+          </div>
           <div class="form-group vps789-only line-only">
             <label>线路</label>
             <select id="fm-line"><option value="CT">CT 电信</option><option value="CU">CU 联通</option><option value="CM">CM 移动</option></select>
@@ -270,8 +274,10 @@ function toggleSourceFields() {
   var type = document.getElementById('fm-source-type').value;
   var needsLine = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line'].indexOf(type) !== -1;
   var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'].indexOf(type) !== -1;
+  var needsApiKey = type === 'api4ce_cfip';
   document.querySelectorAll('.vps789-only').forEach(function(el){ el.style.display = needsFilters ? '' : 'none'; });
   document.querySelectorAll('.line-only').forEach(function(el){ el.style.display = needsLine ? '' : 'none'; });
+  document.querySelectorAll('.api4ce-only').forEach(function(el){ el.style.display = needsApiKey ? '' : 'none'; });
   var hint = document.getElementById('fm-source-hint');
   if (hint) hint.textContent = DDNS_SOURCE_HINTS[type] || '未配置来源说明';
   var fallback = document.getElementById('fm-fallback-type');
@@ -294,6 +300,7 @@ function openDdnsModal(id) {
   document.getElementById('fm-pick-strategy').value = task ? ((task.source || {}).pick_strategy || 'best_score') : 'best_score';
   document.getElementById('fm-max-latency').value = task ? ((task.source || {}).max_latency || 250) : 250;
   document.getElementById('fm-max-loss').value = task ? ((task.source || {}).max_loss_rate || 5) : 5;
+  document.getElementById('fm-api-key').value = task ? ((task.source || {}).api_key || '') : '';
   document.getElementById('fm-fallback-type').value = task ? ((task.source || {}).fallback_type || '') : '';
   document.getElementById('fm-domain').value = task ? ((task.target || {}).domain || '') : '';
   document.getElementById('fm-record-type').value = task ? ((task.target || {}).record_type || 'A') : 'A';
@@ -423,6 +430,7 @@ function currentTaskPayload() {
       pick_strategy: document.getElementById('fm-pick-strategy').value,
       max_latency: Number(document.getElementById('fm-max-latency').value || 0),
       max_loss_rate: Number(document.getElementById('fm-max-loss').value || 0),
+      api_key: document.getElementById('fm-api-key').value.trim(),
       fallback_type: document.getElementById('fm-fallback-type').value
     },
     target: {

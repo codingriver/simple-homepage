@@ -51,14 +51,17 @@ test('ddns source toggle updates line fallback and hint visibility correctly', a
 
   await page.locator('#fm-source-type').selectOption('local_ipv4');
   await expect(page.locator('.line-only').first()).toBeHidden();
+  await expect(page.locator('.api4ce-only').first()).toBeHidden();
   await expect(page.locator('#fm-source-hint')).toContainText('公网 IPv4');
 
   await page.locator('#fm-source-type').selectOption('api4ce_cfip');
   await expect(page.locator('.line-only').first()).toBeVisible();
+  await expect(page.locator('.api4ce-only').first()).toBeVisible();
   await expect(page.locator('#fm-source-hint')).toContainText('4ce');
 
   await page.locator('#fm-source-type').selectOption('cf164746_global');
   await expect(page.locator('.line-only').first()).toBeHidden();
+  await expect(page.locator('.api4ce-only').first()).toBeHidden();
   await expect(page.locator('#fm-source-hint')).toContainText('164746');
 
   await page.locator('#fm-source-type').selectOption('uouin_cfip');
