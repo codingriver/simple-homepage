@@ -15,6 +15,7 @@ require_once dirname(__DIR__) . '/shared/cron_lib.php';
 
 $id   = trim((string)($_GET['id']   ?? ''));
 $page = max(1, (int)($_GET['page']  ?? 1));
+$per  = max(10, min(2000, (int)($_GET['limit'] ?? 100)));
 
 if ($id === '') {
     http_response_code(400);
@@ -23,4 +24,4 @@ if ($id === '') {
 }
 
 header('Content-Type: application/json; charset=UTF-8');
-echo json_encode(task_log_page($id, $page), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+echo json_encode(task_log_page($id, $page, $per), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

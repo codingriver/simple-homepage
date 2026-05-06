@@ -1231,14 +1231,20 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 /* ---- 日志弹窗 ---- */
-var logState = { id: '', name: '', page: 1, pages: 1, requestSeq: 0 };
+var logState = { id: '', name: '', page: 1, pages: 1, requestSeq: 0, limit: 100 };
 
 function openLogModal(id, name) {
-  logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0 };
+  logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0, limit: logState.limit || 100 };
   if (logPollTimer) clearInterval(logPollTimer);
 
   var footerHtml = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
     + '<span id="st-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
+    + '<select id="st-log-limit" onchange="logChangeLimit(this.value)" style="width:90px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;">'
+    + '<option value="50">50 行/页</option>'
+    + '<option value="100"' + (logState.limit === 100 ? ' selected' : '') + '>100 行/页</option>'
+    + '<option value="200"' + (logState.limit === 200 ? ' selected' : '') + '>200 行/页</option>'
+    + '<option value="500"' + (logState.limit === 500 ? ' selected' : '') + '>500 行/页</option>'
+    + '</select>'
     + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-prev" onclick="logLoadPage(logState.page-1, false)">◀ 上一页</button>'
     + '<span id="st-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 1 / 1 页</span>'
     + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-next" onclick="logLoadPage(logState.page+1, false)">下一页 ▶</button>'
@@ -1339,6 +1345,15 @@ function clearCurrentLog() {
     }
   });
 }
+function logChangeLimit(limit) {
+  if (!logState.id) return;
+  limit = parseInt(limit, 10) || 100;
+  var oldOffset = (logState.page - 1) * logState.limit;
+  var newPage = Math.floor(oldOffset / limit) + 1;
+  logState.limit = limit;
+  logLoadPage(newPage, false);
+}
+
 function copyTaskWorkdir(path) {
   if (!path) return;
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1361,7 +1376,7 @@ function logLoadPage(p, jumpToLast, options) {
     NavAceEditor.setValue('加载中…');
   }
 
-  var url = 'api/task_log.php?id=' + encodeURIComponent(logState.id) + '&page=' + p;
+  var url = 'api/task_log.php?id=' + encodeURIComponent(logState.id) + '&page=' + p + '&limit=' + (logState.limit || 100);
   var requestSeq = ++logState.requestSeq;
   fetch(url, { credentials: 'same-origin' })
     .then(function(r){ return r.json(); })
@@ -1386,13 +1401,16 @@ function logLoadPage(p, jumpToLast, options) {
       var nextBtn = document.getElementById('st-log-next');
       var lastBtn = document.getElementById('st-log-last-btn');
       var pageInput = document.getElementById('st-log-page-input');
+      var limitSelect = document.getElementById('st-log-limit');
 
-      if (infoEl) infoEl.textContent = '共 ' + d.total + ' 行，每页 100 行';
+      var per = d.per || logState.limit || 100;
+      if (infoEl) infoEl.textContent = '共 ' + d.total + ' 行，每页 ' + per + ' 行';
       if (pageLabelEl) pageLabelEl.textContent = '第 ' + d.page + ' / ' + d.pages + ' 页';
       if (prevBtn) prevBtn.disabled = d.page <= 1;
       if (nextBtn) nextBtn.disabled = d.page >= d.pages;
       if (lastBtn) lastBtn.disabled = d.page >= d.pages;
       if (pageInput) { pageInput.value = d.page; pageInput.max = d.pages; }
+      if (limitSelect) limitSelect.value = per;
 
       if (!d.lines || d.lines.length === 0) {
         if (!options.silent) NavAceEditor.setValue('暂无日志记录');

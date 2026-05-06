@@ -1828,20 +1828,20 @@ function task_toggle_enabled(string $id): bool|null {
  * 读取任务日志文件，返回指定页的100行（page 从1开始），以及总行数
  * @return array{lines:string[],total:int,page:int,pages:int}
  */
-function task_log_page(string $id, int $page = 1): array {
+function task_log_page(string $id, int $page = 1, int $per = 100): array {
     $id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     $file = task_existing_log_file($id);
     if (!file_exists($file)) {
-        return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0];
+        return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0, 'per' => $per];
     }
     $all   = file($file, FILE_IGNORE_NEW_LINES);
     $total = count($all);
-    $per   = 100;
+    $per   = max(10, min(2000, $per));
     $pages = max(1, (int)ceil($total / $per));
     $page  = max(1, min($page, $pages));
     // 顺序输出（旧的在前，新的在后），默认最后一页
     $slice = array_slice($all, ($page - 1) * $per, $per);
-    return ['lines' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages];
+    return ['lines' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per' => $per];
 }
 
 function task_status_snapshot(array $task): array {
