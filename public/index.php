@@ -724,7 +724,7 @@ function showTab(id){
 }
 function restoreTabView(){
   var cur=localStorage.getItem('nav_tab')||'';
-  secs.forEach(function(s){s.classList.toggle('active',!cur||s.id===cur);s.style.display='';});
+  secs.forEach(function(s){if(cur)s.classList.toggle('active',s.id===cur);s.style.display='';});
   secs.forEach(function(s){s.querySelectorAll('.card').forEach(function(c){c.style.display='';});});
   if(searchMeta) searchMeta.textContent='输入关键词，跨分组搜索站点';
   if(searchMetaInline) searchMetaInline.textContent='默认显示当前分组，可按标签、环境、类型、徽标快速过滤';
