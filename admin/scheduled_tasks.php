@@ -137,6 +137,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         @set_time_limit(0);
         $ex = cron_dispatch_task_async($id);
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => $ex['ok'], 'msg' => $ex['msg']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         flash_set($ex['ok'] ? 'success' : 'warn', $ex['msg']);
         header('Location: scheduled_tasks.php'); exit;
     }
@@ -145,6 +150,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'task_stop') {
         $id = trim((string)($_POST['id'] ?? ''));
         $r = task_stop($id);
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => $r['ok'], 'msg' => $r['msg']], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         flash_set($r['ok'] ? 'success' : 'error', $r['msg']);
         header('Location: scheduled_tasks.php'); exit;
     }
@@ -446,21 +456,11 @@ $CSRF = csrf_field();
 
         <!-- 停止 -->
         <?php if (!empty($t['_running'])): ?>
-        <form method="POST" style="display:inline" data-confirm-title="停止任务" data-confirm-message="确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？">
-          <?= csrf_field() ?>
-          <input type="hidden" name="action" value="task_stop">
-          <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn onclick="submitConfirmForm(this)">⏹ 停止</button>
-        </form>
+        <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" onclick="stopTaskAjax(this.dataset.taskId, this)">⏹ 停止</button>
         <?php endif; ?>
 
         <!-- 立即执行 -->
-        <form method="POST" style="display:inline">
-          <?= csrf_field() ?>
-          <input type="hidden" name="action" value="task_run">
-          <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-          <button type="submit" class="btn btn-sm btn-secondary" data-task-run-btn <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
-        </form>
+        <button type="button" class="btn btn-sm btn-secondary" data-task-run-btn data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : 'onclick="runTaskAjax(this.dataset.taskId, this)"' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
 
         <!-- 查看日志 -->
         <button type="button" class="btn btn-sm btn-secondary"
@@ -558,19 +558,9 @@ $CSRF = csrf_field();
             <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
           <?php endif; ?>
           <?php if (!empty($t['_running'])): ?>
-          <form method="POST" style="display:inline" data-confirm-title="停止任务" data-confirm-message="确定停止任务「<?= htmlspecialchars($t['name'] ?? '', ENT_QUOTES) ?>」？">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="task_stop">
-            <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-            <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn onclick="submitConfirmForm(this)">⏹ 停止</button>
-          </form>
+          <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" onclick="stopTaskAjax(this.dataset.taskId, this)">⏹ 停止</button>
           <?php endif; ?>
-          <form method="POST" style="display:inline">
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="task_run">
-            <input type="hidden" name="id" value="<?= htmlspecialchars($t['id'] ?? '') ?>">
-            <button type="submit" class="btn btn-sm btn-secondary" data-task-run-btn <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : '' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
-          </form>
+          <button type="button" class="btn btn-sm btn-secondary" data-task-run-btn data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" <?= !empty($t['_running']) ? 'disabled style="opacity:.55;cursor:not-allowed"' : 'onclick="runTaskAjax(this.dataset.taskId, this)"' ?>><?= !empty($t['_running']) ? '运行中' : '▶▶ 立即执行' ?></button>
           <button type="button" class="btn btn-sm btn-secondary"
             onclick="openLogModal(<?= htmlspecialchars(json_encode($t['id'] ?? ''), ENT_QUOTES) ?>,
                                    <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>,
@@ -877,6 +867,87 @@ function switchScheduledTab(tab) {
       panel.hidden = !active;
     }
   });
+  if (history.replaceState) {
+    history.replaceState(null, null, '#' + scheduledTabState.active);
+  }
+}
+
+function runTaskAjax(id, btn) {
+  if (!id || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '启动中...';
+  fetch('scheduled_tasks.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: new URLSearchParams({ action: 'task_run', id: id, _csrf: window._csrf || CSRF_TOKEN })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      showToast(data.msg || (data.ok ? '任务已启动' : '启动失败'), data.ok ? 'success' : 'warn');
+      if (data.ok) {
+        // 成功后立即将按钮设为运行中，避免轮询间隔导致状态闪烁
+        btn.textContent = '运行中';
+        btn.style.opacity = '.55';
+        btn.style.cursor = 'not-allowed';
+        btn.onclick = null;
+        var row = btn.closest('[data-task-row]');
+        if (row) {
+          var runBtn = row.querySelector('[data-task-run-btn]');
+          var stopBtn = row.querySelector('[data-task-stop-btn]');
+          if (runBtn && !stopBtn) {
+            var stopBtnEl = document.createElement('button');
+            stopBtnEl.type = 'button';
+            stopBtnEl.className = 'btn btn-sm btn-danger';
+            stopBtnEl.setAttribute('data-task-stop-btn', '');
+            stopBtnEl.setAttribute('data-task-id', id);
+            stopBtnEl.textContent = '⏹ 停止';
+            stopBtnEl.onclick = function() { stopTaskAjax(id, stopBtnEl); };
+            runBtn.parentNode.insertBefore(stopBtnEl, runBtn);
+          }
+        }
+        pollTaskStatuses();
+      } else {
+        btn.disabled = false;
+        btn.textContent = '▶▶ 立即执行';
+      }
+    })
+    .catch(function() {
+      showToast('网络错误，请重试', 'error');
+      btn.disabled = false;
+      btn.textContent = '▶▶ 立即执行';
+    });
+}
+
+function stopTaskAjax(id, btn) {
+  if (!id) return;
+  NavConfirm.open({
+    title: '停止任务',
+    message: '确定停止任务？',
+    confirmText: '确认',
+    cancelText: '取消',
+    danger: true,
+    onConfirm: function() {
+      fetch('scheduled_tasks.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: new URLSearchParams({ action: 'task_stop', id: id, _csrf: window._csrf || CSRF_TOKEN })
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          showToast(data.msg || (data.ok ? '已停止' : '停止失败'), data.ok ? 'success' : 'error');
+          pollTaskStatuses();
+        })
+        .catch(function() {
+          showToast('网络错误，请重试', 'error');
+        });
+    }
+  });
 }
 
 /* ---- 任务弹窗 ---- */
@@ -1115,39 +1186,28 @@ function updateTaskRowStatus(task) {
     if (task.running) {
       runBtn.style.opacity = '.55';
       runBtn.style.cursor = 'not-allowed';
+      runBtn.onclick = null;
     } else {
       runBtn.style.opacity = '';
       runBtn.style.cursor = '';
+      runBtn.onclick = function() { runTaskAjax(task.id, runBtn); };
     }
   }
   // 停止按钮：运行中显示，不在运行中移除
   if (task.running) {
     if (!stopBtn && runBtn) {
-      var stopForm = document.createElement('form');
-      stopForm.method = 'POST';
-      stopForm.style.display = 'inline';
-      stopForm.innerHTML =
-        '<input type="hidden" name="_csrf" value="' + String(CSRF_TOKEN).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">' +
-        '<input type="hidden" name="action" value="task_stop">' +
-        '<input type="hidden" name="id" value="' + String(task.id).replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">' +
-        '<button type="button" class="btn btn-sm btn-danger" data-task-stop-btn>⏹ 停止</button>';
-      stopForm.querySelector('button').addEventListener('click', function() {
-        NavConfirm.open({
-          title: '停止任务',
-          message: '确定停止任务？',
-          confirmText: '确认',
-          cancelText: '取消',
-          danger: true,
-          onConfirm: function() { stopForm.submit(); }
-        });
-      });
-      runBtn.parentNode.insertBefore(stopForm, runBtn);
+      var stopBtnEl = document.createElement('button');
+      stopBtnEl.type = 'button';
+      stopBtnEl.className = 'btn btn-sm btn-danger';
+      stopBtnEl.setAttribute('data-task-stop-btn', '');
+      stopBtnEl.setAttribute('data-task-id', task.id);
+      stopBtnEl.textContent = '⏹ 停止';
+      stopBtnEl.onclick = function() { stopTaskAjax(task.id, stopBtnEl); };
+      runBtn.parentNode.insertBefore(stopBtnEl, runBtn);
     }
   } else {
     if (stopBtn) {
-      var form = stopBtn.closest('form');
-      if (form) form.remove();
-      else stopBtn.remove();
+      stopBtn.remove();
     }
   }
   if (toggleBtn) {
@@ -1219,12 +1279,20 @@ document.addEventListener('DOMContentLoaded', function(){
       }
     });
   }
-  switchScheduledTab('tasks');
+  var hashTab = (location.hash || '').replace('#', '');
+  switchScheduledTab(hashTab === 'ddns' ? 'ddns' : 'tasks');
   taskStatusPollingStopped = false;
   pollTaskStatuses();
   document.addEventListener('submit', stopTaskStatusPolling, true);
   window.addEventListener('beforeunload', stopTaskStatusPolling);
   window.addEventListener('pagehide', stopTaskStatusPolling);
+  // 页面可见性变化时恢复轮询，确保切回页面后状态立即更新
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && !taskStatusPollingStopped) {
+      taskStatusPollTimer = 0;
+      pollTaskStatuses();
+    }
+  });
   // 按 ESC 关闭弹窗
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape') { closeTaskModal(); closeLogModal(); }

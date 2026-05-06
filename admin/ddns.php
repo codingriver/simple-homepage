@@ -260,7 +260,7 @@ function renderRows() {
       + '<td>' + (row.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge badge-gray">禁用</span>') + '</td>'
       + '<td>' + statusBadge(row.last_status, (row.last_status === 'running' ? row.started_at : row.last_run_at) || '') + '</td>'
       + '<td style="white-space:nowrap">'
-      + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="toggleTask(' + jsonId + ')">' + (row.enabled ? '禁用' : '启用') + '</button> '
+      + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center;' + (row.enabled ? 'color:var(--yellow);border-color:rgba(255,204,68,.35)' : 'color:var(--green);border-color:rgba(61,255,160,.35)') + '" onclick="toggleTask(' + jsonId + ')">' + (row.enabled ? '禁用' : '启用') + '</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center;' + (row.last_status === 'running' ? 'opacity:.55;cursor:not-allowed' : '') + '" onclick="' + (row.last_status === 'running' ? 'return false' : 'runTask(' + jsonId + ')') + '">' + (row.last_status === 'running' ? '运行中' : '执行') + '</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="openDdnsLogModal(' + jsonId + ', ' + jsonName + ')">日志</button> '
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="openDdnsModal(' + jsonId + ')">编辑</button> '

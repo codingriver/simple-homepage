@@ -731,6 +731,14 @@ function cron_reconcile_running_state(string $id): bool {
         if (cron_task_has_active_lock($id)) {
             return true;
         }
+        // 若 started_at 在 5 秒内，认为后台进程还在启动中，避免竞态条件导致状态被提前重置
+        $startedAt = $runtime['started_at'] ?? '';
+        if ($startedAt !== '') {
+            $ts = strtotime($startedAt);
+            if ($ts !== false && (time() - $ts) < 5) {
+                return true;
+            }
+        }
         task_try_cleanup_stale_lock($id);
         if (!isset($data['tasks'][$idx]['runtime']) || !is_array($data['tasks'][$idx]['runtime'])) {
             $data['tasks'][$idx]['runtime'] = [];
