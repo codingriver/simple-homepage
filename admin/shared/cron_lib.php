@@ -1825,23 +1825,75 @@ function task_toggle_enabled(string $id): bool|null {
 }
 
 /**
- * 读取任务日志文件，返回指定页的100行（page 从1开始），以及总行数
- * @return array{lines:string[],total:int,page:int,pages:int}
+ * 流式统计文件行数（8KB 块读取，避免大文件内存溢出）
+ */
+function task_log_count_lines(string $path): int {
+    if (!file_exists($path) || !is_readable($path)) {
+        return 0;
+    }
+    $fp = fopen($path, 'rb');
+    if (!$fp) {
+        return 0;
+    }
+    $count = 0;
+    while (!feof($fp)) {
+        $chunk = fread($fp, 8192);
+        if ($chunk === false) {
+            break;
+        }
+        $count += substr_count($chunk, "\n");
+    }
+    fclose($fp);
+    return $count;
+}
+
+/**
+ * 流式读取文件指定范围的行（从 offset 开始，最多 limit 行）
+ */
+function task_log_read_range(string $path, int $offset, int $limit): array {
+    $fp = fopen($path, 'rb');
+    if (!$fp) {
+        return [];
+    }
+    $skipped = 0;
+    while ($skipped < $offset && !feof($fp)) {
+        if (fgets($fp) === false) {
+            break;
+        }
+        $skipped++;
+    }
+    $lines = [];
+    $read = 0;
+    while ($read < $limit && !feof($fp)) {
+        $line = fgets($fp);
+        if ($line === false) {
+            break;
+        }
+        $lines[] = rtrim($line, "\r\n");
+        $read++;
+    }
+    fclose($fp);
+    return $lines;
+}
+
+/**
+ * 读取任务日志文件，返回指定页的内容（page 从1开始）
+ * 统一返回字段名，与 logs_api.php 保持一致
+ * @return array{lines:string[],total_lines:int,page:int,total_pages:int,limit:int}
  */
 function task_log_page(string $id, int $page = 1, int $per = 100): array {
     $id   = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     $file = task_existing_log_file($id);
     if (!file_exists($file)) {
-        return ['lines' => [], 'total' => 0, 'page' => 1, 'pages' => 0, 'per' => $per];
+        return ['lines' => [], 'total_lines' => 0, 'page' => 1, 'total_pages' => 0, 'limit' => $per];
     }
-    $all   = file($file, FILE_IGNORE_NEW_LINES);
-    $total = count($all);
     $per   = max(10, min(2000, $per));
+    $total = task_log_count_lines($file);
     $pages = max(1, (int)ceil($total / $per));
     $page  = max(1, min($page, $pages));
-    // 顺序输出（旧的在前，新的在后），默认最后一页
-    $slice = array_slice($all, ($page - 1) * $per, $per);
-    return ['lines' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per' => $per];
+    $offset = ($page - 1) * $per;
+    $lines = task_log_read_range($file, $offset, $per);
+    return ['lines' => $lines, 'total_lines' => $total, 'page' => $page, 'total_pages' => $pages, 'limit' => $per];
 }
 
 function task_status_snapshot(array $task): array {

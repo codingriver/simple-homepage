@@ -128,23 +128,25 @@ Authorization: Bearer np_a1b2c3d4e5f6...
 
 | 认证方式 | 用途 | 存储位置 | 说明 |
 |----------|------|----------|------|
-| API Token | 程序化 API 访问 | `data/api_tokens.json` | 本文档所述 |
-| Session JWT | Web 登录会话 | Cookie (`_nav_token`) | `shared/auth.php` 管理，用于前后台页面 |
+| API Token | 程序化 API 访问 | `data/api_tokens.json` | 本文档所述；`sites.php` 和 `dns.php` 均支持 |
+| Session JWT | Web 登录会话 | Cookie (`nav_session`) | `shared/auth.php` 管理，用于前后台页面 |
 | Nginx auth_request | 反向代理子站鉴权 | Cookie | `public/auth/verify.php` 验证 Session JWT |
 
-三者完全独立，API Token 不关联任何用户，Session JWT 不适用于 API 端点。
+API Token 与 Session JWT 完全独立，API Token 不关联任何用户。DNS API 外网访问时仅认 API Token，不认 Session Cookie。
 
 ---
 
 ## 第二章 DNS 解析 API 接口说明
 
-> **重要**：DNS API **仅限本机内部访问**，不对外暴露。部署时需确保 Nginx 或前置网关不将 `/api/dns.php` 转发到公网。
+> **重要**：DNS API **默认仅限本机内部访问**，同时也支持通过 API Token 进行外网访问。部署时若需开放公网，请确保仅通过 HTTPS 暴露，并妥善保管 API Token。
 
 ### 2.1 访问控制
 
 入口文件：`public/api/dns.php`
 
-IP 白名单由 `dns_api_is_localhost()` 判定（位于 `admin/shared/dns_api_lib.php`），允许的源地址：
+#### 方式一：本机免 Token 访问（向后兼容）
+
+来自本机的请求无需 Token，直接放行。IP 白名单由 `dns_api_is_localhost()` 判定（位于 `admin/shared/dns_api_lib.php`），允许的源地址：
 
 - `127.0.0.1`
 - `::1`
@@ -152,12 +154,31 @@ IP 白名单由 `dns_api_is_localhost()` 判定（位于 `admin/shared/dns_api_l
 
 检查维度包括：`REMOTE_ADDR`、`SERVER_ADDR`、`HTTP_X_FORWARDED_FOR`。
 
-非白名单 IP 返回 HTTP 403：
+#### 方式二：外网 Token 认证
+
+非本机访问需提供有效的 API Token，认证方式与 `sites.php` 完全一致：
+
+**HTTP Authorization Header（推荐）**
+
+```http
+GET /api/dns.php?action=query&domain=www.example.com&type=A HTTP/1.1
+Authorization: Bearer np_xxxxxxxx...
+```
+
+**URL Query Parameter**
+
+```http
+GET /api/dns.php?action=query&domain=www.example.com&type=A&token=np_xxxxxxxx... HTTP/1.1
+```
+
+> Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。
+
+Token 验证失败返回 HTTP 401：
 
 ```json
 {
   "code": -1,
-  "msg": "仅允许本机 127.0.0.1 / ::1 访问"
+  "msg": "无效的 API Token"
 }
 ```
 

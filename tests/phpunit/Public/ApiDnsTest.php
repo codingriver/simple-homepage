@@ -10,6 +10,13 @@ final class ApiDnsTest extends TestCase
     {
         parent::setUp();
         $this->apiFile = realpath(__DIR__ . '/../../../public/api/dns.php');
+        @unlink(API_TOKENS_FILE);
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink(API_TOKENS_FILE);
+        parent::tearDown();
     }
 
     private function runApiDns(array $server = [], array $get = [], array $post = [], string $method = 'GET'): string
@@ -37,13 +44,71 @@ CODE;
         return (string) $output;
     }
 
-    public function testNonLocalhostIpReturns403(): void
+    public function testNonLocalhostWithoutTokenReturns401(): void
     {
         $output = $this->runApiDns(['REMOTE_ADDR' => '192.168.1.1']);
         $data = json_decode($output, true);
         $this->assertIsArray($data);
         $this->assertSame(-1, $data['code'] ?? null);
-        $this->assertStringContainsString('仅允许本机', $data['msg'] ?? '');
+        $this->assertStringContainsString('无效的 API Token', $data['msg'] ?? '');
+    }
+
+    public function testNonLocalhostWithInvalidTokenReturns401(): void
+    {
+        $output = $this->runApiDns(
+            ['REMOTE_ADDR' => '192.168.1.1', 'HTTP_AUTHORIZATION' => 'Bearer invalid-token'],
+            ['action' => 'query', 'domain' => 'example.com']
+        );
+        $data = json_decode($output, true);
+        $this->assertIsArray($data);
+        $this->assertSame(-1, $data['code'] ?? null);
+        $this->assertStringContainsString('无效的 API Token', $data['msg'] ?? '');
+    }
+
+    public function testNonLocalhostWithValidTokenProceeds(): void
+    {
+        api_token_generate('test-dns');
+        $tokens = api_tokens_load();
+        $token = array_key_first($tokens);
+
+        $output = $this->runApiDns(
+            ['REMOTE_ADDR' => '192.168.1.1', 'HTTP_AUTHORIZATION' => 'Bearer ' . $token],
+            ['action' => 'query', 'domain' => 'example.com']
+        );
+        $data = json_decode($output, true);
+        $this->assertIsArray($data);
+        // 有 token 后不再被 401 拦截，而是进入业务逻辑（域名未匹配 Zone）
+        $this->assertSame(-1, $data['code'] ?? null);
+        $this->assertStringContainsString('Zone', $data['msg'] ?? '');
+    }
+
+    public function testNonLocalhostWithValidUrlTokenProceeds(): void
+    {
+        api_token_generate('test-dns-url');
+        $tokens = api_tokens_load();
+        $token = array_key_first($tokens);
+
+        $output = $this->runApiDns(
+            ['REMOTE_ADDR' => '192.168.1.1'],
+            ['action' => 'query', 'domain' => 'example.com', 'token' => $token]
+        );
+        $data = json_decode($output, true);
+        $this->assertIsArray($data);
+        $this->assertSame(-1, $data['code'] ?? null);
+        $this->assertStringContainsString('Zone', $data['msg'] ?? '');
+    }
+
+    public function testLocalhostStillWorksWithoutToken(): void
+    {
+        $output = $this->runApiDns(
+            ['REMOTE_ADDR' => '127.0.0.1'],
+            ['action' => 'query', 'domain' => 'example.com']
+        );
+        $data = json_decode($output, true);
+        $this->assertIsArray($data);
+        // 本机免 token，直接进入业务逻辑
+        $this->assertSame(-1, $data['code'] ?? null);
+        $this->assertStringContainsString('Zone', $data['msg'] ?? '');
     }
 
     public function testUnknownActionReturns400(): void

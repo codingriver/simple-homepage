@@ -360,9 +360,16 @@
   // ── 脏标记 ──
   function updateDirty() {
     if (!editor) return;
-    dirty = editor.getValue() !== initialValue;
     var status = document.getElementById('nav-ace-dirty-status');
+    // 只读模式不显示脏标记
+    if (config.readOnly) {
+      if (status) status.style.display = 'none';
+      dirty = false;
+      return;
+    }
+    dirty = editor.getValue() !== initialValue;
     if (status) {
+      status.style.display = '';
       status.textContent = dirty ? '· 有未保存修改' : '· 未修改';
       status.classList.toggle('dirty', dirty);
     }
@@ -378,6 +385,178 @@
     setTimeout(function() { if (editor) editor.resize(); }, 20);
   }
 
+  // ── 分页栏 ──
+  var pagEls = {};
+  function renderPagination(pag) {
+    if (!els.footer) return;
+    // 首次创建 DOM 结构
+    if (!document.getElementById('nav-ace-pag-info')) {
+      els.footer.innerHTML = '<div id="nav-ace-pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;flex-wrap:wrap">'
+        + '<span id="nav-ace-pag-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)"></span>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-refresh" title="刷新当前页">🔄</button>'
+        + '<select id="nav-ace-pag-limit" style="width:90px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;"></select>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-first" title="第一页">⏮</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-prev">◀ 上一页</button>'
+        + '<span id="nav-ace-pag-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)"></span>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-next">下一页 ▶</button>'
+        + '<input type="number" id="nav-ace-pag-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;">'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-goto">跳转</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-last" title="最后一页">⏭</button>'
+        + '</div>';
+      pagEls.info  = document.getElementById('nav-ace-pag-info');
+      pagEls.refresh = document.getElementById('nav-ace-pag-refresh');
+      pagEls.limit = document.getElementById('nav-ace-pag-limit');
+      pagEls.first = document.getElementById('nav-ace-pag-first');
+      pagEls.prev  = document.getElementById('nav-ace-pag-prev');
+      pagEls.label = document.getElementById('nav-ace-pag-label');
+      pagEls.next  = document.getElementById('nav-ace-pag-next');
+      pagEls.input = document.getElementById('nav-ace-pag-input');
+      pagEls.goto  = document.getElementById('nav-ace-pag-goto');
+      pagEls.last  = document.getElementById('nav-ace-pag-last');
+      bindPaginationEvents();
+    }
+    // 渲染 limit 选项
+    var limitOpts = pag.limitOptions || [100];
+    var currentLimit = pag.limit || 100;
+    var optsHtml = '';
+    limitOpts.forEach(function(opt) {
+      optsHtml += '<option value="' + opt + '"' + (opt === currentLimit ? ' selected' : '') + '>' + opt + ' 行/页</option>';
+    });
+    if (pagEls.limit) pagEls.limit.innerHTML = optsHtml;
+    // 初始状态
+    updatePaginationState(pag.page || 1, pag.pages || 1, currentLimit, pag.totalLines || 0);
+  }
+
+  function bindPaginationEvents() {
+    if (pagEls.first) {
+      pagEls.first.addEventListener('click', function() {
+        doPaginationNavigate(1);
+      });
+    }
+    if (pagEls.prev) {
+      pagEls.prev.addEventListener('click', function() {
+        var pag = config.pagination;
+        var p = (pag.page || 1) - 1;
+        if (p >= 1) doPaginationNavigate(p);
+      });
+    }
+    if (pagEls.next) {
+      pagEls.next.addEventListener('click', function() {
+        var pag = config.pagination;
+        var p = (pag.page || 1) + 1;
+        if (p <= (pag.pages || 1)) doPaginationNavigate(p);
+      });
+    }
+    if (pagEls.last) {
+      pagEls.last.addEventListener('click', function() {
+        var pag = config.pagination;
+        doPaginationNavigate(pag.pages || 1);
+      });
+    }
+    if (pagEls.refresh) {
+      pagEls.refresh.addEventListener('click', function() {
+        NavAceEditor.refreshPagination();
+      });
+    }
+    if (pagEls.limit) {
+      pagEls.limit.addEventListener('change', function() {
+        var pag = config.pagination;
+        var newLimit = parseInt(this.value, 10) || 100;
+        // 如果提供了 fetch，内置切换 limit 逻辑（尽量保持浏览位置）
+        if (pag && typeof pag.fetch === 'function') {
+          var oldOffset = ((pag.page || 1) - 1) * (pag.limit || 100);
+          var newPage = Math.floor(oldOffset / newLimit) + 1;
+          doPaginationLoad(newPage, newLimit);
+        } else if (pag && typeof pag.onLimitChange === 'function') {
+          pag.onLimitChange(newLimit);
+        }
+      });
+    }
+    if (pagEls.input) {
+      pagEls.input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') doPaginationGoto();
+      });
+    }
+    if (pagEls.goto) {
+      pagEls.goto.addEventListener('click', function() {
+        doPaginationGoto();
+      });
+    }
+  }
+
+  function doPaginationNavigate(page) {
+    var pag = config.pagination;
+    if (!pag) return;
+    if (typeof pag.fetch === 'function') {
+      doPaginationLoad(page, pag.limit || 100);
+    } else if (typeof pag.onPageChange === 'function') {
+      pag.onPageChange(page);
+    }
+  }
+
+  function doPaginationGoto() {
+    if (!pagEls.input || !config.pagination) return;
+    var v = parseInt(pagEls.input.value, 10);
+    var pag = config.pagination;
+    if (!isNaN(v) && v >= 1 && v <= (pag.pages || 1)) {
+      doPaginationNavigate(v);
+    } else {
+      pagEls.input.value = pag.page || 1;
+    }
+  }
+
+  function doPaginationLoad(page, limit) {
+    var pag = config.pagination;
+    if (!pag || typeof pag.fetch !== 'function') return;
+    // 保存当前光标位置和滚动位置
+    var savedRow = 0;
+    var savedScrollTop = 0;
+    if (editor) {
+      savedRow = editor.getCursorPosition().row;
+      savedScrollTop = editor.renderer.getScrollTop();
+    }
+    if (editor) editor.setValue('加载中…', -1);
+    pag.fetch(page, limit)
+      .then(function(result) {
+        var lines = result.lines || [];
+        var text = typeof lines === 'string' ? lines : lines.join('\n');
+        if (editor) {
+          editor.setValue(text || '（空）', -1);
+          // 恢复光标位置（不超过新内容行数）
+          var maxRow = editor.session.getLength() - 1;
+          var targetRow = Math.min(savedRow, maxRow);
+          editor.gotoLine(targetRow + 1, 0, false);
+          // 恢复滚动位置（Ace 自动处理越界）
+          editor.renderer.scrollToY(savedScrollTop);
+        }
+        updatePaginationState(
+          result.page || page,
+          result.pages || 1,
+          result.limit || limit,
+          result.totalLines || 0
+        );
+      })
+      .catch(function(err) {
+        if (editor) editor.setValue('加载失败：' + (err && err.message ? err.message : String(err)), -1);
+      });
+  }
+
+  function updatePaginationState(page, pages, limit, totalLines) {
+    if (!config.pagination) return;
+    config.pagination.page = page;
+    config.pagination.pages = pages;
+    config.pagination.limit = limit;
+    config.pagination.totalLines = totalLines;
+    if (pagEls.info) pagEls.info.textContent = '共 ' + totalLines + ' 行，每页 ' + limit + ' 行';
+    if (pagEls.label) pagEls.label.textContent = '第 ' + page + ' / ' + pages + ' 页';
+    if (pagEls.prev) pagEls.prev.disabled = page <= 1;
+    if (pagEls.next) pagEls.next.disabled = page >= pages;
+    if (pagEls.first) pagEls.first.disabled = page <= 1;
+    if (pagEls.last) pagEls.last.disabled = page >= pages;
+    if (pagEls.input) { pagEls.input.value = page; pagEls.input.max = pages; }
+    if (pagEls.limit) pagEls.limit.value = limit;
+  }
+
   // ── 关闭编辑器内部逻辑 ──
   function doCloseEditor() {
     closeGotoBar();
@@ -386,6 +565,7 @@
       els.footer.innerHTML = '';
       els.footer.style.display = 'none';
     }
+    pagEls = {};
     dirty = false;
     initialValue = '';
 
@@ -589,10 +769,10 @@
       // 渲染按钮
       renderButtons();
 
-      // 底部栏
+      // 底部栏：分页模式或隐藏
       if (els.footer) {
-        if (options.footerHtml) {
-          els.footer.innerHTML = options.footerHtml;
+        if (options.pagination) {
+          renderPagination(options.pagination);
           els.footer.style.display = '';
         } else {
           els.footer.innerHTML = '';
@@ -614,8 +794,8 @@
     close: function() {
       if (!els.modal || !els.modal.classList.contains('open')) return;
 
-      // 未保存确认
-      if (config.confirmOnClose !== false && dirty) {
+      // 未保存确认（只读模式跳过）
+      if (!config.readOnly && config.confirmOnClose !== false && dirty) {
         NavConfirm.open({
           title: '关闭编辑器',
           message: '编辑器中有未保存的修改，确认关闭？',
@@ -708,6 +888,22 @@
     setButtonVisible: function(action, visible) {
       var btn = findButtonByAction(action);
       if (btn) btn.style.display = visible ? '' : 'none';
+    },
+
+    setPagination: function(page, pages, limit, totalLines) {
+      updatePaginationState(page, pages, limit, totalLines);
+    },
+
+    refreshPagination: function() {
+      var pag = config.pagination;
+      if (!pag) return;
+      if (typeof pag.fetch === 'function') {
+        doPaginationLoad(pag.page || 1, pag.limit || 100);
+      }
+    },
+
+    _getPagination: function() {
+      return config.pagination || null;
     }
   };
 })();

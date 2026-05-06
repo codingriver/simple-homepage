@@ -1,8 +1,8 @@
 <?php
 /**
  * AJAX：获取任务日志分页
- * GET ?id=<task_id>&page=<n>
- * 返回 JSON {lines:[...], total:N, page:N, pages:N}
+ * GET ?id=<task_id>&page=<n>&limit=<n>
+ * 返回 JSON {lines:[...], total_lines:N, page:N, total_pages:N, limit:N}
  */
 require_once dirname(__DIR__) . '/shared/functions.php';
 $user = auth_get_current_user();

@@ -562,18 +562,7 @@ require_once __DIR__ . '/shared/header.php';
         var lines = d.lines || [];
         var text = lines.join('\n');
         NavAceEditor.setValue(text);
-
-        var infoEl = document.getElementById('ace-log-info');
-        var pageLabelEl = document.getElementById('ace-log-page-label');
-        var prevBtn = document.getElementById('ace-log-prev');
-        var nextBtn = document.getElementById('ace-log-next');
-        var lastBtn = document.getElementById('ace-log-last-btn');
-
-        if (infoEl) infoEl.textContent = '共 ' + d.total_lines + ' 行，每页 ' + aceLogState.limit + ' 行';
-        if (pageLabelEl) pageLabelEl.textContent = '第 ' + aceLogState.page + ' / ' + aceLogState.pages + ' 页';
-        if (prevBtn) prevBtn.disabled = aceLogState.page <= 1;
-        if (nextBtn) nextBtn.disabled = aceLogState.page >= aceLogState.pages;
-        if (lastBtn) lastBtn.disabled = aceLogState.page >= aceLogState.pages;
+        NavAceEditor.setPagination(aceLogState.page, aceLogState.pages, aceLogState.limit, d.total_lines || 0);
       })
       .catch(function(){
         NavAceEditor.setValue('请求异常');
@@ -591,27 +580,46 @@ require_once __DIR__ . '/shared/header.php';
     aceLogState.pages = logState.totalPages;
     aceLogState.limit = logState.limit;
 
-    var footerHtml = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
-      + '<span id="ace-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
-      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-prev" onclick="aceLogGoPage(aceLogState.page - 1)">◀ 上一页</button>'
-      + '<span id="ace-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 ' + aceLogState.page + ' / ' + aceLogState.pages + ' 页</span>'
-      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-next" onclick="aceLogGoPage(aceLogState.page + 1)">下一页 ▶</button>'
-      + '<button type="button" class="btn btn-sm btn-secondary" onclick="aceLogGoPage(1)" title="第一页">⏮</button>'
-      + '<button type="button" class="btn btn-sm btn-secondary" id="ace-log-last-btn" onclick="aceLogGoPage(aceLogState.pages)" title="最后一页">⏭</button>'
-      + '</div>';
-
     NavAceEditor.open({
       title: logTitle,
       mode: 'text',
       value: '加载中…',
       readOnly: true,
       wrapMode: true,
-      footerHtml: footerHtml,
+      pagination: {
+        page: aceLogState.page,
+        pages: aceLogState.pages,
+        limit: aceLogState.limit,
+        limitOptions: [100, 500, 1000, 5000],
+        totalLines: logState.totalLines,
+        fetch: function(page, limit) {
+          return fetch('logs_api.php?action=read&type=' + encodeURIComponent(aceLogState.key)
+            + '&page=' + encodeURIComponent(page)
+            + '&limit=' + encodeURIComponent(limit),
+            { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            aceLogState.pages = d.total_pages || 1;
+            aceLogState.page = d.page || 1;
+            aceLogState.limit = d.limit || limit;
+            return {
+              lines: d.lines || [],
+              page: d.page || 1,
+              pages: d.total_pages || 1,
+              limit: d.limit || limit,
+              totalLines: d.total_lines || 0
+            };
+          });
+        }
+      },
       buttons: { left: [], right: [] },
       onAction: function(action) {}
     });
 
-    aceLogLoadPage(aceLogState.page);
+    // 首次加载当前页数据
+    setTimeout(function() {
+      NavAceEditor.refreshPagination();
+    }, 50);
   };
 
   window.clearCurrentLog = function() {

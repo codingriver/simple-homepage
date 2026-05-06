@@ -597,16 +597,12 @@ function restoreDataConfig() {
     if (!item || !item.ok) return;
     var title = item.label + ' · ' + item.path;
     var isReadonly = !!item.readonly;
-    var footerHtml = isReadonly
-      ? '<div style="display:flex;align-items:center;justify-content:flex-start;gap:6px;width:100%;font-size:12px;color:var(--tm);"><span>⚠️ 此文件由后台自动管理，修改站点后会自动重新生成</span></div>'
-      : '';
     NavAceEditor.open({
       title: title,
       mode: 'nginx',
       value: item.content || '',
       readOnly: isReadonly,
       wrapMode: true,
-      footerHtml: footerHtml || undefined,
       buttons: isReadonly ? {
         left: [],
         right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]

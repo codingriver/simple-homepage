@@ -2,13 +2,27 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../admin/shared/dns_api_lib.php';
+require_once __DIR__ . '/../../admin/shared/functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-if (!dns_api_is_localhost()) {
-    http_response_code(403);
-    echo json_encode(['code' => -1, 'msg' => '仅允许本机 127.0.0.1 / ::1 访问'], JSON_UNESCAPED_UNICODE);
-    exit;
+$isLocalhost = dns_api_is_localhost();
+
+if (!$isLocalhost) {
+    // 非本机访问需校验 API Token（与 sites.php 保持一致）
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $token = '';
+    if (str_starts_with($authHeader, 'Bearer ')) {
+        $token = substr($authHeader, 7);
+    } elseif (!empty($_GET['token'])) {
+        $token = $_GET['token'];
+    }
+
+    if (!api_token_verify($token)) {
+        http_response_code(401);
+        echo json_encode(['code' => -1, 'msg' => '无效的 API Token'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 }
 
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));

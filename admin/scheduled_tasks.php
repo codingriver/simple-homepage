@@ -774,7 +774,6 @@ var TASK_ROWS = <?= json_encode($tasks, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON
 var CSRF_TOKEN = <?= json_encode($GLOBALS['_nav_csrf_token'] ?? '') ?>;
 var DEFAULT_TASK_COMMAND = <?= json_encode($default_task_command, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var TASKS_ROOT = '/var/www/nav/data/tasks';
-var logPollTimer = 0;
 var taskStatusPollTimer = 0;
 var taskStatusPollInFlight = false;
 var taskStatusPollingStopped = false;
@@ -1235,32 +1234,37 @@ var logState = { id: '', name: '', page: 1, pages: 1, requestSeq: 0, limit: 100 
 
 function openLogModal(id, name) {
   logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0, limit: logState.limit || 100 };
-  if (logPollTimer) clearInterval(logPollTimer);
-
-  var footerHtml = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
-    + '<span id="st-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
-    + '<select id="st-log-limit" onchange="logChangeLimit(this.value)" style="width:90px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;">'
-    + '<option value="50">50 行/页</option>'
-    + '<option value="100"' + (logState.limit === 100 ? ' selected' : '') + '>100 行/页</option>'
-    + '<option value="200"' + (logState.limit === 200 ? ' selected' : '') + '>200 行/页</option>'
-    + '<option value="500"' + (logState.limit === 500 ? ' selected' : '') + '>500 行/页</option>'
-    + '</select>'
-    + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-prev" onclick="logLoadPage(logState.page-1, false)">◀ 上一页</button>'
-    + '<span id="st-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 1 / 1 页</span>'
-    + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-next" onclick="logLoadPage(logState.page+1, false)">下一页 ▶</button>'
-    + '<button type="button" class="btn btn-sm btn-secondary" onclick="logLoadPage(1, false)" title="第一页">⏮</button>'
-    + '<input type="number" id="st-log-page-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;" onkeydown="if(event.key===\'Enter\'){var v=parseInt(this.value,10);if(!isNaN(v)&&v>=1&&v<=logState.pages){logLoadPage(v,false);}else{this.value=logState.page;}}">'
-    + '<button type="button" class="btn btn-sm btn-secondary" onclick="var el=document.getElementById(\'st-log-page-input\');var v=parseInt(el.value,10);if(!isNaN(v)&&v>=1&&v<=logState.pages){logLoadPage(v,false);}else{el.value=logState.page;}">跳转</button>'
-    + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-last-btn" onclick="logLoadPage(logState.pages, false)" title="最后一页">⏭</button>'
-    + '</div>';
-
   NavAceEditor.open({
     title: '运行日志 · ' + name,
     mode: 'text',
     value: '加载中…',
     readOnly: true,
     wrapMode: true,
-    footerHtml: footerHtml,
+    pagination: {
+      page: 1,
+      pages: 1,
+      limit: logState.limit || 100,
+      limitOptions: [50, 100, 200, 500],
+      totalLines: 0,
+      fetch: function(page, limit) {
+        return fetch('api/task_log.php?id=' + encodeURIComponent(logState.id) + '&page=' + page + '&limit=' + limit, {
+          credentials: 'same-origin'
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          logState.pages = d.total_pages || 1;
+          logState.page = d.page || 1;
+          logState.limit = d.limit || limit;
+          return {
+            lines: d.lines || [],
+            page: d.page || 1,
+            pages: d.total_pages || 1,
+            limit: d.limit || limit,
+            totalLines: d.total_lines || 0
+          };
+        });
+      }
+    },
     buttons: {
       left: [{ text: '🗑 清空日志', bgColor: '#e74c3c', action: 'clear' }],
       right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
@@ -1275,19 +1279,36 @@ function openLogModal(id, name) {
       }
     },
     onClose: function() {
-      if (logPollTimer) {
-        clearInterval(logPollTimer);
-        logPollTimer = 0;
-      }
+      // 弹窗关闭时的清理逻辑
     }
   });
 
-  logPollTimer = setInterval(function() {
-    if (typeof NavAceEditor === 'undefined' || !NavAceEditor.getValue) return;
-    logLoadPage(logState.page || 1, false, { silent: true });
-  }, 2000);
-  // 先加载第1页获取总页数，再跳到最后一页
-  logLoadPage(1, true, { forceScrollBottom: true });
+  // 首次加载并跳到最后一页
+  var doInitialLoad = function() {
+    var pag = NavAceEditor._getPagination && NavAceEditor._getPagination();
+    if (!pag || typeof pag.fetch !== 'function') return;
+    pag.fetch(1, logState.limit || 100)
+      .then(function(d) {
+        logState.pages = d.pages || 1;
+        logState.page = d.page || 1;
+        if (d.pages > 1) {
+          // 跳到最后一页
+          return pag.fetch(d.pages, logState.limit || 100);
+        }
+        return d;
+      })
+      .then(function(d) {
+        NavAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
+        var text = typeof d.lines === 'string' ? d.lines : (d.lines || []).join('\n');
+        if (text) {
+          NavAceEditor.setValue(text);
+          var totalLines = text.split('\n').length;
+          NavAceEditor.gotoLine(totalLines, 0, false);
+        }
+      });
+  };
+  // 延迟执行，确保 NavAceEditor 弹窗已渲染完成
+  setTimeout(doInitialLoad, 50);
 }
 function closeLogModal() {
   NavAceEditor.close();
@@ -1345,15 +1366,6 @@ function clearCurrentLog() {
     }
   });
 }
-function logChangeLimit(limit) {
-  if (!logState.id) return;
-  limit = parseInt(limit, 10) || 100;
-  var oldOffset = (logState.page - 1) * logState.limit;
-  var newPage = Math.floor(oldOffset / limit) + 1;
-  logState.limit = limit;
-  logLoadPage(newPage, false);
-}
-
 function copyTaskWorkdir(path) {
   if (!path) return;
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1386,31 +1398,17 @@ function logLoadPage(p, jumpToLast, options) {
         if (!options.silent) NavAceEditor.setValue('请求失败：' + d.error);
         return;
       }
-      logState.pages = d.pages || 1;
+      logState.pages = d.total_pages || 1;
       logState.page  = d.page  || 1;
 
       // 首次打开跳到最后一页
-      if (jumpToLast && d.pages > 1) {
-        logLoadPage(d.pages, false, { forceScrollBottom: true });
+      if (jumpToLast && d.total_pages > 1) {
+        logLoadPage(d.total_pages, false, { forceScrollBottom: true });
         return;
       }
 
-      var infoEl = document.getElementById('st-log-info');
-      var pageLabelEl = document.getElementById('st-log-page-label');
-      var prevBtn = document.getElementById('st-log-prev');
-      var nextBtn = document.getElementById('st-log-next');
-      var lastBtn = document.getElementById('st-log-last-btn');
-      var pageInput = document.getElementById('st-log-page-input');
-      var limitSelect = document.getElementById('st-log-limit');
-
-      var per = d.per || logState.limit || 100;
-      if (infoEl) infoEl.textContent = '共 ' + d.total + ' 行，每页 ' + per + ' 行';
-      if (pageLabelEl) pageLabelEl.textContent = '第 ' + d.page + ' / ' + d.pages + ' 页';
-      if (prevBtn) prevBtn.disabled = d.page <= 1;
-      if (nextBtn) nextBtn.disabled = d.page >= d.pages;
-      if (lastBtn) lastBtn.disabled = d.page >= d.pages;
-      if (pageInput) { pageInput.value = d.page; pageInput.max = d.pages; }
-      if (limitSelect) limitSelect.value = per;
+      var per = d.limit || logState.limit || 100;
+      NavAceEditor.setPagination(d.page, d.total_pages, per, d.total_lines);
 
       if (!d.lines || d.lines.length === 0) {
         if (!options.silent) NavAceEditor.setValue('暂无日志记录');

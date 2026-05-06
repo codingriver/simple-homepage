@@ -69,7 +69,7 @@ public/          # 前台入口
   manifest.webmanifest # PWA 清单
   api/           # 公开 API
     sites.php    # 返回站点分组数据（Bearer Token 或 URL Token 验证）
-    dns.php      # DNS API（本机限 127.0.0.1，支持 query/update/batch_update）
+    dns.php      # DNS API（本机免 Token + 外网 Bearer/URL Token 认证，支持 query/update/batch_update）
   auth/
     verify.php   # Nginx auth_request 鉴权端点（返回 200 + X-Auth-User/X-Auth-Role 或 401）
 
@@ -632,35 +632,44 @@ function openLogViewer(logContent, logName) {
 
 ##### 十、使用 NavAceEditor 作为日志查看器的规范
 
-当把 `NavAceEditor` 用作**只读日志查看器**（如 `scheduled_tasks.php` 的运行日志、`logs.php` 的 Ace 弹窗模式）时，**禁止各页面自行编写弹窗逻辑**，必须严格遵循以下约定，确保所有页面的弹窗界面、底部工具栏、交互行为完全一致：
+当把 `NavAceEditor` 用作**只读日志查看器**（如 `scheduled_tasks.php` 的运行日志、`logs.php` 的 Ace 弹窗模式）时，**禁止各页面自行编写分页逻辑或底部 HTML**，必须使用组件内置的 `pagination` 配置，确保所有页面的分页界面、交互行为完全一致：
 
-1. **禁止从零实现，必须完整复制参考代码**
-   - 以 `scheduled_tasks.php` 的 **`openLogModal()` + `logLoadPage()`** 为**唯一模板**。
-   - 复制时只允许改**数据源**（API 地址）和**变量名**，不允许改结构、删按钮、改样式、改交互逻辑。
-   - 具体必须一致的元素：
-     - `footerHtml` 的 DOM 结构、按钮数量、按钮顺序、`id` 命名规范
-     - 弹窗内分页状态对象（`logState` / `aceLogState`）的字段
-     - 翻页函数（`logGoPage` / `aceLogGoPage`）的边界检查逻辑
-     - 加载函数（`logLoadPage` / `aceLogLoadPage`）的 API 调用 → `setValue()` → 更新底部元素 → 更新按钮禁用态 的完整流程
+1. **分页栏由组件自动渲染，页面只提供数据**
+   - 配置 `pagination` 对象，组件自动在弹窗底部渲染分页栏（信息区、limit 选择器、翻页按钮、页码输入框、跳转按钮、刷新按钮）。
+   - 页面**禁止**使用 `footerHtml`（该参数已移除），也禁止自行创建分页 DOM。
 
-2. **底部工具栏必须通过 `footerHtml` 渲染，且按钮数量和功能固定**
-   - `buttons` 配置中的按钮会渲染到弹窗**顶部工具栏**，而非底部；且 `action: 'close'` 会被过滤。因此底部内容**只能用 `footerHtml`**。
-   - 底部必须包含以下元素（顺序和样式与 `scheduled_tasks.php` 一致）：
-     - 信息区：`共 X 行，每页 Y 行`
-     - `◀ 上一页` 按钮（带 `id`，禁用态由加载函数更新）
-     - 页码标签：`第 X / Y 页`（带 `id`，由加载函数更新）
-     - `下一页 ▶` 按钮（带 `id`，禁用态由加载函数更新）
-     - `⏮` 首页按钮（`title="第一页"`）
-     - `⏭` 末页按钮（带 `id`，`title="最后一页"`，禁用态由加载函数更新）
+2. **`pagination` 配置必须包含的字段**
+   ```javascript
+   pagination: {
+     page: 1,                        // 当前页码
+     pages: 1,                       // 总页数
+     limit: 100,                     // 每页行数
+     limitOptions: [50, 100, 200],   // 可选的 limit 值
+     totalLines: 0,                  // 总行数
+     fetch: function(page, limit) {  // 返回 Promise，resolve { lines, page, pages, limit, totalLines }
+       return fetch('/api/...?page=' + page + '&limit=' + limit)
+         .then(r => r.json())
+         .then(d => ({
+           lines: d.lines || [],
+           page: d.page || page,
+           pages: d.total_pages || 1,
+           limit: d.limit || limit,
+           totalLines: d.total_lines || 0
+         }));
+     }
+   }
+   ```
 
-3. **关闭弹窗统一使用标题栏 ×、蒙层点击或 Esc 键**
+3. **数据获取与状态更新由组件内部处理**
+   - 组件调用 `fetch()` 后，自动执行 `editor.setValue()` 和 `updatePaginationState()`。
+   - 页面无需手动更新页码标签、按钮禁用态或滚动位置——组件在刷新时会自动保存并恢复光标行号和滚动条位置。
+
+4. **参考实现**
+   - 以 `scheduled_tasks.php` 的 `openLogModal()` 和 `logs.php` 的 `openAceLogViewer()` 为模板。
+   - 复制时只允许改 **API 地址** 和 **变量名**，不允许改 `pagination` 的结构、删字段、改交互逻辑。
+
+5. **关闭弹窗统一使用标题栏 ×、蒙层点击或 Esc 键**
    - 不要在 `buttons` 或页面中额外实现关闭按钮，避免与公共组件的关闭逻辑冲突。
-
-4. **遇到"参考 XX"需求时的强制流程**
-   - 第一步：把参考文件的**完整相关函数**（含 HTML、JS、状态对象）复制到草稿。
-   - 第二步：逐行对比，确认自己的实现和参考实现在结构、按钮数量、交互逻辑上无差异。
-   - 第三步：只允许做最小必要的适配（如改 API 地址、改标题前缀），禁止"优化"或"简化"。
-   - 第四步：截图或代码 diff 验证，确认底部工具栏的按钮数量、顺序、功能与参考实现一致。
 
 ---
 

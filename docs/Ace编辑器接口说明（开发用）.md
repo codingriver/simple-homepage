@@ -1,6 +1,8 @@
 # Ace 编辑器接口说明（开发用）
 
 > 本文档面向前端开发维护人员，描述 Simple Homepage 中 NavAceEditor 统一弹窗组件的完整接口规范、配置项及使用示例。不面向终端用户。
+>
+> 如需查阅后端 HTTP API 接口文档，请见同目录下的 `API接口文档（开发用）.md`。
 
 ---
 
@@ -43,7 +45,7 @@
 | 方法 | 返回值 | 说明 |
 |------|--------|------|
 | `NavAceEditor.init(options?)` | `this` | 懒加载初始化。首次调用创建 Ace 实例和弹窗 DOM；重复调用无操作。也可由 `open()` 自动触发。 |
-| `NavAceEditor.open(options)` | `void` | 打开弹窗，根据配置渲染标题、按钮、工具栏，显示弹窗并聚焦编辑器。 |
+| `NavAceEditor.open(options)` | `void` | 打开弹窗，根据配置渲染标题、按钮、工具栏、分页栏，显示弹窗并聚焦编辑器。 |
 | `NavAceEditor.close()` | `void` | 关闭弹窗。若内容已修改且 `confirmOnClose !== false`，先弹出确认框。 |
 | `NavAceEditor.getValue()` | `string` | 获取当前编辑器内容。 |
 | `NavAceEditor.setValue(text, mode?)` | `void` | 设置编辑器内容，可选同时切换语言模式。自动重置脏标记为「未修改」。 |
@@ -59,6 +61,8 @@
 | `NavAceEditor.resize()` | `void` | 触发编辑器重新计算尺寸。 |
 | `NavAceEditor.setButtonDisabled(action, disabled)` | `void` | 启用/禁用指定 `action` 的按钮。 |
 | `NavAceEditor.setButtonVisible(action, visible)` | `void` | 显示/隐藏指定 `action` 的按钮。 |
+| `NavAceEditor.setPagination(page, pages, limit, totalLines)` | `void` | 更新分页栏状态（信息标签、页码显示、按钮禁用态、输入框值）。 |
+| `NavAceEditor.refreshPagination()` | `void` | 手动触发当前页的数据刷新（调用 `pagination.fetch`）。 |
 
 ---
 
@@ -83,9 +87,26 @@ NavAceEditor.open({
   showPrintMargin: false,       // 是否显示打印边距线（通常固定为 false）
   useWorker: false,             // 是否启用 Ace Worker（通常固定为 false）
 
-  // ━━ 底部自定义 HTML ━━
-  footerHtml: '',               // 渲染在编辑器下方、按钮上方的自定义 HTML
-                                // 常用于日志查看器的分页工具栏
+  // ━━ 分页配置（日志查看器专用） ━━
+  pagination: {
+    page: 1,                    // 当前页码
+    pages: 1,                   // 总页数
+    limit: 100,                 // 每页行数
+    limitOptions: [100, 500],   // 每页行数下拉选项（各页面自定义）
+    totalLines: 0,              // 总行数，用于显示"共 X 行，每页 Y 行"
+    // 数据获取函数（组件自动处理加载中、内容设置、分页状态更新、错误提示）
+    fetch: function(page, limit) {
+      return fetch('/api/xxx?page=' + page + '&limit=' + limit)
+        .then(r => r.json())
+        .then(d => ({
+          lines: d.lines,         // 字符串数组，当前页的行列表
+          page: d.page,           // 当前页码
+          pages: d.total_pages,   // 总页数
+          limit: d.limit,         // 每页行数
+          totalLines: d.total_lines // 总行数
+        }));
+    }
+  },
 
   // ━━ 按钮配置 ━━
   buttons: {
@@ -101,6 +122,33 @@ NavAceEditor.open({
   onInit: function(editor) {}             // 编辑器初始化完成回调（首次 init 时触发一次）
 });
 ```
+
+### 分页配置说明
+
+当配置了 `pagination` 且 `readOnly: true` 时，组件自动在底部渲染分页操作栏，包含：
+
+- 信息标签：`共 X 行，每页 Y 行`
+- 🔄 刷新按钮（手动刷新当前页）
+- limit 下拉选择器
+- ⏮ 第一页、◀ 上一页、页码显示、下一页 ▶、⏭ 最后一页
+- 页码输入框 + 跳转按钮
+
+**`fetch` 函数规范：**
+
+| 返回值字段 | 类型 | 说明 |
+|-----------|------|------|
+| `lines` | `string[]` | 当前页的行列表（字符串数组） |
+| `page` | `int` | 当前页码 |
+| `pages` | `int` | 总页数 |
+| `limit` | `int` | 每页行数 |
+| `totalLines` | `int` | 总行数 |
+
+组件内部自动处理：
+- 翻页时显示 `加载中…`
+- 成功时 `setValue(lines.join('\n'))` + `updatePaginationState(...)`
+- 失败时显示 `加载失败：...`
+- 切换 limit 时自动换算新页码保持浏览位置
+- 刷新后恢复光标行号和滚动条位置
 
 ### 支持的语言模式
 
@@ -186,6 +234,7 @@ NavAceEditor.open({
 | **窗口大小变化自适应** | 浏览器 resize | 自动调用 `editor.resize()` |
 | **bfcache 清理** | 浏览器后退恢复 | 自动关闭残留的弹窗 |
 | **触摸手势拦截** | 触摸滑动 | 防止边缘滑动返回/关闭 |
+| **分页刷新保持位置** | 点击 🔄 刷新 | 自动保存并恢复光标行号和滚动条位置 |
 
 ---
 
@@ -312,9 +361,83 @@ NavAceEditor.open({
 
 ## 七、使用模式：日志中心
 
-日志查看使用 `readOnly: true`，隐藏工具栏，通过 `footerHtml` 构建底部分页控制栏。
+日志查看使用 `readOnly: true`，组件自动隐藏工具栏，通过 `pagination` 配置自动渲染底部分页栏。
 
-### 基础日志查看器
+### 典型配置（计划任务运行日志）
+
+```javascript
+NavAceEditor.open({
+  title: '运行日志 · ' + taskName,
+  mode: 'text',
+  value: '加载中…',
+  readOnly: true,
+  wrapMode: true,
+  pagination: {
+    page: 1,
+    pages: 1,
+    limit: 100,
+    limitOptions: [50, 100, 200, 500],
+    totalLines: 0,
+    fetch: function(page, limit) {
+      return fetch('api/task_log.php?id=' + encodeURIComponent(taskId)
+        + '&page=' + page + '&limit=' + limit, {
+        credentials: 'same-origin'
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        return {
+          lines: d.lines || [],
+          page: d.page || 1,
+          pages: d.total_pages || 1,
+          limit: d.limit || limit,
+          totalLines: d.total_lines || 0
+        };
+      });
+    }
+  },
+  buttons: {
+    left: [{ text: '🗑 清空日志', bgColor: '#e74c3c', action: 'clear' }],
+    right: [{ text: '关闭', action: 'close' }]
+  },
+  onAction: function(action) {
+    if (action === 'close') {
+      NavAceEditor.close();
+      return;
+    }
+    if (action === 'clear') {
+      NavConfirm.open({
+        title: '清空日志',
+        message: '确认清空该任务的运行日志？此操作不可恢复。',
+        confirmText: '清空',
+        danger: true,
+        onConfirm: function() {
+          fetch('/admin/scheduled_tasks.php', {
+            method: 'POST',
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+              action: 'task_log_clear',
+              id: taskId,
+              _csrf: window._csrf
+            })
+          })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            if (data.ok) {
+              NavAceEditor.refreshPagination();
+              showToast('日志已清空', 'success');
+            }
+          });
+        }
+      });
+    }
+  }
+});
+```
+
+### 典型配置（日志管理 Ace 弹窗）
 
 ```javascript
 NavAceEditor.open({
@@ -323,186 +446,33 @@ NavAceEditor.open({
   value: '加载中…',
   readOnly: true,
   wrapMode: true,
-  buttons: {
-    left: [],
-    right: [{ text: '关闭', action: 'close' }]
+  pagination: {
+    page: currentPage,
+    pages: totalPages,
+    limit: 500,
+    limitOptions: [100, 500, 1000, 5000],
+    totalLines: totalLines,
+    fetch: function(page, limit) {
+      return fetch('logs_api.php?action=read&type=' + encodeURIComponent(logKey)
+        + '&page=' + page + '&limit=' + limit,
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        return {
+          lines: d.lines || [],
+          page: d.page || 1,
+          pages: d.total_pages || 1,
+          limit: d.limit || limit,
+          totalLines: d.total_lines || 0
+        };
+      });
+    }
   },
+  buttons: { left: [], right: [{ text: '关闭', action: 'close' }] },
   onAction: function(action) {
     if (action === 'close') NavAceEditor.close();
   }
 });
-
-// 加载日志内容
-fetch('/admin/logs_api.php?file=' + encodeURIComponent(logName))
-  .then(r => r.json())
-  .then(data => {
-    NavAceEditor.setValue(data.content || '（空日志）');
-  });
-```
-
-### 带分页工具栏的日志查看器（参考 logs.php）
-
-```javascript
-var aceLogState = { page: 1, pages: 1, total_lines: 0 };
-
-function openLogViewer(logName) {
-  var footerHtml = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%">'
-    + '<span id="ace-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-prev" onclick="aceLogGoPage(aceLogState.page - 1)">◀ 上一页</button>'
-    + '<span id="ace-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 1 / 1 页</span>'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-next" onclick="aceLogGoPage(aceLogState.page + 1)">下一页 ▶</button>'
-    + '<button class="btn btn-sm btn-secondary" onclick="aceLogGoPage(1)" title="第一页">⏮</button>'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-last-btn" onclick="aceLogGoPage(aceLogState.pages)" title="最后一页">⏭</button>'
-    + '</div>';
-
-  NavAceEditor.open({
-    title: '日志查看 · ' + logName,
-    mode: 'text',
-    value: '加载中…',
-    readOnly: true,
-    wrapMode: true,
-    footerHtml: footerHtml,
-    buttons: { left: [], right: [] },
-    onAction: function(action) {}
-  });
-
-  // 加载第一页
-  aceLogLoadPage(1);
-}
-
-function aceLogGoPage(page) {
-  if (page < 1 || page > aceLogState.pages) return;
-  aceLogLoadPage(page);
-}
-
-function aceLogLoadPage(page) {
-  fetch('/admin/logs_api.php?file=' + encodeURIComponent(logName) + '&page=' + page)
-    .then(r => r.json())
-    .then(d => {
-      aceLogState.page = d.page;
-      aceLogState.pages = d.pages;
-      aceLogState.total_lines = d.total_lines;
-
-      NavAceEditor.setValue(d.content || '（空）');
-
-      // 更新 footer 控件状态
-      var infoEl = document.getElementById('ace-log-info');
-      var labelEl = document.getElementById('ace-log-page-label');
-      var prevBtn = document.getElementById('ace-log-prev');
-      var nextBtn = document.getElementById('ace-log-next');
-
-      if (infoEl) infoEl.textContent = '共 ' + d.total_lines + ' 行，每页 ' + d.per_page + ' 行';
-      if (labelEl) labelEl.textContent = '第 ' + d.page + ' / ' + d.pages + ' 页';
-      if (prevBtn) prevBtn.disabled = d.page <= 1;
-      if (nextBtn) nextBtn.disabled = d.page >= d.pages;
-    });
-}
-```
-
-### 带自动轮询和清空的日志查看器（参考 scheduled_tasks.php 运行日志）
-
-```javascript
-var logPollTimer = 0;
-var aceLogState = { page: 1, pages: 1 };
-
-function openTaskLogViewer(taskId, taskName) {
-  var footerHtml = '<div style="display:flex;align-items:center;justify-content:space-between;width:100%">'
-    + '<span id="ace-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)">加载中…</span>'
-    + '<div style="display:flex;align-items:center;gap:6px">'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-prev" onclick="aceLogGoPage(aceLogState.page - 1)">◀ 上一页</button>'
-    + '<span id="ace-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 1 / 1 页</span>'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-next" onclick="aceLogGoPage(aceLogState.page + 1)">下一页 ▶</button>'
-    + '<button class="btn btn-sm btn-secondary" onclick="aceLogGoPage(1)">⏮</button>'
-    + '<button class="btn btn-sm btn-secondary" id="ace-log-last-btn" onclick="aceLogGoPage(aceLogState.pages)">⏭</button>'
-    + '</div></div>';
-
-  NavAceEditor.open({
-    title: '运行日志 · ' + taskName,
-    mode: 'text',
-    value: '加载中…',
-    readOnly: true,
-    wrapMode: true,
-    footerHtml: footerHtml,
-    buttons: {
-      left: [{ text: '🗑 清空日志', action: 'clear', bgColor: '#e74c3c' }],
-      right: [{ text: '关闭', action: 'close' }]
-    },
-    onAction: function(action) {
-      if (action === 'close') {
-        NavAceEditor.close();
-        return;
-      }
-      if (action === 'clear') {
-        NavConfirm.open({
-          title: '清空日志',
-          message: '确认清空该任务的运行日志？此操作不可恢复。',
-          confirmText: '清空',
-          danger: true,
-          onConfirm: function() {
-            fetch('/admin/api/task_log.php', {
-              method: 'POST',
-              headers: { 'X-Requested-With': 'XMLHttpRequest' },
-              body: new URLSearchParams({ action: 'clear', task_id: taskId, _csrf: window._csrf })
-            })
-            .then(r => r.json())
-            .then(data => {
-              if (data.ok) {
-                aceLogState.page = 1;
-                aceLogLoadPage(1);
-                showToast('日志已清空', 'success');
-              }
-            });
-          }
-        });
-      }
-    },
-    onClose: function() {
-      if (logPollTimer) {
-        clearInterval(logPollTimer);
-        logPollTimer = 0;
-      }
-    }
-  });
-
-  // 加载第一页，然后跳转到最后一页
-  aceLogLoadPage(1, function() {
-    if (aceLogState.pages > 1) {
-      aceLogGoPage(aceLogState.pages);
-    }
-  });
-
-  // 每 2 秒自动轮询最后一页
-  logPollTimer = setInterval(function() {
-    if (aceLogState.page >= aceLogState.pages) {
-      aceLogLoadPage(aceLogState.pages);
-    }
-  }, 2000);
-}
-
-function aceLogLoadPage(page, callback) {
-  fetch('/admin/api/task_log.php?task_id=' + taskId + '&page=' + page)
-    .then(r => r.json())
-    .then(d => {
-      aceLogState.page = d.page;
-      aceLogState.pages = d.pages;
-
-      NavAceEditor.setValue(d.content || '（暂无日志）');
-
-      // 更新 footer
-      var infoEl = document.getElementById('ace-log-info');
-      var labelEl = document.getElementById('ace-log-page-label');
-      if (infoEl) infoEl.textContent = '共 ' + d.total_lines + ' 行';
-      if (labelEl) labelEl.textContent = '第 ' + d.page + ' / ' + d.pages + ' 页';
-
-      // 跳转到最后一行
-      if (d.content) {
-        var lines = d.content.split('\n').length;
-        NavAceEditor.gotoLine(lines, 0, false);
-      }
-
-      if (callback) callback();
-    });
-}
 ```
 
 ### 文本编辑器 vs 日志中心对比
@@ -513,9 +483,8 @@ function aceLogLoadPage(page, callback) {
 | 工具栏显示 | ✅ 显示（语言、主题、字号、换行等） | ❌ 隐藏 |
 | 脏标记 | ✅ `{ type: 'dirty' }` | ❌ 无需 |
 | 保存按钮 | ✅ 有 | ❌ 自动过滤 |
-| `footerHtml` | 可选（如只读警告信息） | **必须**（分页控制栏） |
+| 分页栏 | ❌ 无 | ✅ 自动渲染（配置 `pagination`） |
 | 关闭确认 | ✅ 默认开启 | 可保留默认 |
-| 自动轮询 | 否 | 是（日志实时刷新） |
 | 典型按钮 | `[dirty, 语法检查, 关闭, 保存, 保存并Reload]` | `[清空日志, 关闭]` 或 `[关闭]` |
 
 ---
@@ -526,7 +495,7 @@ function aceLogLoadPage(page, callback) {
 页面加载
   → NavAceEditor.init()          // 可选预初始化
        → 创建 Ace 实例
-       → 渲染弹窗 DOM
+       → 渲染弹窗 DOM（含分页栏占位）
        → 绑定事件、快捷键、resize 监听
        → 从 localStorage 恢复用户偏好
        → 触发 onInit(editor)
@@ -536,10 +505,19 @@ function aceLogLoadPage(page, callback) {
        → 设置标题、编辑器配置
        → 写入初始内容，记录 initialValue
        → 渲染按钮到工具栏
-       → 写入 footerHtml
+       → 若配置 pagination：渲染分页栏到弹窗底部
        → 显示弹窗、聚焦编辑器
 
-用户编辑
+用户翻页 / 切换 limit / 点击刷新
+  → 组件内部 doPaginationLoad(page, limit)
+       → 保存当前光标行号 + 滚动位置
+       → editor.setValue('加载中…')
+       → 调用 pagination.fetch(page, limit)
+       → 拿到数据后 setValue(lines.join('\n'))
+       → 恢复光标行号 + 滚动位置
+       → updatePaginationState(更新分页栏状态)
+
+用户编辑（文本编辑器模式）
   → Ace 'change' 事件
        → 自动更新 dirty 状态（标题栏显示）
        → 触发 onChange(value, dirty)
@@ -552,7 +530,7 @@ function aceLogLoadPage(page, callback) {
 用户关闭弹窗
   → NavAceEditor.close()
        → 若 dirty 且 confirmOnClose → 弹出确认
-       → 隐藏弹窗、退出全屏、清空 footer
+       → 隐藏弹窗、退出全屏、清空分页栏
        → 触发 onClose()
 ```
 
@@ -562,7 +540,10 @@ function aceLogLoadPage(page, callback) {
 
 | 功能 | 文件路径 |
 |------|----------|
-| Ace Editor 弹窗封装 | `admin/shared/ace_editor_modal.php` |
+| Ace Editor 弹窗封装（含内置分页栏） | `admin/shared/ace_editor_modal.php` |
 | Nginx 配置编辑器示例 | `admin/nginx.php` |
-| 日志查看器示例 | `admin/logs.php` |
+| 日志管理（含 Ace 弹窗分页） | `admin/logs.php` |
 | 计划任务脚本/日志示例 | `admin/scheduled_tasks.php` |
+| 任务日志后端 API | `admin/api/task_log.php` |
+| 通用日志后端 API | `admin/logs_api.php` |
+| 任务日志分页函数 | `admin/shared/cron_lib.php` → `task_log_page()` |
