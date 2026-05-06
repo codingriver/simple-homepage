@@ -465,7 +465,8 @@ $CSRF = csrf_field();
         <!-- 查看日志 -->
         <button type="button" class="btn btn-sm btn-secondary"
           onclick="openLogModal(<?= htmlspecialchars(json_encode($t['id'] ?? ''), ENT_QUOTES) ?>,
-                                 <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+                                 <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>,
+                                 <?= htmlspecialchars(json_encode($t['_log_file'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
           📋 日志
         </button>
 
@@ -572,7 +573,8 @@ $CSRF = csrf_field();
           </form>
           <button type="button" class="btn btn-sm btn-secondary"
             onclick="openLogModal(<?= htmlspecialchars(json_encode($t['id'] ?? ''), ENT_QUOTES) ?>,
-                                   <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
+                                   <?= htmlspecialchars(json_encode($t['name'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>,
+                                   <?= htmlspecialchars(json_encode($t['_log_file'] ?? '', JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>)">
             📋 日志
           </button>
           <button type="button" class="btn btn-sm btn-danger" disabled style="opacity:.55;cursor:not-allowed">✕ 系统维护</button>
@@ -1232,10 +1234,12 @@ document.addEventListener('DOMContentLoaded', function(){
 /* ---- 日志弹窗 ---- */
 var logState = { id: '', name: '', page: 1, pages: 1, requestSeq: 0, limit: 100 };
 
-function openLogModal(id, name) {
+function openLogModal(id, name, logFile) {
   logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0, limit: logState.limit || 100 };
+  var title = '运行日志 · ' + name;
+  if (logFile) title += ' · ' + logFile;
   NavAceEditor.open({
-    title: '运行日志 · ' + name,
+    title: title,
     mode: 'text',
     value: '加载中…',
     readOnly: true,
@@ -1252,6 +1256,9 @@ function openLogModal(id, name) {
         })
         .then(function(r){ return r.json(); })
         .then(function(d){
+          if (d.ok === false) {
+            return Promise.reject(new Error(d.msg || '加载失败'));
+          }
           logState.pages = d.total_pages || 1;
           logState.page = d.page || 1;
           logState.limit = d.limit || limit;
@@ -1300,11 +1307,14 @@ function openLogModal(id, name) {
       .then(function(d) {
         NavAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
         var text = typeof d.lines === 'string' ? d.lines : (d.lines || []).join('\n');
+        NavAceEditor.setValue(text || '（空）');
         if (text) {
-          NavAceEditor.setValue(text);
           var totalLines = text.split('\n').length;
           NavAceEditor.gotoLine(totalLines, 0, false);
         }
+      })
+      .catch(function(err) {
+        NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
       });
   };
   // 延迟执行，确保 NavAceEditor 弹窗已渲染完成

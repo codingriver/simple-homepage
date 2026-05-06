@@ -599,6 +599,9 @@ require_once __DIR__ . '/shared/header.php';
             { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
           .then(function(r){ return r.json(); })
           .then(function(d){
+            if (d.ok === false) {
+              return Promise.reject(new Error(d.msg || '加载失败'));
+            }
             aceLogState.pages = d.total_pages || 1;
             aceLogState.page = d.page || 1;
             aceLogState.limit = d.limit || limit;

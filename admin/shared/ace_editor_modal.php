@@ -398,9 +398,9 @@
         + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-first" title="第一页">⏮</button>'
         + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-prev">◀ 上一页</button>'
         + '<span id="nav-ace-pag-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)"></span>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-next">下一页 ▶</button>'
         + '<input type="number" id="nav-ace-pag-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;">'
         + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-goto">跳转</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-next">下一页 ▶</button>'
         + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-last" title="最后一页">⏭</button>'
         + '</div>';
       pagEls.info  = document.getElementById('nav-ace-pag-info');
