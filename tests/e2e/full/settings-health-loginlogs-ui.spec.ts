@@ -83,14 +83,14 @@ test('settings health panel and login logs panel load real rows through UI inter
 
     await loginAsDevAdmin(page);
 
-    const loginLogsRes = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php', {
+    const loginLogsRes = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
     expect(loginLogsRes.status()).toBe(200);
-    const logsPayload = (await loginLogsRes.json()) as { ok: boolean; total: number; rows: string[] };
+    const logsPayload = (await loginLogsRes.json()) as { ok: boolean; total_lines: number; lines: string[] };
     expect(logsPayload.ok).toBe(true);
-    expect(logsPayload.total).toBeGreaterThan(0);
-    expect(logsPayload.rows.some((row) => row.includes(logUser))).toBeTruthy();
+    expect(logsPayload.total_lines).toBeGreaterThan(0);
+    expect(logsPayload.lines.some((row) => row.includes(logUser))).toBeTruthy();
 
     await page.goto('/admin/settings.php#health');
     await page.locator('#health').scrollIntoViewIfNeeded();

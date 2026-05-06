@@ -76,7 +76,7 @@ public/          # 前台入口
 admin/           # 后台管理页面和 AJAX API
   *.php          # 后台页面（共 39 个，按功能分组如下）
     站点与分组：sites.php、groups.php
-    用户与认证：users.php、sessions.php、login_logs.php
+    用户与认证：users.php、sessions.php、logs.php（登录认证日志在统一日志中心查看）
     系统与设置：settings.php、configs.php
     网络与代理：nginx.php、dns.php、ddns.php
     宿主机与 Docker：host_runtime.php、docker_hosts.php、manifests.php、packages.php

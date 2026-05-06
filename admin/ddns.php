@@ -33,6 +33,11 @@ $rows = array_map('ddns_task_row', $allTasks);
 $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
 ?>
 
+<script src="assets/ace/ace.js"></script>
+<script src="assets/ace/ext-searchbox.js"></script>
+<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
+<script>window.DDNS_DATA_DIR = <?= json_encode(DATA_DIR) ?>;</script>
+
 <div class="toolbar">
   <button type="button" class="btn btn-primary" onclick="openDdnsModal()">＋ 新建任务</button>
   <button type="button" class="btn btn-secondary" onclick="refreshRows()">↺ 刷新列表</button>
@@ -56,13 +61,13 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
     <table>
       <thead>
         <tr>
-          <th>状态</th>
           <th>任务名称</th>
           <th>来源</th>
           <th>域名</th>
           <th>类型</th>
           <th>最近解析值</th>
           <th>调度</th>
+          <th>状态</th>
           <th>最近执行状态</th>
           <th style="min-width:260px">操作</th>
         </tr>
@@ -179,32 +184,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
   </div>
 </div>
 
-<div id="ddns-log-modal" style="display:none;position:fixed;inset:0;z-index:950;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:12px" >
-  <div style="background:var(--sf);border:1px solid var(--bd2);border-radius:var(--r2);width:min(1280px,99vw);height:min(88vh,920px);box-shadow:0 24px 64px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden;">
-    <div style="padding:16px 20px 12px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;flex-wrap:wrap">
-      <span id="ddns-log-modal-title" style="font-weight:700;font-size:14px;font-family:var(--mono);color:var(--blue)">DDNS 日志</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        <input type="text" id="ddns-log-search" placeholder="搜索当前页日志..." oninput="applyDdnsLogView()" style="width:min(320px,48vw);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:12px;font-family:var(--mono)">
-        <button type="button" class="btn btn-sm btn-secondary" onclick="clearDdnsLogSearch()">清空搜索</button>
-        <button type="button" class="btn btn-sm btn-danger" onclick="clearCurrentDdnsLog()">清空日志</button>
-        <button onclick="closeDdnsLogModal()" style="background:none;border:none;color:var(--tm);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px">✕</button>
-      </div>
-    </div>
-    <div id="ddns-log-body" style="flex:1;overflow:auto;padding:0;font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--tx2);background:var(--bg);">
-      <div style="padding:16px 20px;color:var(--tm)">加载中…</div>
-    </div>
-    <div style="padding:12px 20px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap">
-      <span id="ddns-log-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)"></span>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-sm btn-secondary" id="ddns-log-prev" onclick="ddnsLogLoadPage(ddnsLogState.page-1, false)">◀ 上一页</button>
-        <span id="ddns-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)"></span>
-        <button class="btn btn-sm btn-secondary" id="ddns-log-next" onclick="ddnsLogLoadPage(ddnsLogState.page+1, false)">下一页 ▶</button>
-        <button class="btn btn-sm btn-secondary" onclick="ddnsLogLoadPage(1, false)" title="第一页">⏮</button>
-        <button class="btn btn-sm btn-secondary" id="ddns-log-last-btn" onclick="ddnsLogLoadPage(ddnsLogState.pages, false)" title="最后一页">⏭</button>
-      </div>
-    </div>
-  </div>
-</div>
+
 
 <script>
 var DDNS_ROWS = <?= json_encode($rows, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
@@ -243,7 +223,7 @@ function statusBadge(status, timeText) {
     label = '运行中';
     cls = 'badge badge-blue';
   }
-  var timeHtml = timeText ? '<div style="margin-top:4px;font-size:11px;color:var(--tm);font-family:var(--mono)">' + escapeHtml(timeText) + '</div>' : '';
+  var timeHtml = timeText ? '<div style="margin-top:4px;font-size:11px;color:var(--tm);font-family:var(--mono);white-space:nowrap">' + escapeHtml(timeText) + '</div>' : '';
   return '<div>'
     + '<span class="' + cls + '">' + label + '</span>'
     + timeHtml
@@ -267,13 +247,13 @@ function renderRows() {
     var jsonId = JSON.stringify(row.id).replace(/"/g, '&quot;');
     var jsonName = JSON.stringify(row.name).replace(/"/g, '&quot;');
     tr.innerHTML = ''
-      + '<td>' + (row.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge badge-gray">禁用</span>') + '</td>'
       + '<td style="font-weight:600">' + escapeHtml(row.name) + '</td>'
       + '<td>' + escapeHtml(row.source_label) + '</td>'
       + '<td style="font-family:var(--mono)">' + escapeHtml(row.domain) + '</td>'
       + '<td><code>' + escapeHtml(row.record_type) + '</code></td>'
-      + '<td style="font-family:var(--mono);max-width:180px;word-break:break-all">' + escapeHtml(row.last_value || '—') + '</td>'
-      + '<td style="font-family:var(--mono)">' + escapeHtml(row.cron) + '</td>'
+      + '<td style="font-family:var(--mono);white-space:nowrap">' + escapeHtml(row.last_value || '—') + '</td>'
+      + '<td style="font-family:var(--mono);white-space:nowrap">' + escapeHtml(row.cron) + '</td>'
+      + '<td>' + (row.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge badge-gray">禁用</span>') + '</td>'
       + '<td>' + statusBadge(row.last_status, (row.last_status === 'running' ? row.started_at : row.last_run_at) || '') + '</td>'
       + '<td style="white-space:nowrap">'
       + '<button type="button" class="btn btn-sm btn-secondary" style="min-width:58px;text-align:center;justify-content:center" onclick="toggleTask(' + jsonId + ')">' + (row.enabled ? '禁用' : '启用') + '</button> '
@@ -329,84 +309,89 @@ function closeDdnsModal() {
   document.getElementById('ddns-modal').style.display = 'none';
 }
 
-var ddnsLogState = { id: '', name: '', page: 1, pages: 1, lines: [] };
-
-function clearDdnsLogSearch() {
-  var input = document.getElementById('ddns-log-search');
-  if (!input) return;
-  input.value = '';
-  applyDdnsLogView();
-}
-
-function renderDdnsLogRows(lines, keyword) {
-  if (!lines || !lines.length) {
-    return '<div style="padding:16px 20px;color:var(--tm)">暂无日志记录</div>';
-  }
-  var lowerKeyword = String(keyword || '').trim().toLowerCase();
-  var html = [];
-  var matched = 0;
-  lines.forEach(function(line, idx) {
-    var text = String(line || '');
-    if (lowerKeyword && text.toLowerCase().indexOf(lowerKeyword) === -1) return;
-    matched++;
-    var safe = escapeHtml(text);
-    var cls = 'color:var(--tx2)';
-    if (/\[ERROR\]|失败|fail/i.test(text)) cls = 'color:var(--red)';
-    else if (/跳过|skip/i.test(text)) cls = 'color:var(--yellow)';
-    else if (/成功|success|更新/i.test(text)) cls = 'color:var(--green)';
-    html.push(
-      '<div style="display:grid;grid-template-columns:72px 1fr;gap:0;border-bottom:1px solid rgba(255,255,255,.04)">' +
-        '<div style="padding:6px 12px;color:var(--tm);background:rgba(255,255,255,.02);border-right:1px solid rgba(255,255,255,.05);text-align:right;user-select:none">' + (idx + 1) + '</div>' +
-        '<div style="padding:6px 14px;white-space:pre-wrap;word-break:break-word;' + cls + '">' + safe + '</div>' +
-      '</div>'
-    );
-  });
-  if (!matched) {
-    return '<div style="padding:16px 20px;color:var(--yellow)">当前页没有匹配“' + escapeHtml(keyword) + '”的日志</div>';
-  }
-  return html.join('');
-}
-
-function applyDdnsLogView() {
-  var body = document.getElementById('ddns-log-body');
-  var input = document.getElementById('ddns-log-search');
-  if (!body) return;
-  body.innerHTML = renderDdnsLogRows(ddnsLogState.lines || [], input ? input.value : '');
-}
+var ddnsLogState = { id: '', name: '', page: 1, pages: 1, limit: 100 };
 
 function openDdnsLogModal(id, name) {
-  ddnsLogState = { id: id, name: name, page: 1, pages: 1, lines: [] };
-  document.getElementById('ddns-log-modal-title').textContent = 'DDNS 日志 — ' + name;
-  var search = document.getElementById('ddns-log-search');
-  if (search) search.value = '';
-  document.getElementById('ddns-log-modal').style.display = 'flex';
-  ddnsLogLoadPage(1, true);
-}
+  ddnsLogState = { id: id, name: name, page: 1, pages: 1, limit: ddnsLogState.limit || 100 };
+  var logFile = (window.DDNS_DATA_DIR || '') + '/logs/ddns_' + id + '.log';
+  var title = 'DDNS 日志 · ' + name;
+  if (logFile) title += ' · ' + logFile;
 
-function closeDdnsLogModal() {
-  document.getElementById('ddns-log-modal').style.display = 'none';
-}
+  NavAceEditor.open({
+    title: title,
+    mode: 'text',
+    value: '加载中…',
+    readOnly: true,
+    wrapMode: true,
+    pagination: {
+      page: 1,
+      pages: 1,
+      limit: ddnsLogState.limit || 100,
+      limitOptions: [50, 100, 200, 500],
+      totalLines: 0,
+      fetch: function(page, limit) {
+        return postAjax('log', {id: ddnsLogState.id, page: page})
+          .then(function(res) {
+            if (!res.ok) {
+              return Promise.reject(new Error(res.msg || '加载失败'));
+            }
+            var d = res.data || {};
+            ddnsLogState.pages = d.pages || 1;
+            ddnsLogState.page = d.page || 1;
+            ddnsLogState.limit = limit;
+            return {
+              lines: d.lines || [],
+              page: d.page || 1,
+              pages: d.pages || 1,
+              limit: limit,
+              totalLines: d.total || 0
+            };
+          });
+      }
+    },
+    buttons: {
+      left: [{ text: '🗑 清空日志', bgColor: '#e74c3c', action: 'clear' }],
+      right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
+    },
+    onAction: function(action) {
+      if (action === 'close') {
+        NavAceEditor.close();
+        return;
+      }
+      if (action === 'clear') {
+        clearCurrentDdnsLog();
+      }
+    }
+  });
 
-/* 弹窗背景点击关闭防护（阻止 mousedown 在内容区、mouseup 在背景层的误触） */
-(function(){
-  var mdTarget = null;
-  var ddnsModal = document.getElementById('ddns-modal');
-  if (ddnsModal) {
-    ddnsModal.addEventListener('mousedown', function(e){ mdTarget = e.target; });
-    ddnsModal.addEventListener('click', function(e){
-      if (e.target === ddnsModal && mdTarget === ddnsModal) closeDdnsModal();
-      mdTarget = null;
-    });
-  }
-  var ddnsLogModal = document.getElementById('ddns-log-modal');
-  if (ddnsLogModal) {
-    ddnsLogModal.addEventListener('mousedown', function(e){ mdTarget = e.target; });
-    ddnsLogModal.addEventListener('click', function(e){
-      if (e.target === ddnsLogModal && mdTarget === ddnsLogModal) closeDdnsLogModal();
-      mdTarget = null;
-    });
-  }
-})();
+  // 首次加载并跳到最后一页
+  var doInitialLoad = function() {
+    var pag = NavAceEditor._getPagination && NavAceEditor._getPagination();
+    if (!pag || typeof pag.fetch !== 'function') return;
+    pag.fetch(1, ddnsLogState.limit || 100)
+      .then(function(d) {
+        ddnsLogState.pages = d.pages || 1;
+        ddnsLogState.page = d.page || 1;
+        if (d.pages > 1) {
+          return pag.fetch(d.pages, ddnsLogState.limit || 100);
+        }
+        return d;
+      })
+      .then(function(d) {
+        NavAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
+        var text = typeof d.lines === 'string' ? d.lines : (d.lines || []).join('\n');
+        NavAceEditor.setValue(text || '（空）');
+        if (text) {
+          var totalLines = text.split('\n').length;
+          NavAceEditor.gotoLine(totalLines, 0, false);
+        }
+      })
+      .catch(function(err) {
+        NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
+      });
+  };
+  setTimeout(doInitialLoad, 50);
+}
 
 async function clearCurrentDdnsLog() {
   if (!ddnsLogState.id) return;
@@ -423,36 +408,9 @@ async function clearCurrentDdnsLog() {
         return;
       }
       showToast(res.msg || '日志已清空', 'success');
-      ddnsLogLoadPage(1, false);
+      NavAceEditor.refreshPagination();
     }
   });
-}
-
-async function ddnsLogLoadPage(p, jumpToLast) {
-  if (p < 1 || p > ddnsLogState.pages) return;
-  ddnsLogState.page = p;
-  var body = document.getElementById('ddns-log-body');
-  body.innerHTML = '<div style="padding:16px 20px;color:var(--tm)">加载中…</div>';
-  var res = await postAjax('log', {id: ddnsLogState.id, page: p});
-  if (!res.ok) {
-    body.innerHTML = '<div style="padding:16px 20px;color:var(--red)">' + escapeHtml(res.msg || '读取日志失败') + '</div>';
-    return;
-  }
-  var d = res.data || {};
-  ddnsLogState.pages = d.pages || 1;
-  ddnsLogState.page = d.page || 1;
-  if (jumpToLast && d.pages > 1) {
-    ddnsLogLoadPage(d.pages, false);
-    return;
-  }
-  ddnsLogState.lines = Array.isArray(d.lines) ? d.lines : [];
-  document.getElementById('ddns-log-info').textContent = '共 ' + (d.total || 0) + ' 行，每页 100 行；按最新日志优先显示；支持当前页搜索';
-  document.getElementById('ddns-log-page-label').textContent = '第 ' + (d.page || 1) + ' / ' + (d.pages || 1) + ' 页';
-  document.getElementById('ddns-log-prev').disabled = (d.page || 1) <= 1;
-  document.getElementById('ddns-log-next').disabled = (d.page || 1) >= (d.pages || 1);
-  document.getElementById('ddns-log-last-btn').disabled = (d.page || 1) >= (d.pages || 1);
-  applyDdnsLogView();
-  body.scrollTop = 0;
 }
 
 function currentTaskPayload() {

@@ -1,7 +1,7 @@
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
-test('login logs record successful and failed login attempts and enforce ajax guard', async ({ page }) => {
+test('login logs record successful and failed login attempts', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
@@ -17,16 +17,13 @@ test('login logs record successful and failed login attempts and enforce ajax gu
 
   await loginAsDevAdmin(page);
 
-  const ajaxRes = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php', {
+  const ajaxRes = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
   expect(ajaxRes.status()).toBe(200);
   const json = await ajaxRes.json();
-  expect(json).toMatchObject({ ok: true, total: expect.any(Number), rows: expect.any(Array), max: expect.any(Number) });
-  expect(json.rows.length).toBeGreaterThan(0);
-
-  const plainRes = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php');
-  expect(plainRes.status()).toBe(400);
+  expect(json).toMatchObject({ ok: true, total_lines: expect.any(Number), lines: expect.any(Array) });
+  expect(json.lines.length).toBeGreaterThan(0);
 
   await tracker.assertNoClientErrors();
 });

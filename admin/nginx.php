@@ -445,17 +445,6 @@ $ppm = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
 .compat-banner .actions button:hover {
   border-color: var(--ac);
 }
-.compat-error-modal pre {
-  background: var(--bg);
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  max-height: 400px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-</style>
 <div class="compat-banner">
   <div class="title">⚠️ 当前处于 Nginx 兼容模式</div>
   <div>data 目录下的系统配置（Nginx / PHP-FPM / PHP）校验失败，容器已自动切换到<strong>内置默认配置</strong>启动。你的 data 配置未被修改，可点击下方按钮查看错误并尝试恢复。</div>
@@ -464,17 +453,22 @@ $ppm = ($cfg['proxy_params_mode'] ?? 'simple') === 'full' ? 'full' : 'simple';
     <button type="button" onclick="restoreDataConfig()">🔄 切换为正常模式</button>
   </div>
 </div>
-<div id="compat-error-modal" style="display:none" class="modal-overlay">
-  <div class="modal">
-    <div class="modal-header">系统配置校验错误详情 <button class="close" onclick="document.getElementById('compat-error-modal').style.display='none'">&times;</button></div>
-    <div class="modal-body compat-error-modal"><pre id="compat-error-content">加载中...</pre></div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="document.getElementById('compat-error-modal').style.display='none'">关闭</button>
-    </div>
-  </div>
-</div>
 <script>
 function showCompatError() {
+  NavAceEditor.open({
+    title: 'Nginx 配置校验错误',
+    mode: 'text',
+    value: '加载中…',
+    readOnly: true,
+    wrapMode: true,
+    buttons: {
+      left: [],
+      right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
+    },
+    onAction: function(action) {
+      if (action === 'close') NavAceEditor.close();
+    }
+  });
   fetch('nginx.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
@@ -482,8 +476,10 @@ function showCompatError() {
   })
   .then(r => r.json())
   .then(data => {
-    document.getElementById('compat-error-content').textContent = data.ok ? data.content : data.msg;
-    document.getElementById('compat-error-modal').style.display = 'flex';
+    NavAceEditor.setValue(data.ok ? (data.content || '（空）') : ('加载失败：' + (data.msg || '')));
+  })
+  .catch(function(err) {
+    NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
   });
 }
 function restoreDataConfig() {

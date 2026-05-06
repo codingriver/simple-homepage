@@ -459,6 +459,7 @@ input::placeholder { color: var(--tm); }
   text-transform: uppercase;
   letter-spacing: .06em;
   font-family: var(--mono);
+  white-space: nowrap;
 }
 
 .badge-green  { background: rgba(61,255,160,.1);  color: var(--green);  border: 1px solid rgba(61,255,160,.2); }

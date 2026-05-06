@@ -31,21 +31,17 @@ test('login logs endpoint returns json records and logs center renders auth log 
 
     await loginAsDevAdmin(page);
 
-    // 1. Direct AJAX to login_logs.php returns JSON with rows
-    const ajaxRes = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php', {
+    // 1. Direct AJAX to logs_api.php returns auth log JSON
+    const ajaxRes = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
     expect(ajaxRes.status()).toBe(200);
-    const json = (await ajaxRes.json()) as { ok: boolean; total: number; rows: string[]; max: number };
-    expect(json).toMatchObject({ ok: true, total: expect.any(Number), rows: expect.any(Array), max: expect.any(Number) });
-    expect(json.rows.length).toBeGreaterThan(0);
-    expect(json.rows.some((row) => row.includes(logUser))).toBeTruthy();
+    const json = (await ajaxRes.json()) as { ok: boolean; total_lines: number; lines: string[] };
+    expect(json).toMatchObject({ ok: true, total_lines: expect.any(Number), lines: expect.any(Array) });
+    expect(json.lines.length).toBeGreaterThan(0);
+    expect(json.lines.some((row) => row.includes(logUser))).toBeTruthy();
 
-    // 2. Non-AJAX GET returns 400
-    const plainRes = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php');
-    expect(plainRes.status()).toBe(400);
-
-    // 3. Logs center page renders and can display auth log
+    // 2. Logs center page renders and can display auth log
     await page.goto('/admin/logs.php');
     await expect(page.locator('body')).toContainText('日志中心');
 
@@ -55,45 +51,21 @@ test('login logs endpoint returns json records and logs center renders auth log 
     await expect(authLogItem).toBeVisible();
     await authLogItem.click();
 
-    // Wait for Ace editor to initialize and show content
-    await expect(page.locator('#logEditor')).toBeVisible();
+    // Wait for log preview to load and show content
+    await expect(page.locator('#logPreview')).toBeVisible();
     await expect(page.locator('#currentLogTitle')).toContainText('登录认证日志');
 
-    // Verify the seeded log user appears in the editor content
-    await expect
-      .poll(async () => {
-        const text = await page.evaluate(() => {
-          const editor = (window as any).ace?.edit('logEditor');
-          return editor ? editor.getValue() : '';
-        });
-        return text;
-      })
-      .toContain(logUser);
+    // Verify the seeded log user appears in the preview
+    await expect(page.locator('#logPreview')).toContainText(logUser);
 
-    // 4. Test filter/search
+    // 3. Test filter/search
     await page.locator('#logKeyword').fill(logUser);
-    // Ace editor content should still contain the filtered line
-    await expect
-      .poll(async () => {
-        const text = await page.evaluate(() => {
-          const editor = (window as any).ace?.edit('logEditor');
-          return editor ? editor.getValue() : '';
-        });
-        return text;
-      })
-      .toContain(logUser);
+    // Preview should still contain the filtered line
+    await expect(page.locator('#logPreview')).toContainText(logUser);
 
-    // Filter with a non-matching keyword should empty the display
+    // Filter with a non-matching keyword should show no-match message
     await page.locator('#logKeyword').fill('nonexistent-xyz-999');
-    await expect
-      .poll(async () => {
-        const text = await page.evaluate(() => {
-          const editor = (window as any).ace?.edit('logEditor');
-          return editor ? editor.getValue() : '';
-        });
-        return text.trim();
-      })
-      .toBe('');
+    await expect(page.locator('#logPreview .log-no-match')).toBeVisible();
 
     await tracker.assertNoClientErrors();
   } finally {

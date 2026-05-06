@@ -567,6 +567,8 @@ $dnsApiPort = getenv('NAV_PORT');
 if ($dnsApiPort === false || $dnsApiPort === '' || !ctype_digit($dnsApiPort)) {
     $dnsApiPort = '58080';
 }
+$dnsApiHost = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$dnsApiScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 
 $dnsHydrate = ((string)($_GET['hydrate'] ?? '') === '1');
 
@@ -1059,24 +1061,47 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
   </div>
 </div>
 
-<!-- ═══ 本机 DNS API 说明弹窗 ═══ -->
+<!-- ═══ DNS API 接口说明弹窗 ═══ -->
 <div id="dns-api-modal" class="dns-modal">
-  <div class="dns-modal-card" style="width:min(920px,96vw);max-height:92vh">
+  <div class="dns-modal-card" style="width:min(960px,96vw);max-height:92vh">
     <div class="dns-modal-head">
-      <span class="dns-modal-title">本机 DNS API</span>
+      <span class="dns-modal-title">DNS API 接口说明</span>
       <button class="dns-modal-close" onclick="closeModal('dns-api-modal')" type="button" aria-label="关闭">×</button>
     </div>
     <div class="dns-modal-body" style="max-height:calc(92vh - 56px);overflow-y:auto">
 
       <!-- 接口地址 -->
       <div style="margin:0 0 14px;padding:10px 14px;background:rgba(0,212,170,.06);border:1px solid var(--bd);border-radius:var(--r)">
-        <strong style="color:var(--tx);font-size:13px">接口地址：</strong>
-        <code style="font-size:12px">http://127.0.0.1:<?= htmlspecialchars($dnsApiPort) ?>/api/dns.php</code>
-        <span style="color:var(--tx2);font-size:12px">（仅容器内 127.0.0.1 / ::1 可访问）</span>
+        <div style="margin-bottom:6px">
+          <strong style="color:var(--tx);font-size:13px">本机免认证地址：</strong>
+          <code style="font-size:12px">http://127.0.0.1:<?= htmlspecialchars($dnsApiPort) ?>/api/dns.php</code>
+          <span style="color:var(--tx2);font-size:12px">（仅容器内 127.0.0.1 / ::1 可免 Token 访问）</span>
+        </div>
+        <div>
+          <strong style="color:var(--tx);font-size:13px">外网访问地址：</strong>
+          <code style="font-size:12px"><?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php</code>
+          <span style="color:var(--tx2);font-size:12px">（非本机访问需 API Token 认证）</span>
+        </div>
       </div>
 
-      <!-- 一、支持的 API 列表 -->
-      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">一、支持的 API</h4>
+      <!-- 一、外网访问认证 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">一、外网访问认证（API Token）</h4>
+      <p style="color:var(--tx2);font-size:12px;line-height:1.75;margin:0 0 10px">
+        外网（非本机）调用 DNS API 时必须提供有效的 API Token。Token 在 <a href="api_tokens.php" target="_blank" style="color:var(--ac)">API Token 管理</a> 页面生成，格式为 <code>np_</code> 前缀 + 64 位十六进制字符。
+      </p>
+      <ul style="color:var(--tx2);font-size:12px;line-height:1.85;margin:0 0 14px;padding-left:18px">
+        <li><strong>方式一：HTTP Authorization Header（推荐）</strong>
+          <code style="font-size:11px">Authorization: Bearer np_xxxxxxxx...</code>
+        </li>
+        <li><strong>方式二：URL Query Parameter</strong>
+          <code style="font-size:11px">?token=np_xxxxxxxx...</code>
+        </li>
+        <li>Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。</li>
+        <li>Token 验证失败返回 HTTP 401：<code>{"code":-1,"msg":"无效的 API Token"}</code></li>
+      </ul>
+
+      <!-- 二、支持的 API 列表 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">二、支持的 API</h4>
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
         <thead>
           <tr style="border-bottom:1px solid var(--bd)">
@@ -1112,8 +1137,8 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
         </tbody>
       </table>
 
-      <!-- 二、通用规则 -->
-      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">二、通用规则</h4>
+      <!-- 三、通用规则 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">三、通用规则</h4>
       <ul style="color:var(--tx2);font-size:12px;line-height:1.85;margin:0 0 14px;padding-left:18px">
         <li>无需填写账号 ID 与 Zone，系统根据已配置的 DNS 账号<strong>自动匹配</strong>域名归属</li>
         <li>支持记录类型：<strong>A / AAAA / CNAME</strong>；不传 <code>type</code> 时按 <code>value</code> 自动推断（IPv4→A，IPv6→AAAA，其余→CNAME）</li>
@@ -1122,67 +1147,58 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
         <li>POST 时正文参数<strong>覆盖</strong> URL Query 中的同名参数</li>
       </ul>
 
-      <!-- 三、详细测试用例 -->
-      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">三、测试用例</h4>
+      <!-- 四、本机测试用例 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">四、本机测试用例（免 Token）</h4>
       <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
 
         <div style="color:var(--tm);margin-bottom:8px">▼ query — 查询单个域名</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A"
 curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com"</pre>
 
-        <div style="color:var(--tm);margin-bottom:8px">▼ query — 查询多个域名（分别调用）</div>
-        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A"
-curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=blog.example.com&amp;type=A"
-curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=query&amp;domain=*.example.com&amp;type=A"</pre>
-
         <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 GET 写法</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=1.2.3.4"
 curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=1.2.3.4&amp;type=A&amp;ttl=120"
 curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;domain=www.example.com&amp;value=2606:4700::6810:85e5&amp;type=AAAA"</pre>
-
-        <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 POST 表单写法</div>
-        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
-  -d "action=update" \
-  -d "domain=www.example.com" \
-  -d "value=1.2.3.4"
-
-curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
-  -d "action=update" \
-  -d "domain=www.example.com" \
-  -d "value=1.2.3.4" \
-  -d "type=A" \
-  -d "ttl=120"</pre>
 
         <div style="color:var(--tm);margin-bottom:8px">▼ update — 单域名 POST JSON 写法</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
   -H "Content-Type: application/json" \
   -d '{"action":"update","domain":"www.example.com","value":"1.2.3.4","type":"A","ttl":120}'</pre>
 
-        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — 多个域名 GET 写法（逗号分隔）</div>
-        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com"
-curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com,www.example.com"
-curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=batch_update&amp;value=1.2.3.4&amp;domains=example.com,www.example.com,*.example.com"</pre>
-
         <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — 多个域名 POST JSON 写法（推荐）</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
   -H "Content-Type: application/json" \
-  -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com"]}'
-
-curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
-  -H "Content-Type: application/json" \
   -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com","www.example.com","*.example.com"]}'</pre>
-
-        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — POST 表单写法</div>
-        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php \
-  -d "action=batch_update" \
-  -d "value=1.2.3.4" \
-  -d "domains=example.com,www.example.com,*.example.com"</pre>
       </div>
 
-      <!-- 四、完整示例脚本 -->
-      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">四、计划任务完整示例</h4>
+      <!-- 五、外网测试用例 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">五、外网测试用例（需 API Token）</h4>
+      <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ query — Header 传 Token（推荐）</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "<?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A" \
+  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ query — URL 传 Token</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "<?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A&amp;token=np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ update — POST JSON + Header Token</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS <?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -d '{"action":"update","domain":"www.example.com","value":"1.2.3.4","type":"A","ttl":120}'</pre>
+
+        <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — POST JSON + Header Token（推荐）</div>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS <?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com","www.example.com","*.example.com"]}'</pre>
+      </div>
+
+      <!-- 六、完整示例脚本 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">六、计划任务完整示例（本机）</h4>
       <p style="color:var(--tx2);font-size:12px;line-height:1.75;margin:0 0 10px">
-        在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入任务运行日志。
+        在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入任务运行日志。本机脚本无需 Token。
       </p>
       <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
         <pre style="margin:0;white-space:pre-wrap;word-break:break-all">LOG=/var/www/nav/data/logs/ddns_manual.log
@@ -1210,6 +1226,15 @@ log "batch_update 返回: $RESP"
 
 log "=== DDNS 结束 ==="</pre>
       </div>
+
+      <!-- 七、安全提示 -->
+      <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">七、安全提示</h4>
+      <ul style="color:var(--tx2);font-size:12px;line-height:1.85;margin:0 0 14px;padding-left:18px">
+        <li>外网开放 DNS API 时，<strong>务必使用 HTTPS</strong>，避免 Token 在传输过程中被截获。</li>
+        <li>API Token 等同于管理员权限，请<strong>妥善保管</strong>，不要硬编码在公开仓库或客户端脚本中。</li>
+        <li>若不再需要外网访问，建议删除对应的 API Token，或仅通过本机 127.0.0.1 调用。</li>
+        <li>批量更新最大支持 100 条域名，超出请分批调用。</li>
+      </ul>
 
       <div class="form-actions" style="margin-top:18px;margin-bottom:0">
         <button type="button" class="btn btn-primary" onclick="closeModal('dns-api-modal')">关闭</button>

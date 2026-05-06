@@ -24,30 +24,29 @@ test('login logs and logs center support frontend filtering and level selection'
   try {
     await loginAsDevAdmin(page);
 
-    // login_logs.php AJAX endpoint returns seeded data
-    const loginLogsRes = await page.request.get('/admin/login_logs.php', {
+    // logs_api.php auth endpoint returns seeded data
+    const loginLogsRes = await page.request.get('/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
     expect(loginLogsRes.status()).toBe(200);
     const loginLogsBody = await loginLogsRes.json();
     expect(loginLogsBody.ok).toBe(true);
-    expect(JSON.stringify(loginLogsBody.rows)).toContain(`filter-user-${ts}`);
+    expect(JSON.stringify(loginLogsBody.lines)).toContain(`filter-user-${ts}`);
 
-    // logs.php page loads and supports keyword filtering via Ace Editor
+    // logs.php page loads and supports keyword filtering via inline preview
     await page.goto('/admin/logs.php', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#logsSidebar')).toBeVisible();
     // click auth log source
     await page.locator('[data-key="auth"]').click();
-    await expect(page.locator('#logEditor')).toBeVisible();
+    await expect(page.locator('#logPreview')).toBeVisible();
     // filter by non-matching keyword
     await page.locator('input#logKeyword').fill('zzzzzz-no-match');
     await page.waitForTimeout(300);
-    // verify Ace Editor shows no matching lines via JS
-    const filtered = await page.evaluate(() => {
-      const ed = (window as any).ace?.edit('logEditor');
-      return ed ? ed.getValue() : '';
-    });
-    expect(filtered).not.toContain(`filter-user-${ts}`);
+    // verify preview shows no-match message
+    const noMatch = page.locator('#logPreview .log-no-match');
+    await expect(noMatch).toBeVisible();
+    const text = await noMatch.textContent();
+    expect(text).not.toContain(`filter-user-${ts}`);
   } finally {
     writeContainerFile(containerAuthLogPath, originalAuthLog);
     await fs.writeFile(authLogPath, originalAuthLog, 'utf8').catch(() => undefined);

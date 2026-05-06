@@ -18,7 +18,7 @@ test('admin endpoints consistently reject guest and allow authenticated admin ac
   const guestHealth = await page.request.get('http://127.0.0.1:58080/admin/health_check.php?ajax=status');
   expect(guestHealth.status()).toBe(401);
 
-  const guestLoginLogs = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php', {
+  const guestLoginLogs = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
   expect(guestLoginLogs.status()).toBe(403);
@@ -43,7 +43,7 @@ test('admin endpoints consistently reject guest and allow authenticated admin ac
   expect(adminHealth.status()).toBe(200);
   expect(await adminHealth.json()).toMatchObject({ ok: true });
 
-  const adminLoginLogs = await page.request.get('http://127.0.0.1:58080/admin/login_logs.php', {
+  const adminLoginLogs = await page.request.get('http://127.0.0.1:58080/admin/logs_api.php?action=read&type=auth&offset=0&limit=20', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' },
   });
   expect(adminLoginLogs.status()).toBe(200);
