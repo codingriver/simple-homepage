@@ -1243,6 +1243,8 @@ function openLogModal(id, name) {
     + '<span id="st-log-page-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)">第 1 / 1 页</span>'
     + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-next" onclick="logLoadPage(logState.page+1, false)">下一页 ▶</button>'
     + '<button type="button" class="btn btn-sm btn-secondary" onclick="logLoadPage(1, false)" title="第一页">⏮</button>'
+    + '<input type="number" id="st-log-page-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;" onkeydown="if(event.key===\'Enter\'){var v=parseInt(this.value,10);if(!isNaN(v)&&v>=1&&v<=logState.pages){logLoadPage(v,false);}else{this.value=logState.page;}}">'
+    + '<button type="button" class="btn btn-sm btn-secondary" onclick="var el=document.getElementById(\'st-log-page-input\');var v=parseInt(el.value,10);if(!isNaN(v)&&v>=1&&v<=logState.pages){logLoadPage(v,false);}else{el.value=logState.page;}">跳转</button>'
     + '<button type="button" class="btn btn-sm btn-secondary" id="st-log-last-btn" onclick="logLoadPage(logState.pages, false)" title="最后一页">⏭</button>'
     + '</div>';
 
@@ -1383,12 +1385,14 @@ function logLoadPage(p, jumpToLast, options) {
       var prevBtn = document.getElementById('st-log-prev');
       var nextBtn = document.getElementById('st-log-next');
       var lastBtn = document.getElementById('st-log-last-btn');
+      var pageInput = document.getElementById('st-log-page-input');
 
       if (infoEl) infoEl.textContent = '共 ' + d.total + ' 行，每页 100 行';
       if (pageLabelEl) pageLabelEl.textContent = '第 ' + d.page + ' / ' + d.pages + ' 页';
       if (prevBtn) prevBtn.disabled = d.page <= 1;
       if (nextBtn) nextBtn.disabled = d.page >= d.pages;
       if (lastBtn) lastBtn.disabled = d.page >= d.pages;
+      if (pageInput) { pageInput.value = d.page; pageInput.max = d.pages; }
 
       if (!d.lines || d.lines.length === 0) {
         if (!options.silent) NavAceEditor.setValue('暂无日志记录');
