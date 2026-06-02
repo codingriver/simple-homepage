@@ -1,3 +1,5 @@
+> ⚠️ **历史文档（已过时）**：本项目已转型为 **纯后台管理面板**，前台导航 / 站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块均已移除。文档中相关章节仅供历史参考，最新功能请以 [`README.md`](../README.md) 和 [`AGENTS.md`](../AGENTS.md) 为准。
+
 # 导航网站 Docker 部署文档
 
 > 适用：任何支持 Docker 的 Linux / macOS / Windows（WSL2）环境。

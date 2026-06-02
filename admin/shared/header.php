@@ -31,16 +31,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
 // 与 auth_get_config 共用静态缓存，避免重复读 config.json
 $cfg_admin = auth_get_config();
-$site_name_admin = $cfg_admin['site_name'] ?? '导航中心';
+$site_name_admin = $cfg_admin['site_name'] ?? '后台中心';
 
-// 检测未生效的 proxy 站点
-$_pending_proxy = nginx_pending_sites();
+$_pending_proxy = [];
 
 // 导航菜单项定义
 $nav_items = [
     ['file' => 'index.php',    'icon' => '📊', 'label' => '控制台'],
-    ['file' => 'sites.php',    'icon' => '🔗', 'label' => '站点管理'],
-    ['file' => 'groups.php',   'icon' => '📁', 'label' => '分组管理'],
     ['sep'],
     ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
@@ -48,13 +45,14 @@ $nav_items = [
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
 
     ['sep'],
-    ['file' => 'settings.php',      'icon' => '⚙️', 'label' => '系统设置'],
-    ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知管理'],
-    ['file' => 'health_check.php',  'icon' => '💚', 'label' => '健康检测'],
-    ['file' => 'backups.php',       'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'api_tokens.php','icon' => '🔑', 'label' => 'API Token'],
     ['file' => 'users.php',    'icon' => '👥', 'label' => '用户管理'],
     ['file' => 'sessions.php', 'icon' => '📱', 'label' => '会话管理'],
+
+    ['sep'],
+    ['file' => 'settings.php',      'icon' => '⚙️', 'label' => '系统设置'],
+    ['file' => 'notifications.php', 'icon' => '🔔', 'label' => '通知管理'],
+    ['file' => 'backups.php',       'icon' => '💾', 'label' => '备份恢复'],
     ['file' => 'logs.php',     'icon' => '📄', 'label' => '日志中心'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
 ];

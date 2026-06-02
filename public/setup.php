@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password   = $_POST['password']        ?? '';
     $password2  = $_POST['password2']       ?? '';
     $site_name  = trim($_POST['site_name']  ?? '');
-    if ($site_name === '') $site_name = '导航中心';
+    if ($site_name === '') $site_name = '后台中心';
     $nav_domain = trim($_POST['nav_domain'] ?? '');
 
     $errors = auth_validate_setup_credentials($username, $password, $password2, $site_name);
@@ -78,7 +78,7 @@ NGINX;
 <!DOCTYPE html>
 <html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?></title>
+<title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?></title>
 <script src="/gesture-guard.js" defer></script>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ach:#7c73ff;
@@ -131,7 +131,7 @@ text-decoration:none;margin-top:8px}
 <body><div class="wrap">
 <?php if ($step === 'form'): ?>
 <div class="card">
-  <div class="logo"><div class="icon">🧭</div><h1><?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?></h1><div class="sub">首次安装向导</div></div>
+  <div class="logo"><div class="icon">🧭</div><h1><?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?></h1><div class="sub">首次安装向导</div></div>
   <div class="steps"><div class="s on"></div><div class="s"></div></div>
   <?php if (!empty($errors)): ?>
   <ul class="errs"><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul>
@@ -150,7 +150,7 @@ text-decoration:none;margin-top:8px}
     <hr class="sep">
     <div class="fg"><label>站点名称<em>*</em></label>
       <input type="text" name="site_name" required
-             value="<?= htmlspecialchars($_POST['site_name'] ?? '导航中心') ?>"></div>
+             value="<?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?>"></div>
     <div class="fg"><label>导航站域名</label>
       <input type="text" name="nav_domain" placeholder="nav.yourdomain.com"
              value="<?= htmlspecialchars($_POST['nav_domain'] ?? '') ?>">

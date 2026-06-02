@@ -29,7 +29,7 @@ if (($_GET['complete'] ?? '') === '1') {
         auth_set_cookie($pending_token, $pending_remember);
     }
 
-    $loc = $safe_redirect !== '' ? $safe_redirect : 'index.php';
+    $loc = $safe_redirect !== '' ? $safe_redirect : '/admin/';
     $loc_json = json_encode($loc, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     header('Content-Type: text/html; charset=UTF-8');
     header('Cache-Control: no-store');
@@ -57,7 +57,7 @@ setTimeout(function() {
 // 已登录则跳转到目标地址（若有），否则回首页
 $current_user = auth_get_current_user();
 if ($current_user) {
-    header('Location: ' . ($safe_redirect !== '' ? $safe_redirect : 'index.php'));
+    header('Location: ' . ($safe_redirect !== '' ? $safe_redirect : '/admin/'));
     exit;
 }
 // 被屏蔽时提示用户重新登录（全局变量由 auth_get_current_user() 设置）
@@ -151,7 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['post_login_token'] = $token;
                     $_SESSION['post_login_remember'] = $remember;
                     auth_write_log('SUCCESS', $username, $ip, $remember ? 'remember_me' : '');
-                    $completeUrl = '/login.php?complete=1&redirect=' . rawurlencode($safe_redirect ?: 'index.php');
+                    $completeUrl = '/login.php?complete=1&redirect=' . rawurlencode($safe_redirect ?: '/admin/');
                     header('Location: ' . $completeUrl);
                     exit;
                 }

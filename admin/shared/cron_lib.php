@@ -1362,42 +1362,11 @@ function cron_sync_ddns_dispatcher_task(): array {
 }
 
 function cron_is_favicon_sync_id(string $id): bool {
-    return $id === FAVICON_SYNC_TASK_ID;
+    return false;
 }
 
 function cron_sync_favicon_task(): array {
-    $scheduled = load_scheduled_tasks();
-    $taskRow = [
-        'id' => FAVICON_SYNC_TASK_ID,
-        'name' => '站点图标预抓取',
-        'enabled' => true,
-        'schedule' => '0 */6 * * *',
-        'command' => escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/favicon_sync.php',
-        'is_system' => true,
-        'description' => '自动预抓取所有站点图标到本地缓存，减少首页加载延迟。由系统维护，仅可修改执行周期。',
-    ];
-
-    $found = false;
-    foreach ($scheduled['tasks'] as &$task) {
-        if (($task['id'] ?? '') === FAVICON_SYNC_TASK_ID) {
-            $taskRow['schedule'] = $task['schedule'] ?? $taskRow['schedule'];
-            $taskRow['enabled'] = $task['enabled'] ?? $taskRow['enabled'];
-            $taskRow['last_run'] = $task['last_run'] ?? null;
-            $taskRow['last_code'] = $task['last_code'] ?? null;
-            $taskRow['last_output'] = $task['last_output'] ?? null;
-            $task = array_merge($task, $taskRow);
-            $found = true;
-            break;
-        }
-    }
-    unset($task);
-
-    if (!$found) {
-        $scheduled['tasks'][] = $taskRow;
-    }
-
-    save_scheduled_tasks($scheduled);
-    return ['ok' => true, 'task' => $taskRow];
+    return ['ok' => true, 'task' => null];
 }
 
 /**
@@ -1483,7 +1452,6 @@ function cron_validate_schedule(string $line): bool {
 
 function cron_regenerate(): array {
     cron_sync_ddns_dispatcher_task();
-    cron_sync_favicon_task();
     $lines   = [];
     $lines[] = '# simple-homepage generated — do not edit by hand';
     $lines[] = 'SHELL=/bin/bash';

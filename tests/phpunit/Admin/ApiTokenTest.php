@@ -10,7 +10,6 @@ final class ApiTokenTest extends TestCase
     {
         parent::setUp();
         auth_reset_config_cache();
-        @unlink(SITES_FILE);
         @unlink(CONFIG_FILE);
         @unlink(USERS_FILE);
         @unlink(IP_LOCKS_FILE);

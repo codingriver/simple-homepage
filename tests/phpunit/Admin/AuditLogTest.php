@@ -11,7 +11,6 @@ final class AuditLogTest extends TestCase
         parent::setUp();
         auth_reset_config_cache();
         @unlink(USERS_FILE);
-        @unlink(SITES_FILE);
         @unlink(CONFIG_FILE);
         @unlink(IP_LOCKS_FILE);
         @unlink(AUTH_LOG_FILE);

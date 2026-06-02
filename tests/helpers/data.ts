@@ -12,16 +12,12 @@ export async function resetVolatileAppData(): Promise<void> {
   // 1. 重置核心 JSON 数据文件（不删除，而是清空内容；Docker Desktop for Mac
   // 下删除后容器内可能无法重新创建同名文件，写入到 overlay 而非 bind mount）。
   const jsonFilesToReset: Record<string, string> = {
-    'sites.json': '{"groups":[]}',
     'api_tokens.json': '[]',
-    'health_cache.json': '{}',
     'dns_config.json': '{}',
     'ddns_tasks.json': '[]',
     'scheduled_tasks.json': '[]',
     'notifications.json': '[]',
     'sessions.json': '{}',
-    'ssh_hosts.json': '[]',
-    'ssh_keys.json': '[]',
 
     'ip_locks.json': '{}',
   };

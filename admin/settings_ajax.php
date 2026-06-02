@@ -37,17 +37,7 @@ if ($action === 'nginx_sudo') {
 }
 
 if ($action === 'health_sites_meta') {
-    $sites = [];
-    foreach (load_sites()['groups'] ?? [] as $g) {
-        foreach ($g['sites'] ?? [] as $s) {
-            $sites[] = [
-                'name' => $s['name'] ?? '',
-                'type' => $s['type'] ?? 'external',
-                'url'  => in_array(($s['type'] ?? ''), ['proxy','proxy_domain','proxy_path'], true) ? ($s['proxy_target'] ?? '') : ($s['url'] ?? ''),
-            ];
-        }
-    }
-    echo json_encode(['ok' => true, 'sites' => $sites], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true, 'sites' => []], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

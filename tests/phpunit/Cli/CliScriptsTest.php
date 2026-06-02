@@ -12,7 +12,6 @@ final class CliScriptsTest extends TestCase
         $this->projectRoot = realpath(__DIR__ . '/../../..');
         auth_reset_config_cache();
         @unlink(CONFIG_FILE);
-        @unlink(SITES_FILE);
         @unlink(USERS_FILE);
     }
 
@@ -33,8 +32,8 @@ CODE
         $argStr = implode(' ', array_map('escapeshellarg', $args));
         $cmd = escapeshellarg($php) . ' ' . escapeshellarg($wrapper) . ($argStr ? ' ' . $argStr : '') . ' 2>&1';
 
-        $cmdWithCode = 'bash -c ' . escapeshellarg($cmd . '; echo "___EXIT_CODE___$?"');
-        $fullOutput = shell_exec($cmdWithCode);
+        $cmdWithCode = 'sh -c ' . escapeshellarg($cmd . '; echo "___EXIT_CODE___$?"');
+        $fullOutput = shell_exec($cmdWithCode) ?? '';
         $exitCode = 0;
         $output = $fullOutput;
         if (preg_match('/___EXIT_CODE___(\d+)$/s', $fullOutput, $m)) {
@@ -44,13 +43,6 @@ CODE
 
         unlink($wrapper);
         return ['output' => trim($output), 'exitCode' => $exitCode];
-    }
-
-    public function testHealthCheckCronForceFlag(): void
-    {
-        $result = $this->runCli('cli/health_check_cron.php', ['--force']);
-        $this->assertStringContainsString('health check finished', $result['output']);
-        $this->assertSame(0, $result['exitCode']);
     }
 
     public function testRunScheduledTaskWithoutIdShowsError(): void

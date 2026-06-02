@@ -7,7 +7,9 @@
 
 ## 项目概述
 
-**Simple Homepage**（私有导航首页）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管导航面板。它不只是书签页，还集成了站点/分组管理、反向代理入口、DNS 管理、DDNS 动态解析、计划任务、配置备份与恢复、Webhook 通知等能力。
+**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 计划任务 / Nginx 在线编辑 / 备份 / 用户 / API Token / Webhook 等运维能力。
+
+> 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/`。
 
 - **GitHub**: https://github.com/codingriver/simple-homepage
 - **Docker Hub**: https://hub.docker.com/r/codingriver/simple-homepage
@@ -56,56 +58,45 @@
 ## 代码组织
 
 ```text
-public/          # 前台入口
-  index.php      # 首页：分组卡片、搜索过滤、Tab 切换、最近访问、Cmd+K 命令面板、PWA
+public/          # 公共入口（最小化）
+  index.php      # 直接 302 跳转到 /admin/
   login.php      # 登录页：CSRF、IP 锁定、记住我、开发模式提示
-  setup.php      # 安装向导：首次部署引导、生成 Nginx 配置示例、创建管理员
+  setup.php      # 安装向导：首次部署引导、创建管理员
   logout.php     # 退出登录（清除 Cookie）
-  bg.php         # 背景图安全输出（防路径遍历）
-  favicon.php    # Favicon 代理抓取（SSRF 防护、缓存 7 天、魔数校验）
-
-  sw.js          # Service Worker（PWA 缓存策略）
-  gesture-guard.js # 移动端手势拦截（防止边缘滑动返回）
-  manifest.webmanifest # PWA 清单
-  api/           # 公开 API
-    sites.php    # 返回站点分组数据（Bearer Token 或 URL Token 验证）
-    dns.php      # DNS API（本机免 Token + 外网 Bearer/URL Token 认证，支持 query/update/batch_update）
   auth/
     verify.php   # Nginx auth_request 鉴权端点（返回 200 + X-Auth-User/X-Auth-Role 或 401）
 
-admin/           # 后台管理页面和 AJAX API
-  *.php          # 后台页面（共 39 个，按功能分组如下）
-    站点与分组：sites.php、groups.php
-    用户与认证：users.php、sessions.php、logs.php（登录认证日志在统一日志中心查看）
-    系统与设置：settings.php、configs.php
-    网络与代理：nginx.php、dns.php、ddns.php
-    宿主机与 Docker：host_runtime.php、docker_hosts.php、manifests.php、packages.php
-    文件与审计：files.php、file_audit.php、share_service_audit.php
-    任务与计划：scheduled_tasks.php、tasks.php
-    备份与日志：backups.php、logs.php、logs_api.php
-    健康与证书：health_check.php
-    调试：debug.php、index.php（后台首页）
-  *_ajax.php / *_api.php  # AJAX 端点（ddns_ajax.php、settings_ajax.php、sessions_api.php 等）
-  api/           # 后台专用 API（task_status.php、task_log.php）
-  shared/        # 后台共享库
-    functions.php      # 后台主函数库：站点/配置读写、CSRF、备份恢复、健康检查、Nginx 代理管理、审计日志、回收站
-    header.php         # 后台页面模板头（权限验证、侧边栏导航、Flash Toast、待生效代理警告）
-    footer.php         # 后台页面模板尾（关闭标签、暴露 window._csrf）
-    admin.css          # 后台统一暗色主题（Obsidian Terminal 风格）
-    dns_lib.php / dns_api_lib.php / ddns_lib.php / cron_lib.php 等 # 各业务领域函数库
-  assets/        # 静态资源：Ace Editor（本地）、SortableJS（CDN）
+admin/           # 后台管理页面和 AJAX API（核心模块）
+  index.php            # 后台首页（管理员/用户/备份卡片 + 快捷入口）
+  users.php            # 用户管理（含角色/权限/会话上限）
+  sessions.php / sessions_api.php  # 会话管理
+  api_tokens.php       # API Token 颁发与撤销
+  settings.php / settings_ajax.php # 系统设置
+  notifications.php    # Webhook 通知配置
+  dns.php / ddns.php / ddns_ajax.php # DNS / DDNS
+  scheduled_tasks.php  # 计划任务（含日志）
+  nginx.php            # Nginx / PHP-FPM / PHP 自定义参数 在线编辑器（语法校验 + 兼容回滚）
+  backups.php          # 备份创建 / 恢复 / 下载 / 删除
+  logs.php / logs_api.php  # 日志中心
+  debug.php            # 调试工具
+  api/                 # 后台专用 API（task_status / task_log 等）
+  shared/              # 后台共享库
+    functions.php      # 主函数库：配置读写、CSRF、备份恢复、Nginx 在线编辑、审计日志、回收站、Webhook
+    header.php         # 后台页面模板头（权限校验、侧边栏、Flash Toast）
+    footer.php         # 页面模板尾
+    admin.css          # 后台暗色主题
+    dns_lib.php / dns_api_lib.php / ddns_lib.php / cron_lib.php / alidns.php 等  # 各业务领域函数库
+  assets/              # Ace Editor（本地）、SortableJS（CDN）
 
-shared/          # 核心共享库（前后台共用）
+shared/          # 核心共享库
   auth.php           # 核心认证库：JWT-like Token、Cookie、用户管理、IP 锁定、CSRF、会话撤销、权限系统
   http_client.php    # 带 SSRF 防护的 HTTP 客户端（curl 优先，fallback 到 file_get_contents）
-  request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
   request_timing.php # 请求耗时日志（recv/done 双阶段，自动轮转 10MB + gzip，7 天保留）
 
 cli/             # CLI 脚本
   run_scheduled_task.php   # 计划任务执行器（硬超时 3600s、PID 锁、僵尸锁清理）
   ddns_sync.php            # DDNS 同步
   alidns_sync.php          # 阿里云 DNS 同步
-  health_check_cron.php    # 健康检查定时任务
   manage_users.php         # 用户管理 CLI（list/info/add/passwd/del/reset）
 
 python/          # Python 辅助脚本
@@ -114,36 +105,36 @@ python/          # Python 辅助脚本
 docker/          # Docker 构建配置
   nginx.conf / docker-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh
 
-nginx-conf/      # Nginx 配置模板
-  proxy-params-simple.conf / proxy-params-full.conf / proxy-template-domain.conf / proxy-template-path.conf
+nginx-conf/      # Nginx 站点配置（仅 admin 后台）
+  docker-site.conf
 
 data/            # 持久化数据目录（必须挂载到宿主机）
-  config.json / sites.json / users.json / scheduled_tasks.json / dns_config.json / ddns_tasks.json
-  notifications.json / ip_locks.json / sessions.json / auth_secret.key
-  backups/ / logs/ / tasks/ / favicon_cache/ / bg/ / nginx/
+  config.json / users.json / api_tokens.json / scheduled_tasks.json
+  dns_config.json / ddns_tasks.json / notifications.json
+  ip_locks.json / sessions.json / auth_secret.key
+  backups/ / logs/ / tasks/ / nginx/ / php-fpm/ / php/ / trash/
 
   `users.json` 用户记录字段：
   - `password_hash`（string）：bcrypt 哈希
-  - `role`（string）：admin / user / host_admin / host_viewer
+  - `role`（string）：admin / user
   - `permissions`（string[]）：权限列表，保存时自动按角色重置
   - `max_sessions`（int）：最大同时在线设备数，默认 3
-  - `blocked_ips`（string[]）：屏蔽的 IP 列表，支持单个 IP 或 CIDR（如 `192.168.1.0/24`）
-  - `blocked_domains`（string[]）：屏蔽的域名列表，支持 `*.example.com` 通配符
+  - `blocked_ips`（string[]）：屏蔽的 IP 列表，支持单个 IP 或 CIDR
+  - `blocked_domains`（string[]）：屏蔽的域名列表，支持通配符
   - `created_at` / `updated_at`（string）
   - 开发模式虚拟用户 `qatest` 的屏蔽规则存储在 `config.json` 的 `dev_account_blocked_ips` / `dev_account_blocked_domains`
 
 tests/
-  e2e/full/      # Playwright E2E 测试（171 个 spec 文件，覆盖所有主要功能模块）
-  phpunit/       # PHPUnit 单元测试（9 个测试类，Shared/Admin/Subsite 三个套件）
-  helpers/       # auth.ts（登录/登出）、fixtures.ts（扩展 base test）、data.ts（resetVolatileAppData）、cli.ts（Docker CLI 封装）
-  fixtures/      # 测试固件（import-valid.json、import-invalid.json）
+  e2e/full/      # Playwright E2E 测试（已大幅精简，仅保留与后台仍存模块对应的用例）
+  phpunit/       # PHPUnit 单元测试，套件：Shared / Admin / Subsite / Public / Cli / Docker
+  helpers/       # auth.ts（登录/登出）、fixtures.ts、data.ts（resetVolatileAppData）、cli.ts
 
 local/           # 本地开发环境
   docker-compose.yml / docker-compose.dev.yml / docker-compose.test.yml
   docker-build.sh / .env.example / php-dev.ini / README.md
 
 subsite-middleware/
-  auth_check.php # 子站统一鉴权中间件（URL Token 传递 → Cookie → 用户信息暴露）
+  auth_check.php # 历史保留的子站统一鉴权中间件（独立可复用脚本；本后台已不再生成反代）
 ```
 
 ### 页面与 API 的两种模式

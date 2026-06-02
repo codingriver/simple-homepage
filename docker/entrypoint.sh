@@ -137,15 +137,13 @@ fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p /var/spool/cron/crontabs
-if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/favicon_cache /var/www/nav/data/bg /var/www/nav/data/nginx /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
+if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/nginx /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
     echo "[entrypoint][ERROR] 无法在 /var/www/nav/data 下创建运行目录，请检查宿主机挂载目录权限，或设置 PUID/PGID 对齐。"
     exit 1
 fi
 nav_require_writable_dir /var/www/nav/data
 nav_require_writable_dir /var/www/nav/data/backups
 nav_require_writable_dir /var/www/nav/data/logs
-nav_require_writable_dir /var/www/nav/data/favicon_cache
-nav_require_writable_dir /var/www/nav/data/bg
 nav_require_writable_dir /var/www/nav/data/nginx
 nav_require_writable_dir /var/www/nav/data/php
 nav_require_writable_dir /var/www/nav/data/php-fpm
@@ -171,36 +169,10 @@ if [ -n "${ADMIN:-}" ]; then
     fi
 fi
 
-# ── 确保反代配置文件持久化到 data 目录，/etc/nginx 仅保留运行时软链 ──
-mkdir -p /etc/nginx/conf.d /etc/nginx/http.d /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d
+# ── 确保 nginx 运行时目录存在 ──
+mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
 
-ensure_nginx_proxy_link() {
-    runtime_path="$1"
-    data_path="$2"
-    label="$3"
-
-    if [ ! -f "$data_path" ]; then
-        if [ -f "$runtime_path" ] && [ ! -L "$runtime_path" ]; then
-            cp "$runtime_path" "$data_path"
-            echo "[entrypoint] 已迁移 $label 到 ${data_path}"
-        else
-            touch "$data_path"
-        fi
-    fi
-
-    if [ -e "$runtime_path" ] && [ ! -L "$runtime_path" ]; then
-        bak="${runtime_path}.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$runtime_path" "$bak"
-        echo "[entrypoint] 已备份旧运行时 $label: $bak"
-    fi
-
-    ln -sf "$data_path" "$runtime_path"
-    chown navwww:navwww "$data_path"
-    chmod 664 "$data_path"
-}
-
-ensure_nginx_proxy_link /etc/nginx/conf.d/nav-proxy.conf /var/www/nav/data/nginx/conf.d/nav-proxy.conf "路径前缀代理配置"
-ensure_nginx_proxy_link /etc/nginx/http.d/nav-proxy-domains.conf /var/www/nav/data/nginx/http.d/nav-proxy-domains.conf "子域名代理配置"
+# ⚠️ 后台管理版本不再生成倒反代配置，nav-proxy.conf 软链逻辑已移除
 
 # ── 系统配置文件持久化到 data 目录（容器重建后配置不丢失）──
 
@@ -351,11 +323,7 @@ else
     fi
 fi
 
-# ── 根据持久化数据预生成反代配置（容器重建后 /etc/nginx 下的动态配置会丢失）──
-if [ -f /var/www/nav/data/sites.json ]; then
-    su navwww -s /bin/sh -c 'php -r '\''require "/var/www/nav/admin/shared/functions.php"; $result = nginx_apply_proxy_conf(false); echo "[entrypoint] " . ($result["msg"] ?? "proxy config generate skipped") . PHP_EOL;'\''' || \
-        echo "[entrypoint][WARN] 反代配置预生成失败，容器将继续启动，可稍后在后台手动 Reload Nginx"
-fi
+# ⚠️ 后台管理版本不再从 sites.json 预生成反代配置
 
 # ── 根据持久化数据预生成 crontab（容器重建后 /var/spool/cron/crontabs 下的配置会丢失）──
 if [ -f /var/www/nav/data/scheduled_tasks.json ]; then

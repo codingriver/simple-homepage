@@ -68,23 +68,15 @@ define('AUTH_LOGIN_LOCK_MINUTES_DEFAULT', 15);
  */
 function auth_default_config(): array {
     return [
-        'site_name'           => '导航中心',
+        'site_name'           => '后台中心',
         'nav_domain'          => '',
         'token_expire_hours'  => AUTH_TOKEN_EXPIRE_HOURS_DEFAULT,
         'remember_me_days'    => AUTH_REMEMBER_ME_DAYS_DEFAULT,
         'login_fail_limit'    => AUTH_LOGIN_FAIL_LIMIT_DEFAULT,
         'login_lock_minutes'  => AUTH_LOGIN_LOCK_MINUTES_DEFAULT,
-        'bg_color'            => '',
-        'bg_image'            => '',
         'cookie_secure'       => 'off',
         'cookie_domain'       => '',
-        'card_size'           => 140,
-        'card_height'         => 0,
-        'card_show_desc'      => '1',
-        'card_layout'         => 'grid',
-        'card_direction'      => 'col',
         'display_errors'      => '0',
-        'proxy_params_mode'   => 'simple',
         'theme'               => 'dark',
         'custom_css'          => '',
         'webhook_enabled'     => '0',
@@ -94,7 +86,6 @@ function auth_default_config(): array {
         'webhook_events'      => 'FAIL,IP_LOCKED',
 
         'task_execution_timeout' => 7200,
-        'nginx_last_applied'  => 0,
 
     ];
 }
@@ -490,7 +481,7 @@ function auth_get_initial_admin_config(): ?array {
     }
 
     if ($site === '') {
-        $site = '导航中心';
+        $site = '后台中心';
     }
 
     return [
@@ -515,8 +506,6 @@ function auth_apply_initial_install(string $username, string $password, string $
     foreach ([
         DATA_DIR . '/backups',
         DATA_DIR . '/logs',
-        DATA_DIR . '/favicon_cache',
-        DATA_DIR . '/bg',
     ] as $d) {
         if (!is_dir($d)) {
             mkdir($d, 0755, true);
@@ -532,17 +521,9 @@ function auth_apply_initial_install(string $username, string $password, string $
         'remember_me_days'   => 60,
         'login_fail_limit'   => 5,
         'login_lock_minutes' => 15,
-        'bg_color'           => '',
-        'bg_image'           => '',
         'cookie_secure'      => 'off',
         'cookie_domain'      => '',
-        'card_size'          => 140,
-        'card_height'        => 0,
-        'card_show_desc'     => '1',
-        'card_layout'        => 'grid',
-        'card_direction'     => 'col',
         'display_errors'     => '0',
-        'proxy_params_mode'  => 'simple',
         'webhook_enabled'    => '0',
         'webhook_type'       => 'custom',
         'webhook_url'        => '',
@@ -554,23 +535,6 @@ function auth_apply_initial_install(string $username, string $password, string $
         json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         LOCK_EX
     );
-
-    if (!file_exists(DATA_DIR . '/sites.json')) {
-        $sites = ['groups' => [[
-            'id'            => 'default',
-            'name'          => '我的应用',
-            'icon'          => '🌐',
-            'order'         => 0,
-            'auth_required' => true,
-            'visible_to'    => 'all',
-            'sites'         => [],
-        ]]];
-        file_put_contents(
-            DATA_DIR . '/sites.json',
-            json_encode($sites, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-            LOCK_EX
-        );
-    }
 
     auth_mark_installed();
     auth_write_log('SETUP', $username, get_client_ip(), 'initial_setup');

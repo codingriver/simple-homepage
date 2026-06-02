@@ -13,11 +13,9 @@ test('logs api supports clear_all and download', async ({ page }) => {
 
   // seed log files (容器内写入避免 Docker Desktop bind-mount 同步问题)
   writeContainerFile(`${containerLogsDir}/dns.log`, `dns log entry ${ts}\n`);
-  writeContainerFile(`${containerLogsDir}/ssh_manager_audit.log`, `ssh audit entry ${ts}\n`);
   writeContainerFile(`${containerLogsDir}/audit.log`, `audit entry ${ts}\n`);
   await fs.mkdir(logsDir, { recursive: true }).catch(() => undefined);
   await fs.writeFile(path.join(logsDir, 'dns.log'), `dns log entry ${ts}\n`, 'utf8').catch(() => undefined);
-  await fs.writeFile(path.join(logsDir, 'ssh_manager_audit.log'), `ssh audit entry ${ts}\n`, 'utf8').catch(() => undefined);
   await fs.writeFile(path.join(logsDir, 'audit.log'), `audit entry ${ts}\n`, 'utf8').catch(() => undefined);
 
   await loginAsDevAdmin(page);

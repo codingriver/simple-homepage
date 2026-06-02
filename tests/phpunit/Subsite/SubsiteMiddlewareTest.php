@@ -7,6 +7,9 @@ final class SubsiteMiddlewareTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        if (trim((string)@shell_exec('command -v ss 2>/dev/null')) === '') {
+            $this->markTestSkipped('Subsite middleware tests require the `ss` command for port detection.');
+        }
         auth_ensure_secret_key();
         @unlink(DATA_DIR . '/sessions.json');
         putenv('NAV_AUTH_PHP_PATH');

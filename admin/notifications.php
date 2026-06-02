@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cfg['webhook_url']     = trim($_POST['webhook_url']     ?? '');
         $cfg['webhook_tg_chat'] = trim($_POST['webhook_tg_chat'] ?? '');
         $events_raw = $_POST['webhook_events'] ?? [];
-        $allowed_events = ['SUCCESS','FAIL','IP_LOCKED','LOGOUT','SETUP','HEALTH_DOWN'];
+        $allowed_events = ['SUCCESS','FAIL','IP_LOCKED','LOGOUT','SETUP'];
         $events = array_values(array_intersect((array)$events_raw, $allowed_events));
         $cfg['webhook_events']  = implode(',', $events ?: ['FAIL','IP_LOCKED']);
         save_config($cfg);
@@ -82,7 +82,7 @@ $cfg = auth_get_config();
         <div style="display:flex;gap:16px;flex-wrap:wrap">
           <?php
           $wevents = array_filter(array_map('trim', explode(',', $cfg['webhook_events']??'FAIL,IP_LOCKED')));
-          $event_labels = ['SUCCESS'=>'✅ 登录成功','FAIL'=>'❌ 登录失败','IP_LOCKED'=>'🔒 IP被锁定','LOGOUT'=>'🚪 退出登录','SETUP'=>'🎉 初始安装','HEALTH_DOWN'=>'💔 健康告警'];
+          $event_labels = ['SUCCESS'=>'✅ 登录成功','FAIL'=>'❌ 登录失败','IP_LOCKED'=>'🔒 IP被锁定','LOGOUT'=>'🚪 退出登录','SETUP'=>'🎉 初始安装'];
           foreach ($event_labels as $ev => $el): ?>
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
             <input type="checkbox" name="webhook_events[]" value="<?=$ev?>" <?= in_array($ev,$wevents)?'checked':'' ?>

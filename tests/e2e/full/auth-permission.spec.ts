@@ -10,7 +10,6 @@ test('non-admin user cannot access admin-only pages', async ({ page }) => {
       /Pattern attribute value \[a-zA-Z0-9_-\]\{2,32\} is not a valid regular expression/,
     ],
     ignoredFailedRequests: [
-      /GET .*\/favicon\.php\?url=https%3A%2F%2Fexample\.com :: net::ERR_ABORTED/,
     ],
   });
   const username = `user${Date.now()}`;

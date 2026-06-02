@@ -78,60 +78,46 @@ if (isset($_GET['download']) || isset($_GET['export']) || $_SERVER['REQUEST_METH
             }
             @set_time_limit(0);
             backup_create('auto_import');
-            if (isset($obj['sites']['groups']) && is_array($obj['sites']['groups'])) {
-                $merged_cfg = !empty($obj['config']) && is_array($obj['config'])
-                    ? array_merge(auth_default_config(), $obj['config'])
-                    : auth_default_config();
-                $apply = [
-                    'sites'  => $obj['sites'],
-                    'config' => $merged_cfg,
-                ];
-                if (isset($obj['scheduled_tasks']) && is_array($obj['scheduled_tasks'])) {
-                    $apply['scheduled_tasks'] = $obj['scheduled_tasks'];
-                }
-                if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
-                    $apply['dns_config'] = $obj['dns_config'];
-                }
-                if (isset($obj['ddns_tasks']) && is_array($obj['ddns_tasks'])) {
-                    $apply['ddns_tasks'] = $obj['ddns_tasks'];
-                }
-                backup_apply_restored_sections($apply);
-                $gc = count($obj['sites']['groups']);
-                $parts = [$gc . ' 个分组'];
-                $credential_count = 0;
-                foreach ($obj['sites']['groups'] as $group) {
-                    foreach (($group['sites'] ?? []) as $site) {
-                        if (!empty($site['credential_username']) || !empty($site['credential_password']) || !empty($site['credential_note'])) {
-                            $credential_count++;
-                        }
-                    }
-                }
-                if ($credential_count > 0) {
-                    $parts[] = $credential_count . ' 条站点凭据（明文）';
-                }
-                if (isset($apply['scheduled_tasks']) && is_array($apply['scheduled_tasks'])) {
-                    $tc = count($apply['scheduled_tasks']['tasks'] ?? []);
-                    $parts[] = $tc . ' 条计划任务';
-                }
-                if (isset($apply['dns_config'])) {
-                    $parts[] = 'DNS 账户已同步';
-                }
-                if (isset($apply['ddns_tasks'])) {
-                    $dc = count($apply['ddns_tasks']['tasks'] ?? []);
-                    if ($dc > 0) {
-                        $parts[] = $dc . ' 条 DDNS 任务';
-                    }
-                }
-                audit_log('settings_import', ['format' => 'full', 'groups' => $gc]);
-                flash_set('success', '导入成功（完整格式）：' . implode('，', $parts) . '；旧配置已自动备份');
-            } elseif (isset($obj['groups']) && is_array($obj['groups'])) {
-                file_put_contents(SITES_FILE, json_encode($obj, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-                audit_log('settings_import', ['format' => 'legacy', 'groups' => count($obj['groups'])]);
-                flash_set('success', '导入成功（站点格式），共 ' . count($obj['groups']) . ' 个分组，旧配置已自动备份');
-            } else {
-                flash_set('error', '文件结构无效：无法识别的配置格式，请使用导出配置或备份文件');
+            $apply = [];
+            $merged_cfg = !empty($obj['config']) && is_array($obj['config'])
+                ? array_merge(auth_default_config(), $obj['config'])
+                : null;
+            if ($merged_cfg !== null) {
+                $apply['config'] = $merged_cfg;
+            }
+            if (isset($obj['scheduled_tasks']) && is_array($obj['scheduled_tasks'])) {
+                $apply['scheduled_tasks'] = $obj['scheduled_tasks'];
+            }
+            if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
+                $apply['dns_config'] = $obj['dns_config'];
+            }
+            if (isset($obj['ddns_tasks']) && is_array($obj['ddns_tasks'])) {
+                $apply['ddns_tasks'] = $obj['ddns_tasks'];
+            }
+            if (empty($apply)) {
+                flash_set('error', '文件结构无效：未识别到有效的备份数据（config / scheduled_tasks / dns_config / ddns_tasks）');
                 header('Location: backups.php'); exit;
             }
+            backup_apply_restored_sections($apply);
+            $parts = [];
+            if (isset($apply['config'])) {
+                $parts[] = '系统配置已同步';
+            }
+            if (isset($apply['scheduled_tasks']) && is_array($apply['scheduled_tasks'])) {
+                $tc = count($apply['scheduled_tasks']['tasks'] ?? []);
+                $parts[] = $tc . ' 条计划任务';
+            }
+            if (isset($apply['dns_config'])) {
+                $parts[] = 'DNS 账户已同步';
+            }
+            if (isset($apply['ddns_tasks'])) {
+                $dc = count($apply['ddns_tasks']['tasks'] ?? []);
+                if ($dc > 0) {
+                    $parts[] = $dc . ' 条 DDNS 任务';
+                }
+            }
+            audit_log('settings_import', ['format' => 'full', 'sections' => array_keys($apply)]);
+            flash_set('success', '导入成功：' . implode('，', $parts) . '；旧配置已自动备份');
             header('Location: backups.php'); exit;
         }
 
@@ -212,15 +198,13 @@ function trigger_badge(string $t): string {
     <p style="color:var(--tm);font-size:13px;padding:8px 0">暂无备份记录</p>
   <?php else: ?>
   <div class="table-wrap"><table>
-    <tr><th>备份时间</th><th>触发方式</th><th>分组数</th><th>站点数</th><th>大小</th><th>操作</th></tr>
+    <tr><th>备份时间</th><th>触发方式</th><th>大小</th><th>操作</th></tr>
     <?php foreach ($backups as $bk): ?>
     <tr>
       <td style="font-family:monospace;font-size:12px;white-space:nowrap">
         <?= htmlspecialchars($bk['created_at']) ?></td>
       <td><span class="badge <?= trigger_badge($bk['trigger']) ?>">
         <?= htmlspecialchars(trigger_label($bk['trigger'])) ?></span></td>
-      <td><?= $bk['groups_count'] ?></td>
-      <td><?= $bk['sites_count'] ?></td>
       <td style="font-size:12px"><?= round($bk['size']/1024, 1) ?> KB</td>
       <td>
         <a href="?download=<?= urlencode($bk['filename']) ?>"
@@ -248,8 +232,8 @@ function trigger_badge(string $t): string {
   <div class="card-title">ℹ️ 备份方案说明</div>
   <ul style="color:var(--tm);font-size:13px;line-height:2;padding-left:18px">
     <li><strong>单文件 JSON</strong>：与「设置 → 导出配置」结构相同，一条记录对应一次快照。</li>
-    <li><strong>包含内容</strong>：<code>sites</code>（站点分组，含站点测试账号密码明文）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）、<code>ddns_tasks</code>（DDNS 动态解析任务）。</li>
-    <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务脚本与运行日志（<code>data/tasks/*.sh</code>、<code>data/tasks/*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
+    <li><strong>包含内容</strong>：<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）、<code>ddns_tasks</code>（DDNS 动态解析任务）。</li>
+    <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、计划任务脚本与运行日志（<code>data/tasks/*.sh</code>、<code>data/tasks/*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
     <li><strong>恢复与导入</strong>：写入计划任务后会重新生成系统 crontab；写入 DNS 配置后会清除本机 DNS Zone 缓存。</li>
     <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的；恢复或导入前会先自动备份当前状态。</li>
     <li>触发方式：手动 / 自动-导入 / 自动-设置 / 自动-恢复前（见列表中「触发方式」列）。</li>
@@ -270,41 +254,25 @@ function handleImportFile(input) {
     reader.onload = function(e) {
         try {
             var obj = JSON.parse(e.target.result);
-            var groupCount = 0;
-            var formatLabel = '';
-            if (obj && obj.sites && Array.isArray(obj.sites.groups)) {
-                groupCount = obj.sites.groups.length;
-                var extras = [];
-                var credentialCount = 0;
-                (obj.sites.groups || []).forEach(function(g) {
-                    (g.sites || []).forEach(function(s) {
-                        if (s && (s.credential_username || s.credential_password || s.credential_note)) credentialCount++;
-                    });
-                });
-                if (credentialCount) {
-                    extras.push('站点凭据 ' + credentialCount + ' 条（明文）');
-                }
-                var tasks = obj.scheduled_tasks && obj.scheduled_tasks.tasks;
-                if (Array.isArray(tasks) && tasks.length) {
-                    extras.push('计划任务 ' + tasks.length + ' 条（含脚本）');
-                }
-                if (obj.dns_config && typeof obj.dns_config === 'object') {
-                    extras.push('DNS 账户');
-                }
-                var ddnsTasks = obj.ddns_tasks && obj.ddns_tasks.tasks;
-                if (Array.isArray(ddnsTasks) && ddnsTasks.length) {
-                    extras.push('DDNS 任务 ' + ddnsTasks.length + ' 条');
-                }
-                formatLabel = '完整备份格式，' + groupCount + ' 个分组及系统配置' +
-                    (extras.length ? '，另含 ' + extras.join('、') : '');
-            } else if (obj && Array.isArray(obj.groups)) {
-                groupCount = obj.groups.length;
-                formatLabel = '站点格式，含 ' + groupCount + ' 个分组';
-            } else {
+            var sections = [];
+            if (obj && obj.config) sections.push('系统配置');
+            var tasks = obj && obj.scheduled_tasks && obj.scheduled_tasks.tasks;
+            if (Array.isArray(tasks) && tasks.length) {
+                sections.push('计划任务 ' + tasks.length + ' 条（含脚本）');
+            }
+            if (obj && obj.dns_config && typeof obj.dns_config === 'object') {
+                sections.push('DNS 账户');
+            }
+            var ddnsTasks = obj && obj.ddns_tasks && obj.ddns_tasks.tasks;
+            if (Array.isArray(ddnsTasks) && ddnsTasks.length) {
+                sections.push('DDNS 任务 ' + ddnsTasks.length + ' 条');
+            }
+            if (sections.length === 0) {
                 showToast('无法识别的配置格式，请使用导出配置或备份文件', 'error');
                 input.value = '';
                 return;
             }
+            var formatLabel = '包含：' + sections.join('、');
             NavConfirm.open({
                 title: '导入配置',
                 message: '确认导入？' + formatLabel + '，当前配置将被覆盖（自动备份）',
