@@ -11,6 +11,7 @@
 // 配置区（AUTH_SECRET_KEY 优先读环境变量，其次读 data/auth_secret.key）
 // ============================================================
 define('SESSION_COOKIE_NAME', 'nav_session');
+define('PHP_SESSION_COOKIE_NAME', 'nav_php_session');
 define('NAV_DOMAIN',        'nav.yourdomain.com');
 define('COOKIE_DOMAIN',     '.yourdomain.com');   // 前面有点，支持所有子域共享
 define('NAV_LOGIN_URL',     'https://nav.yourdomain.com/login.php');
@@ -26,6 +27,28 @@ define('INSTALLED_FLAG',    DATA_DIR . '/.installed');
 define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
 /** 登录日志最多保留条数（仅 tail，写入后自动裁剪，避免读全文件） */
 define('AUTH_LOG_MAX_LINES', 10);
+
+/**
+ * 启动 Homepage 自己的 PHP Session。
+ * 使用专用 Cookie 名称，避免被代理后端常见的 PHPSESSID 污染 CSRF Session。
+ */
+function auth_start_php_session(): void {
+    if (session_status() !== PHP_SESSION_NONE) {
+        return;
+    }
+    if (session_name() !== PHP_SESSION_COOKIE_NAME) {
+        session_name(PHP_SESSION_COOKIE_NAME);
+    }
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => auth_request_scheme() === 'https',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
 /** 开发模式标记（容器 entrypoint 根据 NAV_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
 define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
@@ -649,59 +672,122 @@ function auth_generate_token(string $username, string $role = 'user', bool $reme
  * @return array|false
  */
 function auth_verify_token(string $token) {
+    $result = auth_verify_token_detailed($token);
+    return $result['ok'] ? $result['payload'] : false;
+}
+
+/**
+ * 验证 Token，并返回失败原因，供 auth_request 日志和测试断言使用。
+ *
+ * @return array{ok: bool, payload: array|null, reason: string}
+ */
+function auth_verify_token_detailed(string $token): array {
     $parts = explode('.', $token, 2);
-    if (count($parts) !== 2) return false;
+    if (count($parts) !== 2) {
+        return ['ok' => false, 'payload' => null, 'reason' => 'malformed'];
+    }
     [$data, $sig] = $parts;
     // 时间安全的签名比对，防时序攻击
     $expected = hash_hmac('sha256', $data, auth_secret_key());
-    if (!hash_equals($expected, $sig)) return false;
+    if (!hash_equals($expected, $sig)) {
+        return ['ok' => false, 'payload' => null, 'reason' => 'bad_signature'];
+    }
     $payload = json_decode(base64_decode($data), true);
-    if (!$payload || !isset($payload['exp'])) return false;
+    if (!$payload || !isset($payload['exp'])) {
+        return ['ok' => false, 'payload' => null, 'reason' => 'bad_payload'];
+    }
     if (time() > $payload['exp']) {
         if (!empty($payload['jti'])) {
             auth_session_revoke((string)$payload['jti']);
         }
-        return false;
+        return ['ok' => false, 'payload' => null, 'reason' => 'expired'];
     }
     if (!empty($payload['jti']) && !auth_session_exists((string)$payload['jti'])) {
-        return false;
+        return ['ok' => false, 'payload' => null, 'reason' => 'session_missing'];
     }
     if (!empty($payload['jti'])) {
         auth_session_touch((string)$payload['jti']);
     }
-    return $payload;
+    return ['ok' => true, 'payload' => $payload, 'reason' => 'ok'];
 }
 
 // ── 会话管理 ──
 
-function auth_session_register(string $jti, string $username, string $token, int $expiresAt = 0): void {
+/**
+ * 带共享锁读取会话文件，避免读到其他请求 ftruncate 后尚未写完的半截 JSON。
+ */
+function auth_sessions_read_locked(): array {
+    if (!file_exists(SESSIONS_FILE)) {
+        return [];
+    }
+
+    $fp = fopen(SESSIONS_FILE, 'r');
+    if (!$fp) {
+        return [];
+    }
+
+    flock($fp, LOCK_SH);
+    rewind($fp);
+    $content = stream_get_contents($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+
+    return json_decode($content ?: '{}', true) ?? [];
+}
+
+/**
+ * 在独占锁内完成 session 读改写。
+ * mutator 返回 false 时表示无需写回，其余返回值都会触发写回并原样返回。
+ */
+function auth_sessions_update_locked(callable $mutator) {
     $dir = dirname(SESSIONS_FILE);
     if (!is_dir($dir)) mkdir($dir, 0755, true);
-    $sessions = [];
-    if (file_exists(SESSIONS_FILE)) {
-        $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+
+    $fp = fopen(SESSIONS_FILE, 'c+');
+    if (!$fp) return false;
+
+    flock($fp, LOCK_EX);
+    rewind($fp);
+    $content = stream_get_contents($fp);
+    $sessions = json_decode($content ?: '{}', true) ?? [];
+
+    $result = $mutator($sessions);
+    if ($result !== false) {
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
-    $sessions[$jti] = [
-        'username'    => $username,
-        'created_at'  => date('Y-m-d H:i:s'),
-        'ip'          => get_client_ip(),
-        'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? '',
-        'token_prefix'=> substr($token, 0, 16) . '...',
-        'last_active' => date('Y-m-d H:i:s'),
-        'expires_at'  => $expiresAt > 0 ? date('Y-m-d H:i:s', $expiresAt) : date('Y-m-d H:i:s', time() + 28800),
-    ];
-    // 清理过期条目（保留最多 500 条）
-    if (count($sessions) > 500) {
-        $sessions = array_slice($sessions, -500, null, true);
-    }
-    file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+    flock($fp, LOCK_UN);
+    fclose($fp);
+
+    return $result;
+}
+
+function auth_session_register(string $jti, string $username, string $token, int $expiresAt = 0): void {
+    auth_sessions_update_locked(function (array &$sessions) use ($jti, $username, $token, $expiresAt) {
+        $sessions[$jti] = [
+            'username'    => $username,
+            'created_at'  => date('Y-m-d H:i:s'),
+            'ip'          => get_client_ip(),
+            'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? '',
+            'token_prefix'=> substr($token, 0, 16) . '...',
+            'last_active' => date('Y-m-d H:i:s'),
+            'expires_at'  => $expiresAt > 0 ? date('Y-m-d H:i:s', $expiresAt) : date('Y-m-d H:i:s', time() + 28800),
+        ];
+        // 清理过期条目（保留最多 500 条）
+        if (count($sessions) > 500) {
+            $sessions = array_slice($sessions, -500, null, true);
+        }
+        return true;
+    });
 }
 
 function auth_session_exists(string $jti): bool {
     if (!file_exists(SESSIONS_FILE)) {
         return true; // 向后兼容：尚未启用会话管理时不拒绝
     }
-    $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
+    $sessions = auth_sessions_read_locked();
     return isset($sessions[$jti]);
 }
 
@@ -710,19 +796,19 @@ function auth_session_exists(string $jti): bool {
  */
 function auth_session_touch(string $jti): void {
     if (!file_exists(SESSIONS_FILE)) return;
-    $fp = fopen(SESSIONS_FILE, 'c+');
-    if (!$fp) return;
-    flock($fp, LOCK_EX);
-    $content = stream_get_contents($fp);
-    $sessions = json_decode($content, true) ?? [];
-    if (isset($sessions[$jti])) {
+    auth_sessions_update_locked(function (array &$sessions) use ($jti) {
+        if (!isset($sessions[$jti])) {
+            return false;
+        }
+
+        $lastActive = !empty($sessions[$jti]['last_active']) ? strtotime((string)$sessions[$jti]['last_active']) : 0;
+        if ($lastActive > 0 && time() - $lastActive < 60) {
+            return false;
+        }
+
         $sessions[$jti]['last_active'] = date('Y-m-d H:i:s');
-        ftruncate($fp, 0);
-        rewind($fp);
-        fwrite($fp, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    }
-    flock($fp, LOCK_UN);
-    fclose($fp);
+        return true;
+    });
 }
 
 /**
@@ -756,49 +842,59 @@ function auth_user_online_status(string $username): array {
 
 function auth_session_revoke(string $jti): bool {
     if (!file_exists(SESSIONS_FILE)) return false;
-    $fp = fopen(SESSIONS_FILE, 'c+');
-    if (!$fp) return false;
-    flock($fp, LOCK_EX);
-    $content = stream_get_contents($fp);
-    $sessions = json_decode($content, true) ?? [];
-    if (!isset($sessions[$jti])) {
-        flock($fp, LOCK_UN);
-        fclose($fp);
-        return false;
-    }
-    unset($sessions[$jti]);
-    ftruncate($fp, 0);
-    rewind($fp);
-    fwrite($fp, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return true;
+    return auth_sessions_update_locked(function (array &$sessions) use ($jti) {
+        if (!isset($sessions[$jti])) {
+            return false;
+        }
+        unset($sessions[$jti]);
+        return true;
+    }) === true;
 }
 
 function auth_session_list(?string $filterUsername = null): array {
     if (!file_exists(SESSIONS_FILE)) return [];
-    $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
     $now = time();
     $result = [];
-    $changed = false;
-    foreach ($sessions as $jti => $meta) {
-        $expiresAt = !empty($meta['expires_at']) ? strtotime($meta['expires_at']) : 0;
-        $lastActive = !empty($meta['last_active']) ? strtotime($meta['last_active']) : 0;
-        // 清理 Token 已过期 或 超过 5 分钟未活跃的会话
-        if (($expiresAt > 0 && $now > $expiresAt) || ($lastActive > 0 && $now - $lastActive > 300)) {
-            unset($sessions[$jti]);
-            $changed = true;
-            continue;
+
+    auth_sessions_update_locked(function (array &$sessions) use ($filterUsername, $now, &$result) {
+        $changed = false;
+        foreach ($sessions as $jti => $meta) {
+            $expiresAt = !empty($meta['expires_at']) ? strtotime($meta['expires_at']) : 0;
+            $lastActive = !empty($meta['last_active']) ? strtotime($meta['last_active']) : 0;
+            // 清理 Token 已过期 或 超过 5 分钟未活跃的会话
+            if (($expiresAt > 0 && $now > $expiresAt) || ($lastActive > 0 && $now - $lastActive > 300)) {
+                unset($sessions[$jti]);
+                $changed = true;
+                continue;
+            }
+            if ($filterUsername !== null && ($meta['username'] ?? '') !== $filterUsername) {
+                continue;
+            }
+            $result[] = ['jti' => $jti] + $meta;
         }
-        if ($filterUsername !== null && ($meta['username'] ?? '') !== $filterUsername) {
-            continue;
-        }
-        $result[] = ['jti' => $jti] + $meta;
-    }
-    if ($changed) {
-        file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-    }
+        return $changed;
+    });
+
     return array_reverse($result);
+}
+
+function auth_session_revoke_by_usernames(array $usernames): int {
+    if (!file_exists(SESSIONS_FILE)) return 0;
+    $usernames = array_values(array_unique(array_filter(array_map('strval', $usernames), static fn($v) => $v !== '')));
+    if ($usernames === []) return 0;
+
+    $removed = auth_sessions_update_locked(function (array &$sessions) use ($usernames) {
+        $removed = 0;
+        foreach ($sessions as $jti => $meta) {
+            if (in_array((string)($meta['username'] ?? ''), $usernames, true)) {
+                unset($sessions[$jti]);
+                $removed++;
+            }
+        }
+        return $removed > 0 ? $removed : false;
+    });
+
+    return is_int($removed) ? $removed : 0;
 }
 
 /**
@@ -809,17 +905,85 @@ function auth_session_list(?string $filterUsername = null): array {
  * @return array|false
  */
 function auth_get_current_user(): ?array {
-    $token = $_COOKIE[SESSION_COOKIE_NAME] ?? '';
-    if (!$token) {
+    $tokens = auth_request_cookie_values(SESSION_COOKIE_NAME);
+    if (empty($tokens)) {
+        $GLOBALS['_nav_auth_failure_reason'] = 'no_cookie';
         return null;
     }
-    $payload = auth_verify_token($token);
-    return is_array($payload) ? $payload : null;
+    $payload = null;
+    $reasons = [];
+    foreach ($tokens as $token) {
+        $result = auth_verify_token_detailed($token);
+        if ($result['ok'] && is_array($result['payload']) && isset($result['payload']['username'])) {
+            $payload = $result['payload'];
+            break;
+        }
+        $reasons[] = $result['reason'];
+    }
+    if (!is_array($payload) || !isset($payload['username'])) {
+        $GLOBALS['_nav_auth_failure_reason'] = $reasons !== [] ? implode(',', array_unique($reasons)) : 'invalid_token';
+        return null;
+    }
+    // 检查用户是否被当前 IP / 域名屏蔽
+    $username = $payload['username'];
+    $clientIp = get_client_ip();
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $blockedIps = auth_user_blocked_ips($username);
+    $blockedDomains = auth_user_blocked_domains($username);
+    if (!empty($blockedIps) && is_ip_in_list($clientIp, $blockedIps)) {
+        auth_clear_cookie();
+        $GLOBALS['_nav_auth_blocked'] = true;
+        $GLOBALS['_nav_auth_failure_reason'] = 'blocked_ip';
+        return null;
+    }
+    if (!empty($blockedDomains) && is_domain_in_list($host, $blockedDomains)) {
+        auth_clear_cookie();
+        $GLOBALS['_nav_auth_blocked'] = true;
+        $GLOBALS['_nav_auth_failure_reason'] = 'blocked_domain';
+        return null;
+    }
+    $GLOBALS['_nav_auth_failure_reason'] = 'ok';
+    return $payload;
+}
+
+function auth_last_failure_reason(): string {
+    $reason = (string)($GLOBALS['_nav_auth_failure_reason'] ?? '');
+    return $reason !== '' ? $reason : 'unknown';
 }
 
 // ============================================================
 // Cookie 管理
 // ============================================================
+
+/**
+ * 读取请求中指定名称的所有 Cookie 值。
+ * 浏览器可能同时携带同名的 Domain Cookie 和 host-only Cookie，不能只依赖 $_COOKIE。
+ *
+ * @return string[]
+ */
+function auth_request_cookie_values(string $name): array {
+    $values = [];
+    if (!empty($_COOKIE[$name]) && is_string($_COOKIE[$name])) {
+        $values[] = (string) $_COOKIE[$name];
+    }
+
+    $rawCookie = (string) ($_SERVER['HTTP_COOKIE'] ?? '');
+    if ($rawCookie !== '') {
+        foreach (explode(';', $rawCookie) as $part) {
+            $pair = explode('=', trim($part), 2);
+            if (count($pair) !== 2) {
+                continue;
+            }
+            $cookieName = rawurldecode(trim($pair[0]));
+            if ($cookieName !== $name) {
+                continue;
+            }
+            $values[] = rawurldecode($pair[1]);
+        }
+    }
+
+    return array_values(array_unique(array_filter($values, static fn($v) => $v !== '')));
+}
 
 /**
  * 设置登录 Cookie
@@ -840,6 +1004,17 @@ function auth_set_cookie(string $token, bool $remember_me = false): void {
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
+
+    if ($cookie_domain !== '') {
+        setcookie(SESSION_COOKIE_NAME, $token, [
+            'expires'  => $expire,
+            'path'     => '/',
+            'domain'   => '',
+            'secure'   => $is_https,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
 }
 
 /**
@@ -1410,9 +1585,7 @@ if (!function_exists('csrf_token')) {
         if (isset($GLOBALS['_nav_csrf_token']) && is_string($GLOBALS['_nav_csrf_token']) && $GLOBALS['_nav_csrf_token'] !== '') {
             return $GLOBALS['_nav_csrf_token'];
         }
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
+        auth_start_php_session();
         if (empty($_SESSION['csrf_token'])) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
@@ -1424,7 +1597,7 @@ if (!function_exists('csrf_token')) {
     }
 
     function csrf_check(): void {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+        auth_start_php_session();
         $token    = $_POST['_csrf'] ?? '';
         $expected = $_SESSION['csrf_token'] ?? '';
         if (!$token || !$expected || !hash_equals($expected, $token)) {
@@ -1465,6 +1638,131 @@ if (!function_exists('csrf_token')) {
         }
     }
 } 
+
+// ============================================================
+// 用户访问限制（IP / 域名黑名单）
+// ============================================================
+
+/**
+ * 判断 IP 是否命中黑名单（支持单个 IP 或 CIDR，如 192.168.1.0/24）
+ */
+function is_ip_in_list(string $ip, array $list): bool {
+    if ($list === []) return false;
+    foreach ($list as $entry) {
+        $entry = trim($entry);
+        if ($entry === '') continue;
+        // 精确匹配
+        if ($ip === $entry) return true;
+        // CIDR 匹配
+        if (strpos($entry, '/') !== false) {
+            if (is_ipv4_in_cidr($ip, $entry)) return true;
+            if (is_ipv6_in_cidr($ip, $entry)) return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * IPv4 CIDR 匹配
+ */
+function is_ipv4_in_cidr(string $ip, string $cidr): bool {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) return false;
+    [$network, $prefix] = explode('/', $cidr, 2);
+    $prefix = (int)$prefix;
+    if ($prefix < 0 || $prefix > 32) return false;
+    $ipLong = ip2long($ip);
+    $netLong = ip2long($network);
+    if ($ipLong === false || $netLong === false) return false;
+    $mask = $prefix === 0 ? 0 : (~0 << (32 - $prefix));
+    return ($ipLong & $mask) === ($netLong & $mask);
+}
+
+/**
+ * IPv6 CIDR 匹配
+ */
+function is_ipv6_in_cidr(string $ip, string $cidr): bool {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) return false;
+    [$network, $prefix] = explode('/', $cidr, 2);
+    $prefix = (int)$prefix;
+    if ($prefix < 0 || $prefix > 128) return false;
+    $ipBin = inet_pton($ip);
+    $netBin = inet_pton($network);
+    if ($ipBin === false || $netBin === false) return false;
+    $fullBytes = (int)floor($prefix / 8);
+    $remainder = $prefix % 8;
+    for ($i = 0; $i < $fullBytes; $i++) {
+        if ($ipBin[$i] !== $netBin[$i]) return false;
+    }
+    if ($remainder > 0 && $fullBytes < 16) {
+        $mask = 0xFF << (8 - $remainder);
+        $ipByte = ord($ipBin[$fullBytes]);
+        $netByte = ord($netBin[$fullBytes]);
+        if (($ipByte & $mask) !== ($netByte & $mask)) return false;
+    }
+    return true;
+}
+
+/**
+ * 判断域名是否命中黑名单（支持精确匹配和 *.prefix 通配符）
+ */
+function is_domain_in_list(string $host, array $list): bool {
+    if ($list === []) return false;
+    // 去除端口
+    $host = strtolower(explode(':', $host, 2)[0]);
+    foreach ($list as $entry) {
+        $entry = strtolower(trim($entry));
+        if ($entry === '') continue;
+        // 精确匹配
+        if ($host === $entry) return true;
+        // *.example.com 通配符
+        if (str_starts_with($entry, '*.')) {
+            $suffix = substr($entry, 2);
+            if ($suffix !== '' && (str_ends_with($host, '.' . $suffix) || $host === $suffix)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * 获取指定用户的屏蔽 IP 列表
+ * qatest（开发模式虚拟用户）从 config.json 读取，其他用户从 users.json 读取
+ */
+function auth_user_blocked_ips(string $username): array {
+    if ($username === 'qatest' && auth_dev_mode_enabled()) {
+        try {
+            $cfg = auth_get_config();
+            $list = $cfg['dev_account_blocked_ips'] ?? [];
+            return is_array($list) ? $list : [];
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+    $users = auth_load_users();
+    $user = $users[$username] ?? [];
+    $list = $user['blocked_ips'] ?? [];
+    return is_array($list) ? $list : [];
+}
+
+/**
+ * 获取指定用户的屏蔽域名列表
+ */
+function auth_user_blocked_domains(string $username): array {
+    if ($username === 'qatest' && auth_dev_mode_enabled()) {
+        try {
+            $cfg = auth_get_config();
+            $list = $cfg['dev_account_blocked_domains'] ?? [];
+            return is_array($list) ? $list : [];
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+    $users = auth_load_users();
+    $user = $users[$username] ?? [];
+    $list = $user['blocked_domains'] ?? [];
+    return is_array($list) ? $list : [];
+}
 
 // 运行时应用 display_errors 配置（不修改 ini 文件，避免 FPM 重启）
 try {

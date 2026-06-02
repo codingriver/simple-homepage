@@ -278,19 +278,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: scheduled_tasks.php'); exit;
     }
 
-    /* ------ 清空计划任务 ------ */
-    if ($action === 'clear_scheduled_tasks') {
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-        @set_time_limit(0);
-        backup_create('auto_clear_scheduled_tasks');
-        $result = scheduled_tasks_clear_manual_tasks();
-        audit_log('clear_scheduled_tasks', ['removed' => (int)($result['removed'] ?? 0)]);
-        flash_set('success', '已清空 ' . (int)($result['removed'] ?? 0) . ' 条普通计划任务，DDNS 系统调度器已自动保留/重建');
-        header('Location: scheduled_tasks.php'); exit;
-    }
-
 }
 
 $page_title = '计划任务';
@@ -1516,19 +1503,5 @@ function logLoadPage(p, jumpToLast, options) {
 <script src="assets/ace/ace.js"></script>
 <script src="assets/ace/ext-searchbox.js"></script>
 <?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
-
-<div class="card">
-  <div class="card-title" style="color:#ff9f43">⚠ 危险操作</div>
-  <div class="form-hint" style="margin-bottom:12px">
-    下列操作会先自动创建备份，再执行清空。清空计划任务不会删除 <code>data/tasks/</code> 目录中的其他共享文件，只会删除系统管理的任务脚本、任务日志和锁文件。
-  </div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <form method="POST" data-confirm-title="清空计划任务" data-confirm-message="确认清空全部普通计划任务？\n\n会删除系统生成的任务脚本、任务日志、锁文件，并重新生成 crontab。\n不会删除 data/tasks 目录里的其他共享文件。">
-      <?= csrf_field() ?>
-      <input type="hidden" name="action" value="clear_scheduled_tasks">
-      <button class="btn btn-danger" type="button" onclick="submitConfirmForm(this)">🗑 清空计划任务</button>
-    </form>
-  </div>
-</div>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

@@ -4,7 +4,7 @@
  */
 
 // ── 所有 POST/GET 操作必须在 header.php 之前处理（避免 HTML 已输出导致 header() 失效）──
-if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (isset($_GET['download']) || isset($_GET['export']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once __DIR__ . '/shared/functions.php';
     $current_user = auth_get_current_user();
     if (!$current_user || ($current_user['role'] ?? '') !== 'admin') {
@@ -98,6 +98,17 @@ if (isset($_GET['download']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
                 backup_apply_restored_sections($apply);
                 $gc = count($obj['sites']['groups']);
                 $parts = [$gc . ' 个分组'];
+                $credential_count = 0;
+                foreach ($obj['sites']['groups'] as $group) {
+                    foreach (($group['sites'] ?? []) as $site) {
+                        if (!empty($site['credential_username']) || !empty($site['credential_password']) || !empty($site['credential_note'])) {
+                            $credential_count++;
+                        }
+                    }
+                }
+                if ($credential_count > 0) {
+                    $parts[] = $credential_count . ' 条站点凭据（明文）';
+                }
                 if (isset($apply['scheduled_tasks']) && is_array($apply['scheduled_tasks'])) {
                     $tc = count($apply['scheduled_tasks']['tasks'] ?? []);
                     $parts[] = $tc . ' 条计划任务';
@@ -237,7 +248,7 @@ function trigger_badge(string $t): string {
   <div class="card-title">ℹ️ 备份方案说明</div>
   <ul style="color:var(--tm);font-size:13px;line-height:2;padding-left:18px">
     <li><strong>单文件 JSON</strong>：与「设置 → 导出配置」结构相同，一条记录对应一次快照。</li>
-    <li><strong>包含内容</strong>：<code>sites</code>（站点分组）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）、<code>ddns_tasks</code>（DDNS 动态解析任务）。</li>
+    <li><strong>包含内容</strong>：<code>sites</code>（站点分组，含站点测试账号密码明文）、<code>config</code>（系统配置）、<code>scheduled_tasks</code>（计划任务定义，含每条任务的 <code>command</code> 脚本与 cron 表达式）、<code>dns_config</code>（域名解析服务商账户与凭据）、<code>ddns_tasks</code>（DDNS 动态解析任务）。</li>
     <li><strong>不含内容</strong>：用户账户（<code>users.json</code>）、登录日志、Favicon 缓存、计划任务脚本与运行日志（<code>data/tasks/*.sh</code>、<code>data/tasks/*.log</code>）、DNS Zone 列表缓存，以及计划任务共享工作目录 <code>data/tasks/</code> 下的额外文件；如任务脚本依赖这些文件，请另行备份。</li>
     <li><strong>恢复与导入</strong>：写入计划任务后会重新生成系统 crontab；写入 DNS 配置后会清除本机 DNS Zone 缓存。</li>
     <li>最多保留 <?= MAX_BACKUPS ?> 条，超出时自动删除最旧的；恢复或导入前会先自动备份当前状态。</li>
@@ -264,6 +275,15 @@ function handleImportFile(input) {
             if (obj && obj.sites && Array.isArray(obj.sites.groups)) {
                 groupCount = obj.sites.groups.length;
                 var extras = [];
+                var credentialCount = 0;
+                (obj.sites.groups || []).forEach(function(g) {
+                    (g.sites || []).forEach(function(s) {
+                        if (s && (s.credential_username || s.credential_password || s.credential_note)) credentialCount++;
+                    });
+                });
+                if (credentialCount) {
+                    extras.push('站点凭据 ' + credentialCount + ' 条（明文）');
+                }
                 var tasks = obj.scheduled_tasks && obj.scheduled_tasks.tasks;
                 if (Array.isArray(tasks) && tasks.length) {
                     extras.push('计划任务 ' + tasks.length + ' 条（含脚本）');

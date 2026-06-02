@@ -25,7 +25,7 @@ $input = $method === 'POST'
     : $_GET;
 $action = trim((string)($input['action'] ?? ''));
 
-if (session_status() === PHP_SESSION_NONE) session_start();
+auth_start_php_session();
 $ddns_ajax_csrf_token = (string)($_SESSION['csrf_token'] ?? '');
 session_write_close();
 

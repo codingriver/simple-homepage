@@ -26,6 +26,11 @@ $groups = $data['groups'] ?? [];
 
 // 当前用户信息
 $user     = auth_get_current_user();
+// 被屏蔽时强制跳回登录页（全局变量由 auth_get_current_user() 设置）
+if (!empty($GLOBALS['_nav_auth_blocked']) && !empty($_COOKIE[SESSION_COOKIE_NAME])) {
+    header('Location: /login.php');
+    exit;
+}
 $is_admin = ($user['role'] ?? '') === 'admin';
 $token    = $_COOKIE[SESSION_COOKIE_NAME] ?? '';
 

@@ -35,6 +35,18 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       $users[$un]['role']=$role;
       $users[$un]['permissions']=auth_role_permissions_map()[$role] ?? [];
       $users[$un]['max_sessions']=$maxSessions;
+      // 解析屏蔽列表
+      $blockedIps = array_values(array_filter(array_map('trim', explode("\n", $_POST['blocked_ips'] ?? ''))));
+      $blockedDomains = array_values(array_filter(array_map('trim', explode("\n", $_POST['blocked_domains'] ?? ''))));
+      if ($un === 'qatest' && auth_dev_mode_enabled()) {
+          $cfg = load_config();
+          $cfg['dev_account_blocked_ips'] = $blockedIps;
+          $cfg['dev_account_blocked_domains'] = $blockedDomains;
+          save_config($cfg);
+      } else {
+          $users[$un]['blocked_ips'] = $blockedIps;
+          $users[$un]['blocked_domains'] = $blockedDomains;
+      }
       auth_write_users($users);
       audit_log('user_save', ['username' => $un, 'role' => $role, 'orig' => $orig, 'max_sessions' => $maxSessions]);
       flash_set('success',"用户 '{$un}' 已保存");
@@ -49,19 +61,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     else{
       unset($users[$du]);
       auth_write_users($users);
-      if (file_exists(SESSIONS_FILE)) {
-        $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
-        $changed = false;
-        foreach ($sessions as $jti => $meta) {
-          if (($meta['username'] ?? '') === $du) {
-            unset($sessions[$jti]);
-            $changed = true;
-          }
-        }
-        if ($changed) {
-          file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-        }
-      }
+      auth_session_revoke_by_usernames([$du]);
       audit_log('user_delete',['username'=>$du]);
       flash_set('success','已删除');
       header('Location: users.php');
@@ -92,19 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_SERVER['HTTP_X_REQUESTED_WITH'] 
         }
         if ($deleted > 0) {
             auth_write_users($users);
-            if (file_exists(SESSIONS_FILE)) {
-                $sessions = json_decode(file_get_contents(SESSIONS_FILE), true) ?? [];
-                $changed = false;
-                foreach ($sessions as $jti => $meta) {
-                    if (in_array($meta['username'] ?? '', $selected, true)) {
-                        unset($sessions[$jti]);
-                        $changed = true;
-                    }
-                }
-                if ($changed) {
-                    file_put_contents(SESSIONS_FILE, json_encode($sessions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
-                }
-            }
+            auth_session_revoke_by_usernames($selected);
             audit_log('user_batch_delete', ['usernames' => $selected, 'deleted' => $deleted, 'skipped' => $skipped]);
         }
         echo json_encode(['ok' => true, 'msg' => "已删除 {$deleted} 个用户" . ($skipped > 0 ? "，跳过 {$skipped} 个（含当前管理员或仅剩的管理员）" : ''), 'deleted' => $deleted, 'skipped' => $skipped], JSON_UNESCAPED_UNICODE);
@@ -124,6 +112,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_SERVER['HTTP_X_REQUESTED_WITH'] 
         if ($updated > 0) auth_write_users($users);
         audit_log('user_batch_set_max_sessions', ['usernames' => $selected, 'max_sessions' => $maxSess, 'updated' => $updated]);
         echo json_encode(['ok' => true, 'msg' => "已设置 {$updated} 个用户的设备上限为 {$maxSess}", 'updated' => $updated], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($act === 'batch_set_blocked') {
+        $blockedIps = array_values(array_filter(array_map('trim', explode("\n", $_POST['blocked_ips'] ?? ''))));
+        $blockedDomains = array_values(array_filter(array_map('trim', explode("\n", $_POST['blocked_domains'] ?? ''))));
+        $updated = 0;
+        $cfg = null;
+        foreach ($selected as $un) {
+            if (!isset($users[$un])) continue;
+            if ($un === 'qatest' && auth_dev_mode_enabled()) {
+                if ($cfg === null) $cfg = load_config();
+                $cfg['dev_account_blocked_ips'] = $blockedIps;
+                $cfg['dev_account_blocked_domains'] = $blockedDomains;
+            } else {
+                $users[$un]['blocked_ips'] = $blockedIps;
+                $users[$un]['blocked_domains'] = $blockedDomains;
+            }
+            $updated++;
+        }
+        if ($updated > 0) {
+            auth_write_users($users);
+            if ($cfg !== null) save_config($cfg);
+        }
+        audit_log('user_batch_set_blocked', ['usernames' => $selected, 'updated' => $updated]);
+        echo json_encode(['ok' => true, 'msg' => "已设置 {$updated} 个用户的访问限制", 'updated' => $updated], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -148,7 +162,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_SERVER['HTTP_X_REQUESTED_WITH'] 
 
 require_once __DIR__.'/shared/header.php';
 $eu=null;
-if($action==='edit'&&$uname&&isset($users[$uname]))$eu=$users[$uname]+['username'=>$uname];
+if($action==='edit'&&$uname&&isset($users[$uname])){
+    $eu=$users[$uname]+['username'=>$uname];
+    // qatest（虚拟用户）的屏蔽规则从 config.json 读取回填
+    if($uname==='qatest'&&auth_dev_mode_enabled()){
+        $cfg=load_config();
+        $eu['blocked_ips']=$cfg['dev_account_blocked_ips']??[];
+        $eu['blocked_domains']=$cfg['dev_account_blocked_domains']??[];
+    }
+}
 $sf=($action==='add'||$action==='edit');
 ?>
 <?php if($err):?><div class="alert alert-error">❌ <?=htmlspecialchars($err)?></div><?php endif;?>
@@ -170,6 +192,16 @@ $sf=($action==='add'||$action==='edit');
   <div class="form-group full"><label>密码<?=$eu?' （留空不修改）':' （必填）'?></label>
     <input type="password" name="password" <?=!$eu?'required':''?> autocomplete="new-password"></div>
   <div class="form-group full">
+    <label>屏蔽的 IP 列表（每行一个，支持 CIDR 如 192.168.1.0/24）</label>
+    <textarea name="blocked_ips" rows="3" placeholder="1.2.3.4&#10;10.0.0.0/8"
+      style="font-family:var(--mono);font-size:13px;width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);resize:vertical"><?= htmlspecialchars(implode("\n", $eu['blocked_ips'] ?? [])) ?></textarea>
+  </div>
+  <div class="form-group full">
+    <label>屏蔽的域名列表（每行一个，支持 *.example.com）</label>
+    <textarea name="blocked_domains" rows="3" placeholder="evil.com&#10;*.attack.net"
+      style="font-family:var(--mono);font-size:13px;width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);resize:vertical"><?= htmlspecialchars(implode("\n", $eu['blocked_domains'] ?? [])) ?></textarea>
+  </div>
+  <div class="form-group full">
     <label>角色说明</label>
     <div class="form-hint">
       管理员：拥有全部后台权限。<br>
@@ -189,6 +221,7 @@ $sf=($action==='add'||$action==='edit');
     <button type="button" class="btn btn-sm" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:#ff6b6b" onclick="batchDelete()">批量删除</button>
     <button type="button" class="btn btn-sm" style="background:rgba(77,184,255,.12);border:1px solid rgba(77,184,255,.35);color:var(--blue)" onclick="batchSetMax()">批量设置设备上限</button>
     <button type="button" class="btn btn-sm" style="background:rgba(255,204,68,.12);border:1px solid rgba(255,204,68,.35);color:var(--yellow)" onclick="batchKick()">批量踢下线</button>
+    <button type="button" class="btn btn-sm" style="background:rgba(255,92,92,.12);border:1px solid rgba(255,92,92,.35);color:var(--red)" onclick="batchSetBlocked()">批量设置访问限制</button>
   </div>
 </div>
 <div class="card"><div class="table-wrap"><table><thead><tr>
@@ -196,7 +229,15 @@ $sf=($action==='add'||$action==='edit');
 </tr></thead><tbody>
 <?php foreach($users as $un=>$u):?><tr>
   <td><?php if($un!==$current_admin['username']):?><input type="checkbox" class="user-select" value="<?=htmlspecialchars($un)?>"><?php endif;?></td>
-  <td><strong><?=htmlspecialchars($un)?></strong><?php if($un===$current_admin['username']):?> <span class="badge badge-purple">我</span><?php endif;?><?php if(!empty($u['__dev_virtual'])):?> <span class="badge badge-gray" title="开发模式内置，不写入 users.json">dev</span><?php endif;?></td>
+  <td><strong><?=htmlspecialchars($un)?></strong><?php if($un===$current_admin['username']):?> <span class="badge badge-purple">我</span><?php endif;?><?php if(!empty($u['__dev_virtual'])):?> <span class="badge badge-gray" title="开发模式内置，不写入 users.json">dev</span><?php endif;?>
+    <?php
+      $hasBlock = !empty($u['blocked_ips']) || !empty($u['blocked_domains']);
+      if (!$hasBlock && $un === 'qatest' && auth_dev_mode_enabled()) {
+          $cfg = load_config();
+          $hasBlock = !empty($cfg['dev_account_blocked_ips']) || !empty($cfg['dev_account_blocked_domains']);
+      }
+    ?>
+    <?php if($hasBlock):?> <span class="badge badge-red" title="存在访问限制">🔒</span><?php endif;?></td>
   <?php $online = auth_user_online_status($un); ?>
   <td><span class="badge badge-<?=$online['status']==='online'?'green':($online['status']==='recent'?'yellow':'gray')?>"><?=htmlspecialchars($online['label'])?></span></td>
   <?php $roleValue = (string)($u['role'] ?? 'user'); ?>
@@ -278,6 +319,13 @@ $sf=($action==='add'||$action==='edit');
     var n = parseInt(val, 10);
     if (isNaN(n) || n < 1 || n > 20) { showToast('请输入 1-20 之间的数字', 'error'); return; }
     sendBatch('batch_set_max_sessions', { max_sessions: n });
+  };
+  window.batchSetBlocked = function() {
+    var ips = prompt('请输入屏蔽的 IP 列表（每行一个，支持 CIDR）：', '');
+    if (ips === null) return;
+    var domains = prompt('请输入屏蔽的域名列表（每行一个，支持 *.example.com）：', '');
+    if (domains === null) return;
+    sendBatch('batch_set_blocked', { blocked_ips: ips, blocked_domains: domains });
   };
   window.batchKick = function() {
     NavConfirm.open({

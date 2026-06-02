@@ -26,7 +26,7 @@ $cfg = auth_get_config();
 $response = [
     'ok' => true,
     'site_name' => $cfg['site_name'] ?? '导航中心',
-    'groups' => $sites_data['groups'] ?? [],
+    'groups' => sites_strip_credentials($sites_data)['groups'] ?? [],
 ];
 
 echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

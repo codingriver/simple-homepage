@@ -25,6 +25,8 @@ services:
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里
       - ./data:/var/www/nav/data
+      # 挂载反代模板目录：PHP 后台生成 Nginx 配置时读取，确保宿主机修改的模板实时同步到容器
+      - ./nginx-conf:/var/www/nav/nginx-conf:ro
       # - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:

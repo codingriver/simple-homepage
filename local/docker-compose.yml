@@ -48,6 +48,9 @@ services:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──
       - ${DATA_DIR:-../data}:/var/www/nav/data
 
+      # ── 挂载反代模板目录：PHP 后台生成 Nginx 配置时读取 ──
+      - ../nginx-conf:/var/www/nav/nginx-conf:ro
+
       # ── 可选：挂载自定义 Nginx 反代配置 ──
       # - ../nav-proxy.conf:/etc/nginx/conf.d/nav-proxy.conf
 

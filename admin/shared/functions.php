@@ -30,6 +30,31 @@ function save_sites(array $data): void {
         LOCK_EX);
 }
 
+function site_credential_keys(): array {
+    return ['credential_username', 'credential_password', 'credential_note'];
+}
+
+function site_strip_credentials(array $site): array {
+    foreach (site_credential_keys() as $key) {
+        unset($site[$key]);
+    }
+    return $site;
+}
+
+function sites_strip_credentials(array $sitesData): array {
+    foreach ($sitesData['groups'] ?? [] as $groupIndex => $group) {
+        if (!is_array($group)) {
+            continue;
+        }
+        foreach ($group['sites'] ?? [] as $siteIndex => $site) {
+            if (is_array($site)) {
+                $sitesData['groups'][$groupIndex]['sites'][$siteIndex] = site_strip_credentials($site);
+            }
+        }
+    }
+    return $sitesData;
+}
+
 /**
  * 触发指定域名的 Favicon 后台预抓取
  */
@@ -134,7 +159,7 @@ function fs_path_in_allowed_roots(string $path, ?array $roots = null): bool {
 if (!function_exists('csrf_token')) {
     /** 获取或生成 CSRF Token（存储在 Session 中）*/
     function csrf_token(): string {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+        auth_start_php_session();
         if (empty($_SESSION['csrf_token'])) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
@@ -148,7 +173,7 @@ if (!function_exists('csrf_token')) {
 
     /** 验证 CSRF Token，失败则终止 */
     function csrf_check(): void {
-        if (session_status() === PHP_SESSION_NONE) session_start();
+        auth_start_php_session();
         $token     = $_POST['_csrf'] ?? '';
         $expected  = $_SESSION['csrf_token'] ?? '';
         if (!$token || !$expected || !hash_equals($expected, $token)) {
@@ -162,13 +187,13 @@ if (!function_exists('csrf_token')) {
 
 /** 设置 Flash 消息 */
 function flash_set(string $type, string $message): void {
-    if (session_status() === PHP_SESSION_NONE) session_start();
+    auth_start_php_session();
     $_SESSION['flash'] = ['type' => $type, 'msg' => $message];
 }
 
 /** 读取并清除 Flash 消息，返回 ['type','msg'] 或 null */
 function flash_get() {
-    if (session_status() === PHP_SESSION_NONE) session_start();
+    auth_start_php_session();
     if (empty($_SESSION['flash'])) return null;
     $f = $_SESSION['flash'];
     unset($_SESSION['flash']);
@@ -874,6 +899,503 @@ function health_check_url(string $url): array {
     return ['status' => $status, 'code' => $code, 'ms' => $ms];
 }
 
+function proxy_diagnose_site_url(array $site): string {
+    $type = (string)($site['type'] ?? '');
+    if ($type === 'proxy_domain' || (($type === 'proxy') && (($site['proxy_mode'] ?? 'path') === 'domain'))) {
+        $domain = trim((string)($site['proxy_domain'] ?? ''));
+        if ($domain === '') return '';
+        $isLocalDomain = str_contains(strtolower($domain), '.local.');
+        $scheme = $isLocalDomain ? 'http' : 'https';
+        $port = (int)(getenv('NAV_PORT') ?: 58080);
+        $portPart = $isLocalDomain ? ':' . $port : '';
+        return $scheme . '://' . $domain . $portPart . '/';
+    }
+
+    if ($type === 'proxy_path' || $type === 'proxy') {
+        $cfg = load_config();
+        $navDomain = trim((string)($cfg['nav_domain'] ?? ''));
+        $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string)($site['slug'] ?? $site['id'] ?? '')));
+        if ($navDomain === '' || $slug === '') return '';
+        return 'https://' . $navDomain . '/p/' . $slug . '/';
+    }
+
+    return '';
+}
+
+function proxy_diagnose_find_site(string $gid, string $sid): ?array {
+    foreach (load_sites()['groups'] ?? [] as $group) {
+        if ($gid !== '' && (string)($group['id'] ?? '') !== $gid) {
+            continue;
+        }
+        foreach ($group['sites'] ?? [] as $site) {
+            if ((string)($site['id'] ?? '') === $sid) {
+                return ['group' => $group, 'site' => $site];
+            }
+        }
+    }
+    return null;
+}
+
+function proxy_diagnose_fetch_url(string $url, bool $followRedirects = false, int $timeout = 8): array {
+    $start = microtime(true);
+    $result = [
+        'url' => $url,
+        'ok' => false,
+        'status' => 0,
+        'ms' => 0,
+        'final_url' => $url,
+        'content_type' => '',
+        'location' => '',
+        'www_authenticate' => '',
+        'body_sample' => '',
+        'error' => '',
+    ];
+
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        $result['error'] = 'URL 无效';
+        return $result;
+    }
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_FOLLOWLOCATION => $followRedirects,
+            CURLOPT_MAXREDIRS => 3,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => min(3, $timeout),
+            CURLOPT_USERAGENT => 'NavPortal-ProxyDiagnose/1.0',
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_RANGE => '0-262143',
+        ]);
+        $raw = curl_exec($ch);
+        if ($raw === false) {
+            $result['error'] = curl_error($ch) ?: '请求失败';
+            $result['ms'] = (int)round((microtime(true) - $start) * 1000);
+            curl_close($ch);
+            return $result;
+        }
+
+        $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $headersRaw = substr((string)$raw, 0, $headerSize);
+        $body = substr((string)$raw, $headerSize);
+        $result['status'] = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $result['final_url'] = (string)(curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $url);
+        $result['content_type'] = (string)(curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '');
+        $result['ms'] = (int)round(((float)curl_getinfo($ch, CURLINFO_TOTAL_TIME)) * 1000);
+        curl_close($ch);
+
+        if (preg_match_all('/^([^:\r\n]+):\s*(.*?)$/m', $headersRaw, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $key = strtolower(trim($match[1]));
+                $value = trim($match[2]);
+                if ($key === 'location') $result['location'] = $value;
+                if ($key === 'www-authenticate') $result['www_authenticate'] = $value;
+            }
+        }
+
+        $result['body_sample'] = mb_substr($body, 0, 12000, '8bit');
+        $result['ok'] = $result['status'] >= 200 && $result['status'] < 500;
+        return $result;
+    }
+
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'timeout' => $timeout,
+            'ignore_errors' => true,
+            'follow_location' => $followRedirects ? 1 : 0,
+            'max_redirects' => 3,
+            'header' => "User-Agent: NavPortal-ProxyDiagnose/1.0\r\nRange: bytes=0-262143\r\n",
+        ],
+        'ssl' => [
+            'verify_peer' => false,
+            'verify_peer_name' => false,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $ctx);
+    $result['ms'] = (int)round((microtime(true) - $start) * 1000);
+    if ($body === false) {
+        $result['error'] = '请求失败';
+        return $result;
+    }
+    if (!empty($http_response_header)) {
+        foreach ($http_response_header as $line) {
+            if (preg_match('#HTTP/\d+\.?\d*\s+(\d+)#', $line, $m)) {
+                $result['status'] = (int)$m[1];
+            } elseif (stripos($line, 'Location:') === 0) {
+                $result['location'] = trim(substr($line, 9));
+            } elseif (stripos($line, 'Content-Type:') === 0) {
+                $result['content_type'] = trim(substr($line, 13));
+            } elseif (stripos($line, 'WWW-Authenticate:') === 0) {
+                $result['www_authenticate'] = trim(substr($line, 17));
+            }
+        }
+    }
+    $result['body_sample'] = mb_substr((string)$body, 0, 12000, '8bit');
+    $result['ok'] = $result['status'] >= 200 && $result['status'] < 500;
+    return $result;
+}
+
+function proxy_diagnose_host_is_private(?string $host): bool {
+    if ($host === null || $host === '') return false;
+    $host = trim(strtolower($host), '[]');
+    if ($host === 'localhost') return true;
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        return is_private_ip($host);
+    }
+    return false;
+}
+
+function proxy_diagnose_add_issue(array &$issues, string $level, string $code, string $message): void {
+    $issues[] = ['level' => $level, 'code' => $code, 'message' => $message];
+}
+
+function proxy_diagnose_analyze_response(string $scope, array $response, array &$issues): void {
+    $status = (int)($response['status'] ?? 0);
+    $body = (string)($response['body_sample'] ?? '');
+    $location = (string)($response['location'] ?? '');
+    $finalUrl = (string)($response['final_url'] ?? '');
+
+    if (($response['error'] ?? '') !== '') {
+        proxy_diagnose_add_issue($issues, 'error', $scope . '_request_failed', $scope . ' 请求失败：' . $response['error']);
+        return;
+    }
+
+    if (in_array($status, [502, 503, 504], true)) {
+        proxy_diagnose_add_issue($issues, 'error', $scope . '_bad_gateway', $scope . " 返回 {$status}，通常表示上游不可达或超时。");
+    }
+
+    if ($status === 401 && ($response['www_authenticate'] ?? '') !== '') {
+        proxy_diagnose_add_issue($issues, 'info', $scope . '_basic_auth', $scope . ' 可达，但后端要求 Basic/Auth 认证。');
+    }
+
+    if ($scope === 'proxy' && $status >= 300 && $status < 400 && str_contains($location, '/login.php')) {
+        proxy_diagnose_add_issue($issues, 'info', 'proxy_auth_redirect', '代理域名未带登录 Cookie 时跳转到导航登录页，属于受保护代理的预期行为。');
+    }
+
+    $redirectUrls = $location !== '' ? [$location] : [];
+    if ($scope === 'proxy' && $finalUrl !== '' && $finalUrl !== (string)($response['url'] ?? '')) {
+        $redirectUrls[] = $finalUrl;
+    }
+    foreach ($redirectUrls as $redirectUrl) {
+        $host = parse_url($redirectUrl, PHP_URL_HOST);
+        if (proxy_diagnose_host_is_private(is_string($host) ? $host : null)) {
+            proxy_diagnose_add_issue($issues, 'warn', $scope . '_private_redirect', $scope . ' 跳转到了内网/本机地址：' . $redirectUrl);
+        }
+    }
+
+    if (preg_match('#https?://(127\.0\.0\.1|localhost)(:\d+)?#i', $body, $m)) {
+        proxy_diagnose_add_issue($issues, 'warn', $scope . '_hardcoded_loopback', $scope . ' 页面内容包含写死的本机地址：' . $m[0]);
+    }
+    if (preg_match('#https?://(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)([0-9.]+)(:\d+)?#i', $body, $m)) {
+        proxy_diagnose_add_issue($issues, 'warn', $scope . '_hardcoded_private_url', $scope . ' 页面内容包含写死的内网地址：' . $m[0]);
+    }
+}
+
+function proxy_diagnose_resolve_url(string $baseUrl, string $assetUrl): string {
+    $assetUrl = trim($assetUrl);
+    if ($assetUrl === '') return '';
+    if (preg_match('#^https?://#i', $assetUrl)) return $assetUrl;
+    if (str_starts_with($assetUrl, '//')) {
+        $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'http';
+        return $scheme . ':' . $assetUrl;
+    }
+
+    $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'http';
+    $host = parse_url($baseUrl, PHP_URL_HOST) ?: '';
+    if ($host === '') return '';
+    $port = parse_url($baseUrl, PHP_URL_PORT);
+    $authority = $scheme . '://' . $host . ($port ? ':' . $port : '');
+
+    if (str_starts_with($assetUrl, '/')) {
+        return $authority . $assetUrl;
+    }
+
+    $path = (string)(parse_url($baseUrl, PHP_URL_PATH) ?: '/');
+    $dir = rtrim(str_replace('\\', '/', dirname($path)), '/');
+    return $authority . ($dir === '' ? '' : $dir) . '/' . $assetUrl;
+}
+
+function proxy_diagnose_extract_resource_urls(string $html, string $baseUrl, int $limit = 5): array {
+    if ($html === '') return [];
+    preg_match_all('/<(script|link)\b[^>]+(?:src|href)=["\']([^"\']+)["\']/i', $html, $matches);
+    $urls = [];
+    foreach ($matches[2] ?? [] as $asset) {
+        $asset = html_entity_decode((string)$asset, ENT_QUOTES, 'UTF-8');
+        if (!preg_match('#\.(js|css)(\?|$)#i', $asset)) {
+            continue;
+        }
+        $resolved = proxy_diagnose_resolve_url($baseUrl, $asset);
+        if ($resolved !== '') {
+            $urls[] = $resolved;
+        }
+        if (count($urls) >= $limit) break;
+    }
+    return array_values(array_unique($urls));
+}
+
+function proxy_diagnose_site(array $site, array $group = []): array {
+    $type = (string)($site['type'] ?? '');
+    if (!in_array($type, ['proxy', 'proxy_domain', 'proxy_path'], true)) {
+        return ['ok' => false, 'msg' => '不是代理站点'];
+    }
+
+    $target = rtrim((string)($site['proxy_target'] ?? ''), '/');
+    $proxyUrl = proxy_diagnose_site_url($site);
+    $currentProfile = strtolower(trim((string)($site['proxy_profile'] ?? '')));
+    $recommendedProfile = nginx_proxy_profile_for_site($site, $target);
+    $effectiveProfile = $currentProfile !== '' ? $currentProfile : $recommendedProfile;
+    $issues = [];
+
+    if ($currentProfile === '' || $currentProfile === 'default') {
+        if ($recommendedProfile !== 'default') {
+            proxy_diagnose_add_issue($issues, 'info', 'profile_auto_recommended', '建议使用 ' . (nginx_proxy_profiles()[$recommendedProfile]['label'] ?? $recommendedProfile) . ' Profile。');
+        }
+    } elseif ($currentProfile !== $recommendedProfile && $recommendedProfile !== 'default') {
+        proxy_diagnose_add_issue($issues, 'info', 'profile_mismatch', '当前 Profile 与自动识别结果不同，请确认是否有意覆盖。');
+    }
+
+    $targetCheck = proxy_diagnose_fetch_url($target, true, 8);
+    proxy_diagnose_analyze_response('target', $targetCheck, $issues);
+    $resourceChecks = [];
+    foreach (proxy_diagnose_extract_resource_urls((string)($targetCheck['body_sample'] ?? ''), (string)($targetCheck['final_url'] ?? $target), 4) as $resourceUrl) {
+        $resourceCheck = proxy_diagnose_fetch_url($resourceUrl, true, 5);
+        $resourceChecks[] = $resourceCheck;
+        proxy_diagnose_analyze_response('target_resource', $resourceCheck, $issues);
+    }
+
+    $proxyCheck = $proxyUrl !== '' ? proxy_diagnose_fetch_url($proxyUrl, false, 8) : [
+        'url' => '',
+        'ok' => false,
+        'status' => 0,
+        'ms' => 0,
+        'final_url' => '',
+        'content_type' => '',
+        'location' => '',
+        'www_authenticate' => '',
+        'body_sample' => '',
+        'error' => '无法构造代理访问 URL',
+    ];
+    proxy_diagnose_analyze_response('proxy', $proxyCheck, $issues);
+
+    $hasError = array_filter($issues, static fn($issue) => ($issue['level'] ?? '') === 'error');
+    $status = $hasError ? 'error' : (array_filter($issues, static fn($issue) => ($issue['level'] ?? '') === 'warn') ? 'warn' : 'ok');
+
+    return [
+        'ok' => true,
+        'status' => $status,
+        'site' => [
+            'id' => (string)($site['id'] ?? ''),
+            'name' => (string)($site['name'] ?? ''),
+            'group' => (string)($group['name'] ?? ''),
+            'type' => $type,
+            'target' => $target,
+            'proxy_url' => $proxyUrl,
+            'profile' => $effectiveProfile,
+            'recommended_profile' => $recommendedProfile,
+            'profile_label' => nginx_proxy_profiles()[$effectiveProfile]['label'] ?? $effectiveProfile,
+        ],
+        'checks' => [
+            'target' => $targetCheck,
+            'proxy' => $proxyCheck,
+            'target_resources' => $resourceChecks,
+        ],
+        'issues' => array_values($issues),
+        'browser' => proxy_browser_diagnose_capability([$proxyUrl]),
+    ];
+}
+
+function proxy_browser_diagnose_script_path(): string {
+    return __DIR__ . '/../../scripts/proxy_browser_diagnose.js';
+}
+
+function proxy_browser_diagnose_project_root(): string {
+    return dirname(__DIR__, 2);
+}
+
+function proxy_browser_diagnose_normalize_urls(array $urls): array {
+    $out = [];
+    foreach ($urls as $url) {
+        $url = trim((string)$url);
+        if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+            continue;
+        }
+        $scheme = strtolower((string)(parse_url($url, PHP_URL_SCHEME) ?: ''));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            continue;
+        }
+        $out[] = $url;
+    }
+    return array_values(array_unique($out));
+}
+
+function proxy_browser_diagnose_host_command(array $urls, bool $headed = true): string {
+    $urls = proxy_browser_diagnose_normalize_urls($urls);
+    $env = [
+        'PROXY_DIAG_URLS' => implode(',', $urls),
+        'PROXY_DIAG_HEADED' => $headed ? '1' : '0',
+    ];
+    $parts = [];
+    foreach ($env as $key => $value) {
+        $parts[] = $key . '=' . escapeshellarg($value);
+    }
+    return implode(' ', $parts) . ' node scripts/proxy_browser_diagnose.js';
+}
+
+function proxy_browser_diagnose_capability(array $urls = []): array {
+    $urls = proxy_browser_diagnose_normalize_urls($urls);
+    $script = proxy_browser_diagnose_script_path();
+    $hostCommand = proxy_browser_diagnose_host_command($urls, true);
+
+    if (!is_file($script)) {
+        return [
+            'available' => false,
+            'reason' => '浏览器诊断脚本不存在',
+            'host_command' => $hostCommand,
+        ];
+    }
+
+    $node = admin_run_command('command -v node', 3);
+    if (!$node['ok'] || trim((string)$node['output']) === '') {
+        return [
+            'available' => false,
+            'reason' => '当前容器没有安装 Node.js，无法在后台直接运行 Playwright。',
+            'host_command' => $hostCommand,
+        ];
+    }
+
+    $root = proxy_browser_diagnose_project_root();
+    $playwright = admin_run_command(
+        'cd ' . escapeshellarg($root) . ' && node -e ' . escapeshellarg("require.resolve('@playwright/test')"),
+        5
+    );
+    if (!$playwright['ok']) {
+        return [
+            'available' => false,
+            'reason' => '当前运行环境找不到 @playwright/test，请在宿主机安装 npm 依赖后运行命令。',
+            'host_command' => $hostCommand,
+        ];
+    }
+
+    return [
+        'available' => true,
+        'reason' => '',
+        'host_command' => $hostCommand,
+    ];
+}
+
+function proxy_browser_diagnose_current_session_cookie(): string {
+    foreach (auth_request_cookie_values(SESSION_COOKIE_NAME) as $token) {
+        $verified = auth_verify_token_detailed($token);
+        if (($verified['ok'] ?? false) === true) {
+            return $token;
+        }
+    }
+    return '';
+}
+
+function proxy_browser_diagnose_command(array $urls, array $options = []): string {
+    $urls = proxy_browser_diagnose_normalize_urls($urls);
+    $script = proxy_browser_diagnose_script_path();
+    $env = [
+        'PROXY_DIAG_URLS' => implode(',', $urls),
+        'PROXY_DIAG_HEADED' => !empty($options['headed']) ? '1' : '0',
+        'PROXY_DIAG_TIMEOUT' => (string)max(5000, (int)($options['timeout_ms'] ?? 45000)),
+        'PROXY_DIAG_AFTER_LOAD_MS' => (string)max(0, (int)($options['after_load_ms'] ?? 2500)),
+        'PROXY_DIAG_SESSION_COOKIE_NAME' => SESSION_COOKIE_NAME,
+        'PROXY_DIAG_PHP_SESSION_COOKIE_NAME' => PHP_SESSION_COOKIE_NAME,
+    ];
+
+    $navSession = (string)($options['nav_session'] ?? '');
+    if ($navSession !== '') {
+        $env['PROXY_DIAG_NAV_SESSION'] = $navSession;
+    }
+    $phpSession = (string)($_COOKIE[PHP_SESSION_COOKIE_NAME] ?? '');
+    if ($phpSession !== '') {
+        $env['PROXY_DIAG_PHP_SESSION'] = $phpSession;
+    }
+
+    $parts = [];
+    foreach ($env as $key => $value) {
+        $parts[] = $key . '=' . escapeshellarg($value);
+    }
+
+    return 'cd ' . escapeshellarg(proxy_browser_diagnose_project_root())
+        . ' && ' . implode(' ', $parts)
+        . ' node ' . escapeshellarg($script);
+}
+
+function proxy_browser_diagnose_parse_output(string $output): ?array {
+    $decoded = json_decode(trim($output), true);
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+
+    $start = strpos($output, '[');
+    $end = strrpos($output, ']');
+    if ($start === false || $end === false || $end <= $start) {
+        return null;
+    }
+    $decoded = json_decode(substr($output, $start, $end - $start + 1), true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function proxy_browser_diagnose_run(array $urls, array $options = []): array {
+    $urls = proxy_browser_diagnose_normalize_urls($urls);
+    if ($urls === []) {
+        return ['ok' => false, 'msg' => '没有可诊断的代理 URL'];
+    }
+
+    $capability = proxy_browser_diagnose_capability($urls);
+    if (empty($capability['available'])) {
+        return [
+            'ok' => false,
+            'msg' => $capability['reason'] ?: '当前环境无法运行浏览器诊断',
+            'browser' => $capability,
+        ];
+    }
+
+    $cmd = proxy_browser_diagnose_command($urls, [
+        'headed' => false,
+        'timeout_ms' => (int)($options['timeout_ms'] ?? 45000),
+        'nav_session' => (string)($options['nav_session'] ?? ''),
+    ]);
+    $run = admin_run_command($cmd, (int)ceil(((int)($options['timeout_ms'] ?? 45000)) / 1000) + 15);
+    $parsed = proxy_browser_diagnose_parse_output((string)$run['output']);
+    if (!$run['ok'] || $parsed === null) {
+        return [
+            'ok' => false,
+            'msg' => $run['ok'] ? '浏览器诊断输出不是有效 JSON' : '浏览器诊断执行失败',
+            'code' => $run['code'],
+            'output' => mb_substr((string)$run['output'], 0, 4000, '8bit'),
+            'browser' => $capability,
+        ];
+    }
+
+    $hasError = false;
+    $hasWarn = false;
+    foreach ($parsed as $item) {
+        if (!empty($item['error']) || !empty($item['failed'])) {
+            $hasError = true;
+        }
+        if (!empty($item['pending']) || !empty($item['console_errors'])) {
+            $hasWarn = true;
+        }
+    }
+
+    return [
+        'ok' => true,
+        'status' => $hasError ? 'error' : ($hasWarn ? 'warn' : 'ok'),
+        'results' => $parsed,
+        'browser' => $capability,
+    ];
+}
+
 function health_build_curl_handle(string $url) {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -1204,10 +1726,147 @@ function nginx_sanitize_config_literal(string $s): string {
 }
 
 /**
+ * 内置反代兼容 Profile。
+ *
+ * Profile 只承载已知应用差异，不再试图用一份 full 参数覆盖所有站点。
+ * @return array<string,array{label:string,description:string}>
+ */
+function nginx_proxy_profiles(): array {
+    return [
+        'default' => [
+            'label' => '默认',
+            'description' => '普通 Web / API 服务，使用全局 simple/full 参数。',
+        ],
+        'qbittorrent' => [
+            'label' => 'qBittorrent',
+            'description' => '清空 Origin/Referer，并向上游发送目标 Host，避免 qB WebUI 登录被来源校验拦截。',
+        ],
+        'spa' => [
+            'label' => 'SPA 前端应用',
+            'description' => '为 assets/static 等静态资源补浏览器缓存头，适合 Vue/React 类前端。',
+        ],
+        'synology_dsm' => [
+            'label' => 'Synology DSM',
+            'description' => '为 DSM 常见静态资源路径补缓存头，降低大量资源并发加载压力。',
+        ],
+        'media' => [
+            'label' => '媒体/文件',
+            'description' => '适合 Emby/Jellyfin/FileBrowser/AList 等大文件和 Range 请求场景。',
+        ],
+        'websocket' => [
+            'label' => 'WebSocket',
+            'description' => '适合实时面板、终端、长连接服务。',
+        ],
+    ];
+}
+
+function nginx_proxy_profile_for_site(array $site, string $target = ''): string {
+    $profile = strtolower(trim((string)($site['proxy_profile'] ?? '')));
+    $profiles = nginx_proxy_profiles();
+    if ($profile !== '' && isset($profiles[$profile])) {
+        return $profile;
+    }
+
+    $id = strtolower((string)($site['id'] ?? ''));
+    $name = strtolower((string)($site['name'] ?? ''));
+    $domain = strtolower((string)($site['proxy_domain'] ?? ''));
+    $targetHost = (string)(parse_url($target, PHP_URL_HOST) ?: '');
+    $targetPort = (int)(parse_url($target, PHP_URL_PORT) ?: 0);
+
+    if (str_contains($id, 'qb') || str_contains($name, 'qbittorrent') || ($targetHost === '192.168.2.2' && $targetPort === 9097)) {
+        return 'qbittorrent';
+    }
+    if ($targetPort === 5000 || str_contains($id, 'nas') || str_contains($name, 'synology') || str_contains($domain, 'nas.')) {
+        return 'synology_dsm';
+    }
+    if (str_contains($id, 'file') || str_contains($id, 'alist') || str_contains($name, 'filebrowser')) {
+        return 'media';
+    }
+    if (str_contains($id, 'mp') || str_contains($name, 'moviepilot') || str_contains($id, 'v2raya') || str_contains($id, 'clash')) {
+        return 'spa';
+    }
+
+    return 'default';
+}
+
+/**
+ * qB 需要完全接管 location / 的代理头，避免被通用 include 中的 Host 覆盖。
+ * @return string[]
+ */
+function nginx_qbittorrent_proxy_directives(): array {
+    return [
+        'proxy_http_version 1.1;',
+        'proxy_set_header Upgrade $http_upgrade;',
+        'proxy_set_header Connection $connection_upgrade;',
+        'proxy_set_header Host $proxy_host;',
+        'proxy_set_header X-Real-IP $remote_addr;',
+        'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
+        'proxy_set_header X-Forwarded-Proto $nav_forwarded_proto;',
+        'proxy_set_header X-Forwarded-Host $host;',
+        'proxy_set_header X-Forwarded-Port $server_port;',
+        'proxy_set_header Authorization $http_authorization;',
+        'proxy_set_header Cookie $http_cookie;',
+        'proxy_set_header Range $http_range;',
+        'proxy_set_header If-Range $http_if_range;',
+        'proxy_set_header Origin "";',
+        'proxy_set_header Referer "";',
+        'proxy_pass_header Set-Cookie;',
+        'proxy_pass_header Location;',
+        'proxy_connect_timeout 30s;',
+        'proxy_send_timeout 1800s;',
+        'proxy_read_timeout 1800s;',
+        'send_timeout 1800s;',
+        'client_max_body_size 2g;',
+        'proxy_redirect off;',
+    ];
+}
+
+function nginx_indent_lines(array $lines, string $indent): string {
+    if ($lines === []) return '';
+    return implode("\n", array_map(static fn($line) => $indent . $line, $lines));
+}
+
+function nginx_profile_main_location_directives(string $profile, string $paramsFile): string {
+    if ($profile === 'qbittorrent') {
+        return nginx_indent_lines(nginx_qbittorrent_proxy_directives(), '        ');
+    }
+
+    return "        include {$paramsFile};";
+}
+
+function nginx_profile_static_pattern(string $profile): string {
+    return match ($profile) {
+        'synology_dsm' => '^/(scripts|webman|synoSDSjslib)/',
+        'spa', 'media', 'websocket' => '^/(assets|static|scripts|fonts|img|css|js)/',
+        default => '',
+    };
+}
+
+function nginx_profile_static_locations(string $profile, string $target, string $paramsFile): string {
+    $pattern = nginx_profile_static_pattern($profile);
+    if ($pattern === '') {
+        return '';
+    }
+
+    return implode("\n", [
+        "    location ~* {$pattern} {",
+        "        auth_request /auth/verify;",
+        "        error_page 401 = @nav_login;",
+        "        proxy_pass {$target};",
+        "        include {$paramsFile};",
+        "        expires 1h;",
+        "        add_header Cache-Control \"private, max-age=3600\" always;",
+        "    }",
+        "",
+    ]);
+}
+
+/**
  * 根据当前 sites.json 生成 Nginx 反代配置片段
- * 输出到：
- *   - /etc/nginx/conf.d/nav-proxy.conf        （路径前缀模式）
- *   - /etc/nginx/http.d/nav-proxy-domains.conf（子域名模式）
+ * 输出到 data/nginx 下的持久化配置文件；容器启动时会将 /etc/nginx 中的
+ * 同名文件软链到 data 目录，避免运行配置和持久化配置分裂：
+ *   - DATA_DIR/nginx/conf.d/nav-proxy.conf        （路径前缀模式）
+ *   - DATA_DIR/nginx/http.d/nav-proxy-domains.conf（子域名模式）
  * 由 nginx reload 后生效。
  *
  * 仅处理 type=proxy 的站点：
@@ -1261,6 +1920,7 @@ function nginx_generate_proxy_conf(): array {
                 continue; // 格式非法，跳过此站点，不写入 Nginx 配置
             }
             $name   = nginx_sanitize_config_literal($s['name'] ?? $s['id']);
+            $profile = nginx_proxy_profile_for_site(is_array($s) ? $s : [], $target);
 
             if (($s['type'] ?? '') === 'proxy_path' || (($s['type'] ?? '') === 'proxy' && ($s['proxy_mode'] ?? 'path') === 'path')) {
                 $slug = preg_replace('/[^a-z0-9_-]/', '-', strtolower($s['slug'] ?? $s['id']));
@@ -1270,17 +1930,18 @@ function nginx_generate_proxy_conf(): array {
                         'slug' => $slug,
                         'target' => $target,
                         'params_file' => $selected_params_file,
+                        'profile' => $profile,
+                        'profile_location_directives' => nginx_profile_main_location_directives($profile, $selected_params_file),
                     ]);
                 } else {
                     // 硬编码 fallback
                     $block_lines = [
                         "    # {$name}",
                         "    location /p/{$slug}/ {",
-                        "        if (\$cookie_nav_session = \"\") { return 302 /login.php?redirect=\$request_uri; }",
                         "        auth_request      /auth/verify.php;",
                         "        error_page 401  = @login_redirect;",
                         "        proxy_pass        {$target}/;",
-                        "        include           {$selected_params_file};",
+                        nginx_profile_main_location_directives($profile, $selected_params_file),
                     ];
                     $block_lines[] = "    }";
                     $path_blocks[] = implode("\n", $block_lines);
@@ -1289,7 +1950,13 @@ function nginx_generate_proxy_conf(): array {
                 // 子域名模式：独立 server 块
                 $pd = nginx_sanitize_config_literal($s['proxy_domain'] ?? '');
                 if (!$pd || !preg_match('/^[a-zA-Z0-9._-]+$/', $pd)) continue;
-                if ($useTplDomain) {
+                $targetHost = parse_url($target, PHP_URL_HOST) ?: '';
+                $targetPort = (int) (parse_url($target, PHP_URL_PORT) ?: 80);
+                $isQbittorrent = $profile === 'qbittorrent';
+                $tplSupportsProfiles = $useTplDomain
+                    && strpos($tplDomain, '{{profile_location_directives}}') !== false
+                    && strpos($tplDomain, '{{profile_static_locations}}') !== false;
+                if ($useTplDomain && ($profile === 'default' || $tplSupportsProfiles)) {
                     $domain_blocks[] = nginx_render_proxy_template($tplDomain, [
                         'name' => $name,
                         'domain' => $pd,
@@ -1297,6 +1964,9 @@ function nginx_generate_proxy_conf(): array {
                         'params_file' => $selected_params_file,
                         'nav_domain' => $nav_domain,
                         'port' => (string)$port,
+                        'profile' => $profile,
+                        'profile_static_locations' => nginx_profile_static_locations($profile, $target, $selected_params_file),
+                        'profile_location_directives' => nginx_profile_main_location_directives($profile, $selected_params_file),
                     ]);
                 } else {
                     // 硬编码 fallback
@@ -1305,6 +1975,7 @@ function nginx_generate_proxy_conf(): array {
                         "    listen {$port};",
                         "    listen [::]:{$port};",
                         "    server_name {$pd};",
+                        "    absolute_redirect off;",
                         "",
                         "    location = /auth/verify {",
                         "        internal;",
@@ -1321,18 +1992,57 @@ function nginx_generate_proxy_conf(): array {
                         "        fastcgi_read_timeout 30s;",
                         "    }",
                         "",
+                        "    location = /login.php {",
+                        "        auth_request off;",
+                        "        fastcgi_pass unix:/run/php-fpm.sock;",
+                        "        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/login.php;",
+                        "        include fastcgi_params;",
+                        "        fastcgi_param HTTP_X_REAL_IP \$remote_addr;",
+                        "        fastcgi_param HTTP_X_FORWARDED_FOR \$proxy_add_x_forwarded_for;",
+                        "        fastcgi_param HTTP_X_FORWARDED_PROTO \$http_x_forwarded_proto;",
+                        "        fastcgi_connect_timeout 10s;",
+                        "        fastcgi_send_timeout 60s;",
+                        "        fastcgi_read_timeout 60s;",
+                        "    }",
+                        "",
+                        "    location = /login.css {",
+                        "        auth_request off;",
+                        "        root /var/www/nav/public;",
+                        "        expires 7d;",
+                        "        add_header Cache-Control \"public, immutable\";",
+                        "    }",
+                        "",
+                        "    location = /gesture-guard.js {",
+                        "        auth_request off;",
+                        "        root /var/www/nav/public;",
+                        "        expires 7d;",
+                        "        add_header Cache-Control \"public, immutable\";",
+                        "    }",
+                        "",
+                    ];
+                    $staticLocations = nginx_profile_static_locations($profile, $target, $selected_params_file);
+                    if ($staticLocations !== '') {
+                        $block_lines[] = rtrim($staticLocations);
+                        $block_lines[] = "";
+                    }
+                    $block_lines = array_merge($block_lines, [
                         "    location / {",
-                        "        if (\$cookie_nav_session = \"\") { return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri; }",
                         "        auth_request /auth/verify;",
                         "        error_page 401 = @nav_login;",
                         "        proxy_pass {$target};",
-                        "        include {$selected_params_file};",
-                    ];
+                    ]);
+                    if ($isQbittorrent) {
+                        foreach (nginx_qbittorrent_proxy_directives() as $directive) {
+                            $block_lines[] = "        {$directive}";
+                        }
+                    } else {
+                        $block_lines[] = nginx_profile_main_location_directives($profile, $selected_params_file);
+                    }
                     $block_lines = array_merge($block_lines, [
                         "    }",
                         "",
                         "    location @nav_login {",
-                        "        return 302 https://{$nav_domain}/login.php?redirect=https://\$host\$request_uri;",
+                        "        return 302 /login.php?redirect=\$nav_forwarded_proto://\$http_host\$request_uri;",
                         "    }",
                         "}",
                     ]);
@@ -1396,6 +2106,8 @@ function nginx_generate_proxy_conf(): array {
     // 写入配置文件
     $path_conf_path   = nginx_proxy_conf_path();
     $domain_conf_path = nginx_domain_proxy_conf_path();
+    @mkdir(dirname($path_conf_path), 0775, true);
+    @mkdir(dirname($domain_conf_path), 0775, true);
     $path_result      = @file_put_contents($path_conf_path, $path_conf, LOCK_EX);
     $domain_result    = @file_put_contents($domain_conf_path, $domain_conf, LOCK_EX);
 
@@ -1558,14 +2270,24 @@ function nginx_reload_capability(): array {
  * Nginx 反代配置文件路径
  */
 function nginx_proxy_conf_path(): string {
-    return '/etc/nginx/conf.d/nav-proxy.conf';
+    $overrideDir = trim((string)getenv('NAV_NGINX_CONF_D_DIR'));
+    if ($overrideDir !== '') {
+        return rtrim($overrideDir, '/') . '/nav-proxy.conf';
+    }
+    $baseDataDir = realpath(DATA_DIR) ?: DATA_DIR;
+    return rtrim($baseDataDir, '/') . '/nginx/conf.d/nav-proxy.conf';
 }
 
 /**
  * Nginx 子域名反代配置文件路径
  */
 function nginx_domain_proxy_conf_path(): string {
-    return '/etc/nginx/http.d/nav-proxy-domains.conf';
+    $overrideDir = trim((string)getenv('NAV_NGINX_HTTP_D_DIR'));
+    if ($overrideDir !== '') {
+        return rtrim($overrideDir, '/') . '/nav-proxy-domains.conf';
+    }
+    $baseDataDir = realpath(DATA_DIR) ?: DATA_DIR;
+    return rtrim($baseDataDir, '/') . '/nginx/http.d/nav-proxy-domains.conf';
 }
 
 /**
@@ -1605,11 +2327,11 @@ function nginx_default_proxy_params_simple_template(): string {
         'proxy_set_header                Host                            $host;',
         'proxy_set_header                X-Real-IP                       $remote_addr;',
         'proxy_set_header                X-Forwarded-For                 $proxy_add_x_forwarded_for;',
-        'proxy_set_header                X-Forwarded-Proto               $scheme;',
+        'proxy_set_header                X-Forwarded-Proto               $nav_forwarded_proto;',
         'proxy_set_header                X-Forwarded-Host                $host;',
         'proxy_set_header                X-Forwarded-Port                $server_port;',
         'proxy_set_header                Upgrade                         $http_upgrade;',
-        'proxy_set_header                Connection                      "upgrade";',
+        'proxy_set_header                Connection                      $connection_upgrade;',
         'proxy_connect_timeout           60s;',
         'proxy_send_timeout              60s;',
         'proxy_read_timeout              60s;',
@@ -1636,7 +2358,7 @@ function nginx_default_proxy_template_path(): string {
         '        auth_request      /auth/verify.php;',
         '        error_page 401  = @login_redirect;',
         '        proxy_pass        {{target}}/;',
-        '        include           {{params_file}};',
+        '{{profile_location_directives}}',
         '    }',
     ]) . "\n";
 }
@@ -1656,6 +2378,7 @@ function nginx_default_proxy_template_domain(): string {
         '    listen {{port}};',
         '    listen [::]:{{port}};',
         '    server_name {{domain}};',
+        '    absolute_redirect off;',
         '',
         '    location = /auth/verify {',
         '        internal;',
@@ -1672,16 +2395,43 @@ function nginx_default_proxy_template_domain(): string {
         '        fastcgi_read_timeout 30s;',
         '    }',
         '',
+        '    location = /login.php {',
+        '        auth_request off;',
+        '        fastcgi_pass unix:/run/php-fpm.sock;',
+        '        fastcgi_param SCRIPT_FILENAME /var/www/nav/public/login.php;',
+        '        include fastcgi_params;',
+        '        fastcgi_param HTTP_X_REAL_IP $remote_addr;',
+        '        fastcgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;',
+        '        fastcgi_param HTTP_X_FORWARDED_PROTO $http_x_forwarded_proto;',
+        '        fastcgi_connect_timeout 10s;',
+        '        fastcgi_send_timeout 60s;',
+        '        fastcgi_read_timeout 60s;',
+        '    }',
+        '',
+        '    location = /login.css {',
+        '        auth_request off;',
+        '        root /var/www/nav/public;',
+        '        expires 7d;',
+        '        add_header Cache-Control "public, immutable";',
+        '    }',
+        '',
+        '    location = /gesture-guard.js {',
+        '        auth_request off;',
+        '        root /var/www/nav/public;',
+        '        expires 7d;',
+        '        add_header Cache-Control "public, immutable";',
+        '    }',
+        '',
+        '{{profile_static_locations}}',
         '    location / {',
-        '        if ($cookie_nav_session = "") { return 302 https://{{nav_domain}}/login.php?redirect=https://$host$request_uri; }',
         '        auth_request /auth/verify;',
         '        error_page 401 = @nav_login;',
         '        proxy_pass {{target}};',
-        '        include {{params_file}};',
+        '{{profile_location_directives}}',
         '    }',
         '',
         '    location @nav_login {',
-        '        return 302 https://{{nav_domain}}/login.php?redirect=https://$host$request_uri;',
+        '        return 302 /login.php?redirect=$nav_forwarded_proto://$http_host$request_uri;',
         '    }',
         '}',
     ]) . "\n";
@@ -1706,11 +2456,11 @@ function nginx_default_proxy_params_full_template(): string {
         '# Nginx 完整反代参数模板（回退版本）',
         'proxy_http_version              1.1;',
         'proxy_set_header                Upgrade                         $http_upgrade;',
-        'proxy_set_header                Connection                      "upgrade";',
+        'proxy_set_header                Connection                      $connection_upgrade;',
         'proxy_set_header                Host                            $host;',
         'proxy_set_header                X-Real-IP                       $remote_addr;',
         'proxy_set_header                X-Forwarded-For                 $proxy_add_x_forwarded_for;',
-        'proxy_set_header                X-Forwarded-Proto               $scheme;',
+        'proxy_set_header                X-Forwarded-Proto               $nav_forwarded_proto;',
         'proxy_set_header                X-Forwarded-Host                $host;',
         'proxy_set_header                X-Forwarded-Port                $server_port;',
         'proxy_set_header                Authorization                   $http_authorization;',
@@ -2291,6 +3041,7 @@ function nginx_effective_proxy_site_state(array $site): ?array {
         'id' => $id,
         'mode' => $mode,
         'target' => $target,
+        'proxy_profile' => nginx_proxy_profile_for_site($site, $target),
         'slug' => $mode === 'path' ? $slug : '',
         'proxy_domain' => $mode === 'domain' ? (string)($site['proxy_domain'] ?? '') : '',
     ];

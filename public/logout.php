@@ -4,8 +4,8 @@
  * 清除登录 Cookie，记录日志，跳转登录页
  * 安全：仅接受 POST+CSRF，防止 CSRF 强制退出
  */
-if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
+auth_start_php_session();
 require_once __DIR__ . '/../shared/request_timing.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
 

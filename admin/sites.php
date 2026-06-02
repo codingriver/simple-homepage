@@ -36,6 +36,9 @@ function sites_handle_post(array &$sites_data): array {
         $type    = $_POST['type'] ?? 'external';
         $url     = trim($_POST['url']  ?? '');
         $notes = trim((string)($_POST['notes'] ?? ''));
+        $credential_username = trim((string)($_POST['credential_username'] ?? ''));
+        $credential_password = (string)($_POST['credential_password'] ?? '');
+        $credential_note = trim((string)($_POST['credential_note'] ?? ''));
 
         $err = '';
         if (!preg_match('/^[a-z0-9_-]+$/', $sid)) $err = '站点ID只允许小写字母数字下划线横杠';
@@ -44,6 +47,8 @@ function sites_handle_post(array &$sites_data): array {
         elseif ($type === 'proxy_domain' || $type === 'proxy_path') {
             $target = trim($_POST['proxy_target'] ?? '');
             if (!is_allowed_proxy_target($target)) $err = '代理目标必须是 RFC1918 内网IPv4地址（防SSRF）';
+            $profile = trim((string)($_POST['proxy_profile'] ?? 'default'));
+            if ($profile !== '' && !isset(nginx_proxy_profiles()[$profile])) $err = '未知的反代 Profile';
         }
 
         if ($err) return ['ok' => false, 'msg' => $err];
@@ -65,6 +70,11 @@ function sites_handle_post(array &$sites_data): array {
             'type' => $type,
             'notes' => $notes,
         ];
+        if ($credential_username !== '' || $credential_password !== '' || $credential_note !== '') {
+            $site['credential_username'] = $credential_username;
+            $site['credential_password'] = $credential_password;
+            $site['credential_note'] = $credential_note;
+        }
         if ($oldSite) {
             foreach (['desc','order','tags','favorite','pinned','status_badge','owner','env','asset_type','domain_expire_at','ssl_expire_at','renew_url'] as $k) {
                 if (isset($oldSite[$k])) $site[$k] = $oldSite[$k];
@@ -72,6 +82,7 @@ function sites_handle_post(array &$sites_data): array {
         }
         if ($type === 'proxy_domain' || $type === 'proxy_path') {
             $site['proxy_target'] = trim($_POST['proxy_target'] ?? '');
+            $site['proxy_profile'] = trim($_POST['proxy_profile'] ?? 'default');
             if ($type === 'proxy_domain') {
                 $site['proxy_domain'] = trim($_POST['proxy_domain'] ?? '');
             } else {
@@ -126,7 +137,7 @@ function sites_handle_post(array &$sites_data): array {
             favicon_trigger_sync($trigger_domain);
         }
 
-        audit_log('site_save', ['gid' => $gid, 'sid' => $sid, 'name' => $name]);
+        audit_log('site_save', ['gid' => $gid, 'sid' => $sid, 'name' => $name, 'credential_set' => ($credential_username !== '' || $credential_password !== '')]);
         flash_set('success', '站点已保存');
         return ['ok' => true, 'msg' => '站点已保存'];
     }
@@ -257,6 +268,14 @@ $groups_json = json_encode(
     array_map(function($g){ return ['id'=>$g['id'],'name'=>$g['name']]; }, $groups),
     JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP
 );
+$proxy_profiles_json = json_encode(
+    array_map(
+        static fn($key, $profile) => ['id' => $key, 'label' => $profile['label'], 'description' => $profile['description']],
+        array_keys(nginx_proxy_profiles()),
+        nginx_proxy_profiles()
+    ),
+    JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP
+);
 ?>
 
 <div class="toolbar">
@@ -293,13 +312,24 @@ $groups_json = json_encode(
       <td style="cursor:move;text-align:center;color:var(--tm)">☰</td>
       <td><code style="font-size:12px"><?= htmlspecialchars($s['id']) ?></code></td>
       <td><?= htmlspecialchars($s['icon']??'') ?> <?= htmlspecialchars($s['name']) ?></td>
-      <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','proxy_domain'=>'badge-yellow','proxy_path'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars(['proxy_domain'=>'子域名代理','proxy_path'=>'子路径代理','proxy'=>'代理','internal'=>'内站','external'=>'外链'][$s['type']??'external']) ?></span></td>
+      <td><span class="badge <?= ['internal'=>'badge-purple','proxy'=>'badge-yellow','proxy_domain'=>'badge-yellow','proxy_path'=>'badge-yellow','external'=>'badge-gray'][$s['type']??'external'] ?>"><?= htmlspecialchars(['proxy_domain'=>'子域名代理','proxy_path'=>'子路径代理','proxy'=>'代理','internal'=>'内站','external'=>'外链'][$s['type']??'external']) ?></span>
+        <?php if (in_array(($s['type']??''), ['proxy','proxy_domain','proxy_path'], true)): ?>
+          <?php $profileKey = nginx_proxy_profile_for_site($s, (string)($s['proxy_target'] ?? '')); $profileLabel = nginx_proxy_profiles()[$profileKey]['label'] ?? $profileKey; ?>
+          <span class="badge badge-gray" title="反代 Profile"><?= htmlspecialchars($profileLabel) ?></span>
+        <?php endif; ?>
+        <?php if (trim((string)($s['credential_username'] ?? '')) !== '' || trim((string)($s['credential_password'] ?? '')) !== ''): ?>
+          <span class="badge badge-purple" title="已保存站点测试凭据">凭据</span>
+        <?php endif; ?></td>
       <td style="font-size:12px;font-family:monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
         <?= htmlspecialchars($s['url'] ?? $s['proxy_target'] ?? '') ?></td>
       <td style="font-size:12px;white-space:nowrap"><?= $h_dot ?><?= $h_status==='up' && $h_ms!=='-' ? ' <span style="color:var(--tm);font-size:10px">('.$h_ms.'ms)</span>' : '' ?></td>
       <td>
         <button class="btn btn-sm btn-secondary"
           onclick='openForm(<?= htmlspecialchars(json_encode($s),ENT_QUOTES) ?>, "<?= htmlspecialchars($grp['id'],ENT_QUOTES) ?>")'>编辑</button>
+        <?php if (in_array(($s['type']??''), ['proxy','proxy_domain','proxy_path'], true)): ?>
+        <button type="button" class="btn btn-sm btn-secondary"
+          onclick="runProxyDiagnose('<?= htmlspecialchars($grp['id'], ENT_QUOTES) ?>','<?= htmlspecialchars($s['id'], ENT_QUOTES) ?>')">诊断</button>
+        <?php endif; ?>
         <form method="POST" style="display:inline" data-confirm-title="删除站点" data-confirm-message="确认删除该站点？">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="delete">
@@ -354,6 +384,9 @@ padding:28px;width:100%;max-width:520px;margin:auto">
             <input type="text" name="proxy_target" id="fi_ptarget" placeholder="http://192.168.1.x:port"></div>
           <div class="form-group"><label>代理域名</label>
             <input type="text" name="proxy_domain" id="fi_pdomain" placeholder="app.yourdomain.com"></div>
+          <div class="form-group full"><label>反代 Profile</label>
+            <select name="proxy_profile" id="fi_pprofile"></select>
+            <div class="form-hint" id="fi_pprofile_hint"></div></div>
         </div>
       </div>
       <div id="proxy_path_fields" style="display:none;grid-column:1/-1">
@@ -362,21 +395,43 @@ padding:28px;width:100%;max-width:520px;margin:auto">
             <input type="text" name="proxy_target" id="fi_ptarget_path" placeholder="http://192.168.1.x:port"></div>
           <div class="form-group"><label>路径前缀 /p/{slug}/</label>
             <input type="text" name="slug" id="fi_slug" placeholder="my-app"></div>
+          <div class="form-group full"><label>反代 Profile</label>
+            <select name="proxy_profile" id="fi_pprofile_path"></select>
+            <div class="form-hint" id="fi_pprofile_path_hint"></div></div>
         </div>
       </div>
       <div class="form-group full"><label>备注</label>
         <textarea name="notes" id="fi_notes" rows="3" style="width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;resize:vertical"></textarea></div>
+      <div class="form-group"><label>站点账号</label>
+        <input type="text" name="credential_username" id="fi_credential_username" autocomplete="off" placeholder="用于测试登录"></div>
+      <div class="form-group"><label>站点密码</label>
+        <input type="password" name="credential_password" id="fi_credential_password" autocomplete="new-password" placeholder="明文保存"></div>
+      <div class="form-group full"><label>凭据备注</label>
+        <input type="text" name="credential_note" id="fi_credential_note" maxlength="200" placeholder="例如：仅用于 qB 代理测试"></div>
     </div>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">保存</button>
       <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
     </div>
   </form>
-</div></div>
+	</div></div>
 
-<script>
-var modal  = document.getElementById('modal');
-var groups = <?= $groups_json ?>;
+	<div id="proxyDiagModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+	z-index:520;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto">
+	<div id="proxyDiagInner" style="background:var(--sf);border:1px solid var(--bd);border-radius:14px;
+	padding:24px;width:100%;max-width:760px;margin:auto">
+	  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px">
+	    <div style="font-weight:700;font-size:15px">代理诊断</div>
+	    <button type="button" class="btn btn-sm btn-secondary" onclick="closeProxyDiagnose()">关闭</button>
+	  </div>
+	  <div id="proxyDiagBody" style="font-size:13px;color:var(--tx)"></div>
+	</div></div>
+
+	<script>
+	var modal  = document.getElementById('modal');
+	var proxyDiagModal = document.getElementById('proxyDiagModal');
+	var groups = <?= $groups_json ?>;
+	var proxyProfiles = <?= $proxy_profiles_json ?>;
 function populateGroups(selGid) {
     var sel = document.getElementById('fi_gid');
     if(!groups||!groups.length){sel.innerHTML='<option value="">(请先添加分组)</option>';return;}
@@ -388,7 +443,37 @@ function toggleType(t) {
     document.getElementById('row_url').style.display = (t==='proxy_domain' || t==='proxy_path') ? 'none' : '';
     document.getElementById('proxy_domain_fields').style.display = t==='proxy_domain' ? 'grid' : 'none';
     document.getElementById('proxy_path_fields').style.display = t==='proxy_path' ? 'grid' : 'none';
+    var domainProfile = document.getElementById('fi_pprofile');
+    var pathProfile = document.getElementById('fi_pprofile_path');
+    if (domainProfile) domainProfile.disabled = t !== 'proxy_domain';
+    if (pathProfile) pathProfile.disabled = t !== 'proxy_path';
 }
+function populateProxyProfiles(selected) {
+    var html = proxyProfiles.map(function(p){
+        return '<option value="'+p.id+'"'+(p.id===selected?' selected':'')+'>'+p.label+'</option>';
+    }).join('');
+    ['fi_pprofile','fi_pprofile_path'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    });
+    updateProxyProfileHint();
+}
+function updateProxyProfileHint() {
+    [
+        ['fi_pprofile', 'fi_pprofile_hint'],
+        ['fi_pprofile_path', 'fi_pprofile_path_hint']
+    ].forEach(function(pair){
+        var sel = document.getElementById(pair[0]);
+        var hint = document.getElementById(pair[1]);
+        if (!sel || !hint) return;
+        var found = proxyProfiles.find(function(p){ return p.id === sel.value; });
+        hint.textContent = found ? found.description : '';
+    });
+}
+['fi_pprofile','fi_pprofile_path'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', updateProxyProfileHint);
+});
 function openForm(s, gid) {
     document.getElementById('mtitle').textContent = s ? '编辑站点' : '添加站点';
     document.getElementById('fi_ogid').value   = gid  || '';
@@ -408,12 +493,217 @@ function openForm(s, gid) {
     document.getElementById('fi_slug').value   = s ? (s.slug||'') : '';
     document.getElementById('fi_pdomain').value= s ? (s.proxy_domain||'') : '';
     document.getElementById('fi_notes').value = s ? (s.notes||'') : '';
+    document.getElementById('fi_credential_username').value = s ? (s.credential_username||'') : '';
+    document.getElementById('fi_credential_password').value = s ? (s.credential_password||'') : '';
+    document.getElementById('fi_credential_note').value = s ? (s.credential_note||'') : '';
     populateGroups(gid||(groups.length?groups[0].id:''));
+    populateProxyProfiles(s ? (s.proxy_profile || 'default') : 'default');
     toggleType(stype);
     var sb=document.querySelector('#siteForm button[type=submit]');if(sb){sb.disabled=false;sb.textContent='保存';}
     modal.style.display='flex';
 }
-function closeModal() { modal.style.display = 'none'; closeEmojiPicker(); }
+	function closeModal() { modal.style.display = 'none'; closeEmojiPicker(); }
+	function closeProxyDiagnose() { proxyDiagModal.style.display = 'none'; }
+	var proxyDiagCurrent = { gid: '', sid: '' };
+
+	function escHtml(value) {
+	    return String(value == null ? '' : value)
+	        .replace(/&/g, '&amp;')
+	        .replace(/</g, '&lt;')
+	        .replace(/>/g, '&gt;')
+	        .replace(/"/g, '&quot;')
+	        .replace(/'/g, '&#39;');
+	}
+
+	function renderProxyDiagnose(d) {
+	    if (!d || !d.ok) {
+	        return '<div class="alert alert-error">' + escHtml((d && d.msg) || '诊断失败') + '</div>';
+	    }
+	    var site = d.site || {};
+	    var checks = d.checks || {};
+	    var issues = d.issues || [];
+	    var badge = d.status === 'ok' ? 'badge-green' : (d.status === 'warn' ? 'badge-yellow' : 'badge-red');
+	    var html = ''
+	        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+	        + '<strong>' + escHtml(site.name || site.id || '-') + '</strong>'
+	        + '<span class="badge ' + badge + '">' + escHtml(d.status || '-') + '</span>'
+	        + '<span class="badge badge-gray">' + escHtml(site.profile_label || site.profile || '-') + '</span>'
+	        + '</div>'
+	        + '<div class="table-wrap" style="margin-bottom:14px"><table>'
+	        + '<tr><th>项目</th><th>地址</th><th>状态</th><th>耗时</th><th>跳转/错误</th></tr>'
+	        + renderDiagCheck('内网目标', checks.target)
+	        + renderDiagCheck('代理域名', checks.proxy)
+	        + '</table></div>';
+	    if (issues.length) {
+	        html += '<div style="display:grid;gap:8px">';
+	        issues.forEach(function(issue){
+	            var color = issue.level === 'error' ? '#f87171' : (issue.level === 'warn' ? '#facc15' : 'var(--tm)');
+	            html += '<div style="border:1px solid var(--bd);border-radius:8px;padding:9px 10px">'
+	                + '<span style="color:' + color + ';font-weight:700">' + escHtml(issue.level || 'info') + '</span> '
+	                + '<code style="font-size:11px">' + escHtml(issue.code || '') + '</code>'
+	                + '<div style="margin-top:4px;color:var(--tx)">' + escHtml(issue.message || '') + '</div>'
+	                + '</div>';
+	        });
+	        html += '</div>';
+	    } else {
+	        html += '<div style="color:#4ade80">未发现明显代理配置风险。</div>';
+	    }
+	    html += renderBrowserDiagPanel(d);
+	    return html;
+	}
+
+	function renderBrowserDiagPanel(d) {
+	    var browser = d.browser || {};
+	    var site = d.site || {};
+	    var html = '<div style="margin-top:16px;border-top:1px solid var(--bd);padding-top:14px">'
+	        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+	        + '<strong>真实浏览器诊断</strong>';
+	    if (browser.available && site.proxy_url) {
+	        html += '<button type="button" class="btn btn-sm btn-primary" onclick="runProxyBrowserDiagnose()">运行浏览器诊断</button>';
+	    }
+	    html += '</div>';
+	    if (browser.available) {
+	        html += '<div style="font-size:12px;color:var(--tm);margin-bottom:10px">使用 Playwright 打开代理 URL，并捕获运行时请求失败、慢资源和控制台错误。</div>';
+	    } else {
+	        html += '<div class="alert alert-warn" style="margin-bottom:10px">' + escHtml(browser.reason || '当前后台环境不能直接运行浏览器诊断。') + '</div>';
+	        if (browser.host_command) {
+	            html += '<div style="font-size:12px;color:var(--tm);margin-bottom:6px">可在宿主机项目目录运行：</div>'
+	                + '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:11px">'
+	                + escHtml(browser.host_command) + '</pre>';
+	        }
+	    }
+	    html += '<div id="proxyDiagBrowserBody"></div></div>';
+	    return html;
+	}
+
+	function renderProxyBrowserDiagnose(d) {
+	    if (!d || !d.ok) {
+	        var msg = (d && d.msg) || '浏览器诊断失败';
+	        var html = '<div class="alert alert-error">' + escHtml(msg) + '</div>';
+	        if (d && d.browser && d.browser.host_command) {
+	            html += '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:11px">'
+	                + escHtml(d.browser.host_command) + '</pre>';
+	        }
+	        if (d && d.output) {
+	            html += '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;font-size:11px;max-height:180px;overflow:auto">'
+	                + escHtml(d.output) + '</pre>';
+	        }
+	        return html;
+	    }
+	    var statusBadge = d.status === 'ok' ? 'badge-green' : (d.status === 'warn' ? 'badge-yellow' : 'badge-red');
+	    var html = '<div style="display:flex;gap:8px;align-items:center;margin:8px 0 10px">'
+	        + '<span class="badge ' + statusBadge + '">' + escHtml(d.status || '-') + '</span>'
+	        + '<span style="font-size:12px;color:var(--tm)">浏览器诊断完成</span>'
+	        + '</div>';
+	    (d.results || []).forEach(function(item){
+	        html += '<div style="border:1px solid var(--bd);border-radius:8px;padding:10px;margin-bottom:10px">'
+	            + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'
+	            + '<strong>' + escHtml(item.id || item.url || '-') + '</strong>'
+	            + '<span class="badge badge-gray">' + escHtml((item.status || '-') + ' / ' + (item.ms || 0) + ' ms') + '</span>'
+	            + '</div>'
+	            + '<div style="font-family:monospace;font-size:11px;color:var(--tm);word-break:break-all">final: ' + escHtml(item.final_url || '-') + '</div>';
+	        if (item.error) {
+	            html += '<div style="color:var(--red);margin-top:8px">' + escHtml(item.error) + '</div>';
+	        }
+	        if (item.app_checks && item.app_checks.length) {
+	            item.app_checks.forEach(function(check){
+	                var checkBadge = check.ok ? 'badge-green' : 'badge-red';
+	                html += '<div style="margin-top:8px;border:1px solid var(--bd);border-radius:8px;padding:8px">'
+	                    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+	                    + '<strong>' + escHtml(check.type || 'app') + '</strong>'
+	                    + '<span class="badge ' + checkBadge + '">' + (check.ok ? 'ok' : 'error') + '</span>'
+	                    + '</div>'
+	                    + '<div style="font-family:monospace;font-size:11px;color:var(--tm);margin-top:6px">'
+	                    + 'login=' + escHtml(check.login_status || '-') + ' maindata=' + escHtml(check.maindata_status || '-')
+	                    + ' torrents=' + escHtml(check.torrent_count == null ? '-' : check.torrent_count)
+	                    + ' completed=' + escHtml(check.completed_count == null ? '-' : check.completed_count)
+	                    + '</div>';
+	                if (check.error) {
+	                    html += '<div style="color:var(--red);font-size:11px;margin-top:6px;word-break:break-all">' + escHtml(check.error) + '</div>';
+	                }
+	                html += '</div>';
+	            });
+	        }
+	        html += renderBrowserList('失败请求', item.failed, ['type', 'error', 'url']);
+	        html += renderBrowserList('未完成请求', item.pending, ['type', 'age_ms', 'url']);
+	        html += renderBrowserList('慢资源', item.slow, ['type', 'status', 'ms', 'url']);
+	        if (item.console_errors && item.console_errors.length) {
+	            html += '<div style="margin-top:8px;font-weight:700">控制台错误</div>';
+	            item.console_errors.forEach(function(line){
+	                html += '<div style="font-size:11px;color:var(--red);word-break:break-all">' + escHtml(line) + '</div>';
+	            });
+	        }
+	        html += '</div>';
+	    });
+	    return html;
+	}
+
+	function renderBrowserList(title, rows, fields) {
+	    if (!rows || !rows.length) return '';
+	    var html = '<div style="margin-top:8px;font-weight:700">' + escHtml(title) + '</div>';
+	    rows.slice(0, 10).forEach(function(row){
+	        var line = fields.map(function(field){
+	            return field + '=' + (row[field] == null ? '-' : row[field]);
+	        }).join(' ');
+	        html += '<div style="font-family:monospace;font-size:11px;color:var(--tm);word-break:break-all">' + escHtml(line) + '</div>';
+	    });
+	    return html;
+	}
+
+	function renderDiagCheck(name, c) {
+	    c = c || {};
+	    var status = c.status ? String(c.status) : '-';
+	    var extra = c.error || c.location || c.final_url || '';
+	    var url = c.url || '-';
+	    return '<tr>'
+	        + '<td>' + escHtml(name) + '</td>'
+	        + '<td style="font-family:monospace;font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(url) + '">' + escHtml(url) + '</td>'
+	        + '<td style="font-family:monospace">' + escHtml(status) + '</td>'
+	        + '<td style="font-family:monospace">' + (c.ms != null ? escHtml(c.ms + ' ms') : '-') + '</td>'
+	        + '<td style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(extra) + '">' + escHtml(extra || '-') + '</td>'
+	        + '</tr>';
+	}
+
+	function runProxyDiagnose(gid, sid) {
+	    proxyDiagCurrent = { gid: gid, sid: sid };
+	    proxyDiagModal.style.display = 'flex';
+	    document.getElementById('proxyDiagBody').innerHTML = '<div style="color:var(--tm)">诊断中...</div>';
+	    var body = new URLSearchParams();
+	    body.set('gid', gid);
+	    body.set('sid', sid);
+	    body.set('_csrf', window._csrf || '');
+	    fetch('proxy_diagnose.php', {
+	        method: 'POST',
+	        credentials: 'same-origin',
+	        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+	        body: body.toString()
+	    }).then(function(r){ return r.json(); }).then(function(d){
+	        document.getElementById('proxyDiagBody').innerHTML = renderProxyDiagnose(d);
+	    }).catch(function(){
+	        document.getElementById('proxyDiagBody').innerHTML = '<div class="alert alert-error">请求失败，请重试</div>';
+	    });
+	}
+
+	function runProxyBrowserDiagnose() {
+	    var target = document.getElementById('proxyDiagBrowserBody');
+	    if (!target || !proxyDiagCurrent.sid) return;
+	    target.innerHTML = '<div style="color:var(--tm)">正在启动真实浏览器诊断...</div>';
+	    var body = new URLSearchParams();
+	    body.set('action', 'browser');
+	    body.set('gid', proxyDiagCurrent.gid);
+	    body.set('sid', proxyDiagCurrent.sid);
+	    body.set('_csrf', window._csrf || '');
+	    fetch('proxy_diagnose.php', {
+	        method: 'POST',
+	        credentials: 'same-origin',
+	        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+	        body: body.toString()
+	    }).then(function(r){ return r.json(); }).then(function(d){
+	        target.innerHTML = renderProxyBrowserDiagnose(d);
+	    }).catch(function(){
+	        target.innerHTML = '<div class="alert alert-error">浏览器诊断请求失败，请重试</div>';
+	    });
+	}
 
 
 

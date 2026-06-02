@@ -11,8 +11,8 @@
  * 3. 只返回图片类型内容
  * 4. 需要登录才能调用
  */
-if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
+auth_start_php_session();
 require_once __DIR__ . '/../shared/request_timing.php';
 require_once __DIR__ . '/../shared/favicon_lib.php';
 

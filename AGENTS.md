@@ -122,6 +122,16 @@ data/            # 持久化数据目录（必须挂载到宿主机）
   notifications.json / ip_locks.json / sessions.json / auth_secret.key
   backups/ / logs/ / tasks/ / favicon_cache/ / bg/ / nginx/
 
+  `users.json` 用户记录字段：
+  - `password_hash`（string）：bcrypt 哈希
+  - `role`（string）：admin / user / host_admin / host_viewer
+  - `permissions`（string[]）：权限列表，保存时自动按角色重置
+  - `max_sessions`（int）：最大同时在线设备数，默认 3
+  - `blocked_ips`（string[]）：屏蔽的 IP 列表，支持单个 IP 或 CIDR（如 `192.168.1.0/24`）
+  - `blocked_domains`（string[]）：屏蔽的域名列表，支持 `*.example.com` 通配符
+  - `created_at` / `updated_at`（string）
+  - 开发模式虚拟用户 `qatest` 的屏蔽规则存储在 `config.json` 的 `dev_account_blocked_ips` / `dev_account_blocked_domains`
+
 tests/
   e2e/full/      # Playwright E2E 测试（171 个 spec 文件，覆盖所有主要功能模块）
   phpunit/       # PHPUnit 单元测试（9 个测试类，Shared/Admin/Subsite 三个套件）
@@ -193,6 +203,12 @@ npm run test:e2e:full:chromium          # 桌面端
 npm run test:e2e:full:mobile-chrome     # 移动端
 npm run test:e2e:headed                 # headed 模式调试
 
+# 本地 qB 子域名代理登录回归（默认跳过，需当前代理环境可用）
+RUN_QB_PROXY_E2E=1 PLAYWRIGHT_REPORTER=line npx playwright test tests/e2e/full/qb-local-proxy-login-regression.spec.ts --project=chromium --headed
+
+# 登录 / Cookie / Session 回归（默认环境可跑）
+PLAYWRIGHT_REPORTER=line npx playwright test tests/e2e/full/auth-cookie-session-regression.spec.ts --project=chromium
+
 # Docker 环境中运行（推荐，避免本地环境差异）
 docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-full
 docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm playwright-mobile
@@ -258,10 +274,26 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 - 密码：`password_hash($p, PASSWORD_BCRYPT, ['cost' => 10])` / `password_verify()`
 - Token 比较：`hash_equals($expected, $actual)`
+- 登录达到 `max_sessions` 上限时，超限页应使用复选框允许多选旧设备，默认选择足够数量的最久未活跃设备；POST 可携带 `kick_oldest=1` 作为兜底，服务端必须只允许踢当前登录用户自己的 session，踢下线后再生成新的登录 Token。
 
 ### 8. Nginx + PHP-FPM 死锁规避
 
 - 在 `admin/` 等使用 `auth_request` 的 location 中，PHP 子 location 必须加 `auth_request off;`，由 PHP 自行鉴权。
+- 子域名代理的未登录回跳必须同时兼容外层 HTTPS 反代和内网 HTTP 调试：每个代理 `server` 块必须设置 `absolute_redirect off;`，未登录时跳转到 `/login.php?redirect=$nav_forwarded_proto://$http_host$request_uri`。`$nav_forwarded_proto` 由外层 `X-Forwarded-Proto` 决定，未设置时回退到 `$scheme`，因此外网 HTTPS 不会暴露 `:58080`，内网 `http://*.local.303066.xyz:58080/` 仍保留 HTTP 和端口。
+- 子域名代理必须提供同源 `/login.php`、`/login.css`、`/gesture-guard.js` 入口，未登录时跳转到 `/login.php?redirect=$scheme://$http_host$request_uri`。不要统一跳到 `https://nav_domain/login.php`，否则 HTTPS 登录页下发的 Secure Cookie 无法回传到 HTTP 调试入口，导致重定向循环。
+- qBittorrent WebUI 代理（当前 `192.168.2.2:9097`）需要向上游发送 `$proxy_host`，并清空 `Referer` / `Origin`，否则 qB API 登录会因 Host/来源校验返回 `401 Unauthorized`。
+- 通用反代参数里的 WebSocket 头必须使用 `proxy_set_header Connection $connection_upgrade;`，禁止对所有请求强制 `"upgrade"`，否则普通 JS/CSS/字体资源在多层代理下可能长时间挂起。
+- Homepage 自身的 PHP Session Cookie 使用专用名称 `nav_php_session`，不要再和后端常见的 `PHPSESSID` 混用，否则代理站点会污染登录页 CSRF 会话。
+- 登录 Cookie `nav_session` 在配置了 `cookie_domain` 时，需要同时写入站群 Domain Cookie 和当前 Host 的 host-only Cookie；服务端读取 Cookie 时必须兼容同名 Cookie 多值，逐个验证 token，避免旧 Domain Cookie 遮住新的本域登录态。`public/auth/verify.php` 作为 Nginx `auth_request` 入口也必须走同一套多 Cookie 验证逻辑，不能直接读 `$_COOKIE[SESSION_COOKIE_NAME]`。
+- 登录成功后先跳同源 `/login.php?complete=1&redirect=...`，由 200 HTML 完成页二次写入 `nav_session` 后再跳目标地址，避免部分浏览器在 302 后立刻进入代理鉴权时还未稳定带回新 Cookie。
+- `auth_request` 失败必须写入 `AUTH_DENY` 登录日志并包含 `reason=...`，便于区分 `no_cookie`、`malformed`、`bad_signature`、`expired`、`session_missing`、`blocked_ip`、`blocked_domain` 等原因。
+- `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免代理站点大量静态资源并发请求时把有效登录误判为 `session_missing`。
+- 站点代理不再依赖一份“万能 full 参数”覆盖所有场景；`sites.json` 中的代理站点应支持 `proxy_profile`（如 `default` / `qbittorrent` / `spa` / `synology_dsm` / `media` / `websocket`），生成器需按 profile 注入专用头与静态资源 location。默认 profile 仍保持兼容旧站点的自动推断。
+- 站点可在 `sites.json` 中保存测试凭据字段 `credential_username` / `credential_password` / `credential_note`，当前按产品要求明文保存，并随导入、导出、备份、恢复一起保留。后台页面可回显给管理员编辑；公共 `public/api/sites.php` 返回站点数据时必须调用 `sites_strip_credentials()` 移除这些字段，避免 API Token 消费端拿到明文密码。
+- 真实浏览器回归时应同时验收：外网域名、内网直连目标、登录后页面、静态资源是否仍被误导到 `/login.php`、以及是否存在后端写死 `127.0.0.1` 之类的应用配置问题；这类问题要在诊断报告中与反代问题分开标记。
+- 后台提供 `admin/proxy_diagnose.php` 作为单站点代理诊断接口，返回目标 URL、代理 URL、profile、资源采样和问题列表；同一接口支持 `action=browser` 触发真实浏览器诊断。若容器内没有 Node.js / Playwright，后台必须给出宿主机可执行命令，不能让诊断卡死或报含糊错误。本地浏览器级诊断脚本位于 `scripts/proxy_browser_diagnose.js`，用于捕获运行时 JS 请求失败、慢资源和控制台错误，并支持复用当前 `nav_session` Cookie。
+- PHPUnit 测试 Nginx 配置生成时必须通过 `NAV_NGINX_CONF_D_DIR` / `NAV_NGINX_HTTP_D_DIR` 指向临时目录，禁止写入真实 `/etc/nginx/conf.d` 或 `/etc/nginx/http.d`。
+- 反向代理生成配置以 `data/nginx` 为唯一持久化源：`data/nginx/conf.d/nav-proxy.conf` 和 `data/nginx/http.d/nav-proxy-domains.conf`。容器启动时将 `/etc/nginx/conf.d/nav-proxy.conf`、`/etc/nginx/http.d/nav-proxy-domains.conf` 软链到上述文件；禁止让 `/etc/nginx` 与 `data/nginx` 形成两份可写配置。
 
 ### 9. 计划任务健壮性
 
@@ -695,6 +727,8 @@ function openLogViewer(logContent, logName) {
 - **测试规范**: 必须遵守 `docs/测试用例编写规范.md` 中的维度清单（权限、异常、边界、状态、响应式、数据一致性等）。
 - **数据隔离**:
   - `tests/helpers/fixtures.ts` 扩展 Playwright base test，在每个测试前自动调用 `resetVolatileAppData()`。
+  - `auth-cookie-session-regression.spec.ts` 覆盖登录完成页、旧 Cookie、max session 多选下线、`kick_oldest` 兜底、`auth_request` 失败日志、服务端 session 被撤销后重新登录、刷新与新标签页。
+  - `qb-local-proxy-login-regression.spec.ts` 是面向当前局域网 qB 代理的显式本地回归，默认跳过；仅在设置 `RUN_QB_PROXY_E2E=1` 或 `QB_PROXY_URL` 时运行，测试只清理 `sessions.json` / `ip_locks.json`，避免重置站点配置。
   - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，重置 `sites.json` 为空分组、清空日志和备份、重置各类任务/会话等 JSON。
   - 创建型数据需使用唯一值（`Date.now()` 时间戳），禁止测试间残留数据依赖。
   - 修改全局配置/文件后需在 `try/finally` 中回滚。

@@ -49,6 +49,39 @@ final class AuthTest extends TestCase
         $newData = base64_encode(json_encode($data));
         $newToken = $newData . '.' . hash_hmac('sha256', $newData, auth_secret_key());
         $this->assertFalse(auth_verify_token($newToken));
+        $detailed = auth_verify_token_detailed($newToken);
+        $this->assertFalse($detailed['ok']);
+        $this->assertSame('expired', $detailed['reason']);
+    }
+
+    public function testDetailedTokenReasonsAndMultipleCookieFallback(): void
+    {
+        auth_ensure_secret_key();
+        $_SERVER['HTTP_HOST'] = 'app.example.test';
+        $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+
+        $bad = auth_verify_token_detailed('not-a-token');
+        $this->assertFalse($bad['ok']);
+        $this->assertSame('malformed', $bad['reason']);
+
+        $valid = auth_generate_token('multi-cookie-user', 'admin');
+        $_COOKIE = [];
+        $_SERVER['HTTP_COOKIE'] = 'nav_session=bad-token; nav_session=' . rawurlencode($valid);
+
+        $user = auth_get_current_user();
+        $this->assertIsArray($user);
+        $this->assertSame('multi-cookie-user', $user['username']);
+        $this->assertSame('ok', auth_last_failure_reason());
+
+        $payload = auth_verify_token($valid);
+        $this->assertIsArray($payload);
+        auth_session_revoke((string)$payload['jti']);
+        $_SERVER['HTTP_COOKIE'] = 'nav_session=' . rawurlencode($valid);
+        $this->assertNull(auth_get_current_user());
+        $this->assertSame('session_missing', auth_last_failure_reason());
+
+        unset($_SERVER['HTTP_COOKIE'], $_SERVER['HTTP_HOST'], $_SERVER['REMOTE_ADDR']);
+        $_COOKIE = [];
     }
 
     public function testPasswordHashVerification(): void

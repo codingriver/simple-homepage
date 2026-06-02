@@ -4,8 +4,8 @@
  * 首次部署时引导管理员设置账户密码和站点名称。
  * 安装完成后写入 .installed 锁，后续访问返回 404。
  */
-if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../shared/auth.php';
+auth_start_php_session();
 require_once __DIR__ . '/../shared/request_timing.php';
 require_once __DIR__ . '/../admin/shared/functions.php';
 auth_bootstrap_initial_admin_if_needed();

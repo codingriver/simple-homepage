@@ -137,7 +137,7 @@ fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p /var/spool/cron/crontabs
-if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/favicon_cache /var/www/nav/data/bg /var/www/nav/data/nginx /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
+if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/favicon_cache /var/www/nav/data/bg /var/www/nav/data/nginx /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
     echo "[entrypoint][ERROR] 无法在 /var/www/nav/data 下创建运行目录，请检查宿主机挂载目录权限，或设置 PUID/PGID 对齐。"
     exit 1
 fi
@@ -171,14 +171,36 @@ if [ -n "${ADMIN:-}" ]; then
     fi
 fi
 
-# ── 确保反代配置文件存在 ──
-mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
-touch /etc/nginx/conf.d/nav-proxy.conf
-touch /etc/nginx/http.d/nav-proxy-domains.conf
-chown navwww:navwww /etc/nginx/conf.d/nav-proxy.conf
-chown navwww:navwww /etc/nginx/http.d/nav-proxy-domains.conf
-chmod 664 /etc/nginx/conf.d/nav-proxy.conf
-chmod 664 /etc/nginx/http.d/nav-proxy-domains.conf
+# ── 确保反代配置文件持久化到 data 目录，/etc/nginx 仅保留运行时软链 ──
+mkdir -p /etc/nginx/conf.d /etc/nginx/http.d /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d
+
+ensure_nginx_proxy_link() {
+    runtime_path="$1"
+    data_path="$2"
+    label="$3"
+
+    if [ ! -f "$data_path" ]; then
+        if [ -f "$runtime_path" ] && [ ! -L "$runtime_path" ]; then
+            cp "$runtime_path" "$data_path"
+            echo "[entrypoint] 已迁移 $label 到 ${data_path}"
+        else
+            touch "$data_path"
+        fi
+    fi
+
+    if [ -e "$runtime_path" ] && [ ! -L "$runtime_path" ]; then
+        bak="${runtime_path}.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$runtime_path" "$bak"
+        echo "[entrypoint] 已备份旧运行时 $label: $bak"
+    fi
+
+    ln -sf "$data_path" "$runtime_path"
+    chown navwww:navwww "$data_path"
+    chmod 664 "$data_path"
+}
+
+ensure_nginx_proxy_link /etc/nginx/conf.d/nav-proxy.conf /var/www/nav/data/nginx/conf.d/nav-proxy.conf "路径前缀代理配置"
+ensure_nginx_proxy_link /etc/nginx/http.d/nav-proxy-domains.conf /var/www/nav/data/nginx/http.d/nav-proxy-domains.conf "子域名代理配置"
 
 # ── 系统配置文件持久化到 data 目录（容器重建后配置不丢失）──
 
@@ -237,23 +259,18 @@ fi
 ln -sf /var/www/nav/data/php-fpm/nav.conf /usr/local/etc/php-fpm.d/nav.conf
 chown root:navwww /var/www/nav/data/php-fpm/nav.conf
 chmod 664 /var/www/nav/data/php-fpm/nav.conf
-# ── 从镜像复制 Nginx 代理模板到数据目录（不存在/为空/不可读写时）──
+# ── 从镜像复制 Nginx 代理模板到数据目录（始终同步，确保模板更新及时生效）──
 for tmpl in proxy-params-simple.conf proxy-params-full.conf proxy-template-path.conf proxy-template-domain.conf; do
     src="/var/www/nav/nginx-conf/$tmpl"
     dst="/var/www/nav/data/nginx/$tmpl"
-    need_copy=0
-    if [ ! -f "$dst" ]; then
-        need_copy=1
-    elif [ ! -s "$dst" ]; then
-        need_copy=1
-    elif [ ! -r "$dst" ] || [ ! -w "$dst" ]; then
-        need_copy=1
-    fi
-    if [ "$need_copy" = 1 ] && [ -f "$src" ] && [ -r "$src" ]; then
-        cp "$src" "$dst"
-        chown navwww:navwww "$dst"
-        chmod 755 "$dst"
-        echo "[entrypoint] 已从镜像复制 $tmpl 到 data/nginx/"
+    if [ -f "$src" ] && [ -r "$src" ]; then
+        # 使用 cmp 比较差异，避免无意义的写入；若文件不存在或内容不同则复制
+        if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst"; then
+            cp "$src" "$dst"
+            chown navwww:navwww "$dst"
+            chmod 755 "$dst"
+            echo "[entrypoint] 已同步 $tmpl 到 data/nginx/"
+        fi
     fi
 done
 
