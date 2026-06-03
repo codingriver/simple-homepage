@@ -135,7 +135,7 @@ body {
   box-shadow: 0 0 6px var(--ac);
 }
 .nav-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
-.nav-sep { margin: 8px 18px; border: none; border-top: 1px solid #6b7280; opacity:.6; }
+.nav-sep { margin: 10px 18px; height: 1px; border: 0; background: #9ca3af; opacity: 1; }
 
 .sidebar-footer {
   padding: 14px 18px;
