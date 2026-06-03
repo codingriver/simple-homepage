@@ -310,7 +310,7 @@ function submitConfirmForm(btn, options) {
   </a>
   <nav class="sidebar-nav">
     <?php foreach ($nav_items as $item): ?>
-      <?php if (isset($item['sep'])): ?>
+      <?php if (isset($item['sep']) || (($item[0] ?? null) === 'sep')): ?>
         <hr class="nav-sep">
       <?php else: ?>
         <a href="<?= htmlspecialchars($item['file'] ?? '') ?>"

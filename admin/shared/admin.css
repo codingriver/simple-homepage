@@ -135,7 +135,17 @@ body {
   box-shadow: 0 0 6px var(--ac);
 }
 .nav-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
-.nav-sep { margin: 10px 18px; height: 1px; border: 0; background: #9ca3af; opacity: 1; }
+.nav-sep {
+  display: block;
+  width: calc(100% - 36px);
+  height: 1px;
+  min-height: 1px;
+  margin: 12px 18px;
+  border: 0;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, transparent, rgba(136,153,180,.72), rgba(77,255,212,.28), rgba(136,153,180,.72), transparent);
+  box-shadow: 0 0 8px rgba(77,255,212,.08);
+}
 
 .sidebar-footer {
   padding: 14px 18px;
@@ -791,5 +801,4 @@ details summary:hover { color: var(--ac); }
   font-family: var(--mono);
   white-space: nowrap;
 }
-
 

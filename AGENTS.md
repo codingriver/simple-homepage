@@ -9,7 +9,7 @@
 
 **Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 计划任务 / Nginx 在线编辑 / 备份 / 用户 / API Token / Webhook 等运维能力。
 
-> 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/`。
+> 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/index.php`。
 
 - **GitHub**: https://github.com/codingriver/simple-homepage
 - **Docker Hub**: https://hub.docker.com/r/codingriver/simple-homepage
@@ -59,7 +59,7 @@
 
 ```text
 public/          # 公共入口（最小化）
-  index.php      # 直接 302 跳转到 /admin/
+  index.php      # 直接 302 跳转到 /admin/index.php
   login.php      # 登录页：CSRF、IP 锁定、记住我、开发模式提示
   setup.php      # 安装向导：首次部署引导、创建管理员
   logout.php     # 退出登录（清除 Cookie）

@@ -2,5 +2,5 @@
 /**
  * 站点入口：跳转到后台管理面板
  */
-header('Location: /admin/');
+header('Location: /admin/index.php');
 exit;

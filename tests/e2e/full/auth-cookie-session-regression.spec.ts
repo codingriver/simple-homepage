@@ -132,7 +132,7 @@ test('auth_request denial writes reason to auth log', async ({ page }) => {
       sameSite: 'Lax',
     },
   ]);
-  await page.goto('/admin/');
+  await page.goto('/admin/index.php');
   await expect(page).toHaveURL(/login\.php\?redirect=/);
 
   const log = readContainerFile('/var/www/nav/data/logs/auth.log');
