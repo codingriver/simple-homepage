@@ -43,6 +43,14 @@ services:
       - TZ=${TZ:-Asia/Shanghai}
       - PUID=${PUID:-}     # 可选：显式覆盖；留空时启动后自动按 data 目录 owner 对齐
       - PGID=${PGID:-}
+      - HTTP_PROXY
+      - HTTPS_PROXY
+      - http_proxy
+      - https_proxy
+      - NO_PROXY
+      - no_proxy
+      - ALL_PROXY
+      - all_proxy
 
     volumes:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──

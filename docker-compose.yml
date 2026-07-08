@@ -21,6 +21,15 @@ services:
       # 可选：显式覆盖运行用户 UID/GID；留空时容器启动后自动按 data 目录 owner 对齐
       PUID: "${PUID:-}"
       PGID: "${PGID:-}"
+      # 可选：出站 API 代理。DigitalPlat 等平台若对容器出口触发 Cloudflare challenge，可透传宿主机可用代理。
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      http_proxy: "${http_proxy:-}"
+      https_proxy: "${https_proxy:-}"
+      NO_PROXY: "${NO_PROXY:-}"
+      no_proxy: "${no_proxy:-}"
+      ALL_PROXY: "${ALL_PROXY:-}"
+      all_proxy: "${all_proxy:-}"
 
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里

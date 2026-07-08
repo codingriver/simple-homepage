@@ -7,7 +7,7 @@
 
 ## 项目概述
 
-**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 计划任务 / Nginx 在线编辑 / 备份 / 用户 / API Token / Webhook 等运维能力。
+**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 域名有效期 / 计划任务 / Nginx 在线编辑 / 备份 / 用户 / API Token / Webhook 等运维能力。
 
 > 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/index.php`。
 
@@ -40,14 +40,14 @@
 | `package.json` | npm 脚本定义 E2E/性能测试命令；开发依赖仅 `@playwright/test`、`@lhci/cli`、`typescript` |
 | `playwright.config.ts` | Playwright 配置：`testDir: './tests/e2e/full'`，`workers: 1`，`fullyParallel: false`，Projects: `chromium`（桌面端）和 `mobile-chrome`（Pixel 7），CI 时 `retries: 1` |
 | `tsconfig.json` | TypeScript 配置：`target: ES2022`，`module: commonjs`，`strict: true`，供 Playwright 测试和配置脚本使用 |
-| `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data` |
+| `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data`；运行期可透传 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 等出站代理变量 |
 | `phpunit.xml` | PHPUnit 配置：三个测试套件 `Shared` / `Admin` / `Subsite`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
 | `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + Supervisor + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、反代配置预生成、sudo 白名单设置 |
 | `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
 | `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
-| `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；支持代理环境变量透传 |
+| `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；构建期和运行期均支持代理环境变量透传 |
 | `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新、启用 `NAV_DEV_MODE`、临时挂载 `docker.sock` |
 | `local/docker-compose.test.yml` | 测试环境叠加配置：定义 `playwright-full`、`playwright-mobile`、`lighthouse` 服务 |
 | `.github/workflows/docker-publish.yml` | CI 工作流：push 到 `main`/`master` 或 `v*` 标签时触发；多架构构建（`linux/amd64`, `linux/arm64`）并推送到 Docker Hub；同步 README 到 Docker Hub 描述 |
@@ -74,6 +74,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
   settings.php / settings_ajax.php # 系统设置
   notifications.php    # Webhook 通知配置
   dns.php / ddns.php / ddns_ajax.php # DNS / DDNS
+  domain_expiry.php / domain_expiry_ajax.php # 域名注册有效期监控（RDAP 查询 + 本地缓存）
   scheduled_tasks.php  # 计划任务（含日志）
   nginx.php            # Nginx / PHP-FPM / PHP 自定义参数 在线编辑器（语法校验 + 兼容回滚）
   backups.php          # 备份创建 / 恢复 / 下载 / 删除
@@ -85,7 +86,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
     header.php         # 后台页面模板头（权限校验、侧边栏、Flash Toast）
     footer.php         # 页面模板尾
     admin.css          # 后台暗色主题
-    dns_lib.php / dns_api_lib.php / ddns_lib.php / cron_lib.php / alidns.php 等  # 各业务领域函数库
+    dns_lib.php / dns_api_lib.php / ddns_lib.php / domain_expiry_lib.php / cron_lib.php / alidns.php 等  # 各业务领域函数库
   assets/              # Ace Editor（本地）、SortableJS（CDN）
 
 shared/          # 核心共享库
@@ -96,6 +97,7 @@ shared/          # 核心共享库
 cli/             # CLI 脚本
   run_scheduled_task.php   # 计划任务执行器（硬超时 3600s、PID 锁、僵尸锁清理）
   ddns_sync.php            # DDNS 同步
+  domain_expiry_sync.php   # 域名有效期同步（刷新 RDAP 缓存）
   alidns_sync.php          # 阿里云 DNS 同步
   manage_users.php         # 用户管理 CLI（list/info/add/passwd/del/reset）
 
@@ -111,6 +113,7 @@ nginx-conf/      # Nginx 站点配置（仅 admin 后台）
 data/            # 持久化数据目录（必须挂载到宿主机）
   config.json / users.json / api_tokens.json / scheduled_tasks.json
   dns_config.json / ddns_tasks.json / notifications.json
+  domain_expiry.json / domain_expiry_rdap_bootstrap.json
   ip_locks.json / sessions.json / auth_secret.key
   backups/ / logs/ / tasks/ / nginx/ / php-fpm/ / php/ / trash/
 
