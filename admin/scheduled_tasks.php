@@ -40,9 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', '请填写任务名称');
             header('Location: scheduled_tasks.php'); exit;
         }
-        if (cron_is_ddns_dispatcher_id($id)) {
+        if (cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
             scheduled_tasks_unlock($lock);
-            flash_set('error', 'DDNS 调度器由系统自动维护，不能手动编辑');
+            flash_set('error', '系统调度器由系统自动维护，不能手动编辑');
             header('Location: scheduled_tasks.php'); exit;
         }
         if (cron_is_favicon_sync_id($id)) {
@@ -101,8 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* ------ 删除任务 ------ */
     if ($action === 'task_delete') {
         $id = trim((string)($_POST['id'] ?? ''));
-        if (cron_is_ddns_dispatcher_id($id)) {
-            flash_set('error', 'DDNS 调度器由系统自动维护，不能手动删除');
+        if (cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
+            flash_set('error', '系统调度器由系统自动维护，不能手动删除');
             header('Location: scheduled_tasks.php'); exit;
         }
         if (cron_is_favicon_sync_id($id)) {

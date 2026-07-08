@@ -10,6 +10,7 @@ if (!function_exists('load_config')) {
 define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
 define('DDNS_DISPATCHER_TASK_PREFIX', 'sys_ddns_dispatcher_');
+define('DOMAIN_EXPIRY_SYNC_TASK_ID', 'sys_domain_expiry_sync');
 define('FAVICON_SYNC_TASK_ID', 'sys_favicon_sync');
 define('TASK_DISPATCH_LOG_FILE', DATA_DIR . '/logs/task_dispatch.log');
 define('SCHEDULED_TASKS_LOCK_FILE', DATA_DIR . '/.scheduled_tasks.lock');
@@ -449,7 +450,7 @@ function task_write_script_file(array $task, string $cmd, array $allTasks = []):
 
 function task_sync_script_for_task(array $task, array $allTasks = []): array {
     $id = (string)($task['id'] ?? '');
-    if ($id === '' || cron_is_ddns_dispatcher_id($id)) {
+    if ($id === '' || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
         return ['ok' => true, 'path' => ''];
     }
     $cmd = (string)($task['command'] ?? '');
@@ -469,7 +470,7 @@ function task_sync_scripts_from_scheduled_tasks(array $data, bool $remove_orphan
     $expected = [];
     foreach ($data['tasks'] ?? [] as $task) {
         $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
-        if ($id === '' || cron_is_ddns_dispatcher_id($id)) {
+        if ($id === '' || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
             continue;
         }
         $path = task_script_file_for_task($task, $data['tasks'] ?? []);
@@ -1053,8 +1054,8 @@ function scheduled_task_upsert(array $input): array {
     if ($name === '') {
         return ['ok' => false, 'msg' => '请填写任务名称'];
     }
-    if (cron_is_ddns_dispatcher_id($id)) {
-        return ['ok' => false, 'msg' => 'DDNS 调度器由系统自动维护，不能手动编辑'];
+    if (cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
+        return ['ok' => false, 'msg' => '系统调度器由系统自动维护，不能手动编辑'];
     }
     if (!cron_validate_schedule($schedule)) {
         return ['ok' => false, 'msg' => 'Cron 表达式无效（需至少 5 个时间字段）'];
@@ -1361,6 +1362,44 @@ function cron_sync_ddns_dispatcher_task(): array {
     ];
 }
 
+function cron_domain_expiry_command(): string {
+    return escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/domain_expiry_sync.php';
+}
+
+function cron_sync_domain_expiry_task(): array {
+    $scheduled = load_scheduled_tasks();
+    $found = false;
+    $taskRow = [
+        'id' => DOMAIN_EXPIRY_SYNC_TASK_ID,
+        'name' => '域名有效期同步',
+        'enabled' => true,
+        'schedule' => '23 3 * * *',
+        'command' => cron_domain_expiry_command(),
+        'is_system' => true,
+        'description' => '由系统自动维护，用于每日刷新域名注册有效期缓存',
+        'meta' => [
+            'kind' => 'domain_expiry',
+        ],
+    ];
+
+    foreach ($scheduled['tasks'] as $idx => $task) {
+        if (($task['id'] ?? '') !== DOMAIN_EXPIRY_SYNC_TASK_ID) {
+            continue;
+        }
+        $taskRow['last_run'] = $task['last_run'] ?? null;
+        $taskRow['last_code'] = $task['last_code'] ?? null;
+        $taskRow['last_output'] = $task['last_output'] ?? null;
+        $scheduled['tasks'][$idx] = $taskRow;
+        $found = true;
+        break;
+    }
+    if (!$found) {
+        $scheduled['tasks'][] = $taskRow;
+    }
+    save_scheduled_tasks($scheduled);
+    return ['ok' => true, 'task_id' => DOMAIN_EXPIRY_SYNC_TASK_ID];
+}
+
 function cron_is_favicon_sync_id(string $id): bool {
     return false;
 }
@@ -1452,6 +1491,7 @@ function cron_validate_schedule(string $line): bool {
 
 function cron_regenerate(): array {
     cron_sync_ddns_dispatcher_task();
+    cron_sync_domain_expiry_task();
     $lines   = [];
     $lines[] = '# simple-homepage generated — do not edit by hand';
     $lines[] = 'SHELL=/bin/bash';

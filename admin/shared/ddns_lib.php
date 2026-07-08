@@ -206,6 +206,7 @@ function ddns_source_short_label(string $type, array $source = []): string {
     return match ($type) {
         'vps789_cfip' => 'vps789' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
         'api4ce_cfip' => '4ce' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
+        'wetest_cfip' => 'wetest' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
         'uouin_cfip' => 'uouin' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
         'cf090227_line' => '090227' . (in_array((string)($source['line'] ?? ''), ['CT', 'CU', 'CM'], true) ? ' / ' . (string)$source['line'] : ''),
         'addressesapi_164746' => 'addressesapi',
@@ -265,7 +266,7 @@ function ddns_normalize_task(array $input, ?array $existing = null): array {
     $runtime = is_array($existing['runtime'] ?? null) ? $existing['runtime'] : [];
 
     $type = trim((string)($source['type'] ?? 'local_ipv4'));
-    if (!in_array($type, ['local_ipv4', 'local_ipv6', 'vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'], true)) {
+    if (!in_array($type, ['local_ipv4', 'local_ipv6', 'vps789_cfip', 'api4ce_cfip', 'wetest_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'], true)) {
         $type = 'local_ipv4';
     }
     $line = strtoupper(trim((string)($source['line'] ?? 'CT')));
@@ -297,7 +298,7 @@ function ddns_normalize_task(array $input, ?array $existing = null): array {
             'max_latency' => max(0, (int)($source['max_latency'] ?? 250)),
             'max_loss_rate' => max(0, (float)($source['max_loss_rate'] ?? 5)),
             'api_key' => trim((string)($source['api_key'] ?? '')),
-            'fallback_type' => in_array((string)($source['fallback_type'] ?? ''), ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'], true)
+            'fallback_type' => in_array((string)($source['fallback_type'] ?? ''), ['vps789_cfip', 'api4ce_cfip', 'wetest_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'], true)
                 ? (string)$source['fallback_type']
                 : '',
         ],
@@ -337,7 +338,7 @@ function ddns_validate_task(array $task): ?string {
         return 'Cron 表达式无效';
     }
     $type = (string)($task['source']['type'] ?? '');
-    if (in_array($type, ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line'], true)
+    if (in_array($type, ['vps789_cfip', 'api4ce_cfip', 'wetest_cfip', 'uouin_cfip', 'cf090227_line'], true)
         && !in_array((string)($task['source']['line'] ?? ''), ['CT', 'CU', 'CM'], true)) {
         return $type . ' 线路无效';
     }
@@ -396,6 +397,8 @@ function ddns_toggle_task(string $id): ?bool {
 function ddns_fetch_url(string $url, array $logMeta = []): array {
     $taskId = trim((string)($logMeta['task_id'] ?? ''));
     $step = trim((string)($logMeta['step'] ?? '来源请求'));
+    $userAgent = trim((string)($logMeta['user_agent'] ?? 'simple-homepage-ddns/1.0'));
+    $accept = trim((string)($logMeta['accept'] ?? 'application/json,text/plain,*/*'));
     if ($taskId !== '') {
         ddns_task_log($taskId, 'info', $step . '开始', ['url' => $url]);
     }
@@ -411,8 +414,8 @@ function ddns_fetch_url(string $url, array $logMeta = []): array {
             CURLOPT_CONNECTTIMEOUT => 8,
             CURLOPT_SSL_VERIFYPEER => 0,
             CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_USERAGENT => 'simple-homepage-ddns/1.0',
-            CURLOPT_HTTPHEADER => ['Accept: application/json,text/plain,*/*'],
+            CURLOPT_USERAGENT => $userAgent !== '' ? $userAgent : 'simple-homepage-ddns/1.0',
+            CURLOPT_HTTPHEADER => ['Accept: ' . ($accept !== '' ? $accept : 'application/json,text/plain,*/*')],
         ]);
         $body = curl_exec($ch);
         $err = curl_error($ch);
@@ -425,7 +428,7 @@ function ddns_fetch_url(string $url, array $logMeta = []): array {
             if ($taskId !== '') {
                 ddns_task_log($taskId, 'warning', $step . ' curl SSL 失败，降级到 file_get_contents', ['url' => $url, 'curl_error' => $err]);
             }
-            return _ddns_fetch_url_fallback($url, $taskId, $step);
+            return _ddns_fetch_url_fallback($url, $taskId, $step, $userAgent, $accept);
         }
 
         if ($body === false) {
@@ -456,15 +459,17 @@ function ddns_fetch_url(string $url, array $logMeta = []): array {
     }
 
     // fallback 到 file_get_contents（无 curl 环境 或 curl SSL 失败时）
-    return _ddns_fetch_url_fallback($url, $taskId, $step);
+    return _ddns_fetch_url_fallback($url, $taskId, $step, $userAgent, $accept);
 }
 
-function _ddns_fetch_url_fallback(string $url, string $taskId, string $step): array {
+function _ddns_fetch_url_fallback(string $url, string $taskId, string $step, string $userAgent = 'simple-homepage-ddns/1.0', string $accept = 'application/json,text/plain,*/*'): array {
+    $userAgent = $userAgent !== '' ? $userAgent : 'simple-homepage-ddns/1.0';
+    $accept = $accept !== '' ? $accept : 'application/json,text/plain,*/*';
     $context = stream_context_create([
         'http' => [
             'timeout' => 15,
             'ignore_errors' => true,
-            'header' => "User-Agent: simple-homepage-ddns/1.0\r\nAccept: application/json,text/plain,*/*\r\n",
+            'header' => "User-Agent: {$userAgent}\r\nAccept: {$accept}\r\n",
         ],
         'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
     ]);
@@ -579,6 +584,108 @@ function ddns_fetch_cf_api4ce(string $line, array $source): array {
         'value' => (string)$picked['value'],
         'message' => '获取 4ce 候选 IP 成功',
         'meta' => $picked,
+    ];
+}
+
+function ddns_clean_html_cell(string $html): string {
+    $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    return preg_replace('/\s+/', ' ', $text) ?? '';
+}
+
+function ddns_parse_wetest_cfip_html(string $body, string $line, string $recordType = 'A'): array {
+    $lineMap = ['CT' => '电信', 'CU' => '联通', 'CM' => '移动'];
+    $lineName = $lineMap[strtoupper($line)] ?? '电信';
+    $recordType = strtoupper($recordType) === 'AAAA' ? 'AAAA' : 'A';
+    preg_match_all('/<tr\b[^>]*>(.*?)<\/tr>/is', $body, $matches);
+
+    $rows = [];
+    foreach (($matches[1] ?? []) as $rowHtml) {
+        preg_match_all('/<t[dh]\b([^>]*)>(.*?)<\/t[dh]>/is', $rowHtml, $cellMatches, PREG_SET_ORDER);
+        if ($cellMatches === []) {
+            continue;
+        }
+        $cells = [];
+        $byLabel = [];
+        foreach ($cellMatches as $match) {
+            $attrs = (string)($match[1] ?? '');
+            $value = ddns_clean_html_cell((string)($match[2] ?? ''));
+            $cells[] = $value;
+            if (preg_match('/\bdata-label\s*=\s*([\'"])(.*?)\1/i', $attrs, $labelMatch)) {
+                $byLabel[trim((string)$labelMatch[2])] = $value;
+            }
+        }
+
+        $lineText = (string)($byLabel['线路名称'] ?? $byLabel['线路'] ?? $cells[0] ?? '');
+        if ($lineName !== '' && !str_contains($lineText, $lineName)) {
+            continue;
+        }
+
+        $ip = trim((string)($byLabel['优选地址'] ?? $byLabel['IP地址'] ?? $byLabel['IP'] ?? ''));
+        if ($ip === '') {
+            foreach ($cells as $cell) {
+                if (preg_match('/\b\d{1,3}(?:\.\d{1,3}){3}\b/', $cell, $m)) {
+                    $ip = $m[0];
+                    break;
+                }
+                if (preg_match('/\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,}\b/i', $cell, $m)) {
+                    $ip = $m[0];
+                    break;
+                }
+            }
+        }
+
+        $isValid = $recordType === 'AAAA'
+            ? filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)
+            : filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4);
+        if (!$isValid) {
+            continue;
+        }
+
+        $colo = (string)($byLabel['数据中心'] ?? $byLabel['机房'] ?? '');
+        $rows[] = [
+            'ip' => $ip,
+            'loss_rate' => 0,
+            'latency' => 0,
+            'score' => 0,
+            'line' => strtoupper($line),
+            'colo' => $colo,
+            'source' => 'wetest',
+        ];
+    }
+
+    return $rows;
+}
+
+function ddns_fetch_cf_wetest(string $line, array $source): array {
+    $recordType = strtoupper((string)($source['__record_type'] ?? 'A')) === 'AAAA' ? 'AAAA' : 'A';
+    $url = $recordType === 'AAAA'
+        ? 'https://www.wetest.vip/page/cloudflare/address_v6.html'
+        : 'https://www.wetest.vip/page/cloudflare/address_v4.html';
+    $r = ddns_fetch_url($url, [
+        'task_id' => (string)($source['__task_log_id'] ?? ''),
+        'step' => 'wetest 来源请求',
+        'user_agent' => 'Mozilla/5.0',
+        'accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    ]);
+    if (!$r['ok']) {
+        return $r;
+    }
+    $rows = ddns_parse_wetest_cfip_html((string)($r['body'] ?? ''), $line, $recordType);
+    if ($rows === []) {
+        return ['ok' => false, 'msg' => 'wetest 未解析到符合条件的候选 IP，可能是页面结构变化或访问受限'];
+    }
+    $picked = ddns_pick_best_candidate($rows, $source);
+    if ($picked === null) {
+        return ['ok' => false, 'msg' => 'wetest 未找到符合条件的候选 IP'];
+    }
+    return [
+        'ok' => true,
+        'value' => (string)$picked['value'],
+        'message' => '获取 wetest 候选 IP 成功',
+        'meta' => array_merge($picked, [
+            'record_type' => $recordType,
+            'source' => 'wetest',
+        ]),
     ];
 }
 
@@ -899,6 +1006,7 @@ function ddns_fetch_cf_cf090227(string $line, array $source): array {
 function ddns_fetch_cf_source_by_type(string $type, array $source): array {
     return match ($type) {
         'api4ce_cfip' => ddns_fetch_cf_api4ce(strtoupper((string)($source['line'] ?? 'CT')), $source),
+        'wetest_cfip' => ddns_fetch_cf_wetest(strtoupper((string)($source['line'] ?? 'CT')), $source),
         'uouin_cfip' => ddns_fetch_cf_uouin(strtoupper((string)($source['line'] ?? 'CT')), $source),
         'cf090227_line' => ddns_fetch_cf_cf090227(strtoupper((string)($source['line'] ?? 'CT')), $source),
         'addressesapi_164746' => ddns_fetch_cf_addressesapi_164746($source),
@@ -960,6 +1068,7 @@ function ddns_fetch_cf_vps789(string $line, array $source): array {
 function ddns_resolve_source(array $task): array {
     $source = is_array($task['source'] ?? null) ? $task['source'] : [];
     $source['__task_log_id'] = (string)($task['id'] ?? '');
+    $source['__record_type'] = strtoupper((string)($task['target']['record_type'] ?? 'A'));
     $type = (string)($source['type'] ?? 'local_ipv4');
     if ($type === 'local_ipv4') {
         $r = ddns_fetch_url('https://api.ipify.org', [
@@ -986,7 +1095,7 @@ function ddns_resolve_source(array $task): array {
         return ['ok' => true, 'value' => $value, 'message' => '获取公网 IPv6 成功'];
     }
 
-    if ($type === 'api4ce_cfip' || $type === 'uouin_cfip' || $type === 'cf090227_line' || $type === 'addressesapi_164746' || $type === 'ipdb030101_bestcf' || $type === 'ymyuuu_ipdb_bestcf' || $type === 'cf164746_global' || $type === 'vps789_cfip') {
+    if ($type === 'api4ce_cfip' || $type === 'wetest_cfip' || $type === 'uouin_cfip' || $type === 'cf090227_line' || $type === 'addressesapi_164746' || $type === 'ipdb030101_bestcf' || $type === 'ymyuuu_ipdb_bestcf' || $type === 'cf164746_global' || $type === 'vps789_cfip') {
         $resolved = ddns_fetch_cf_source_by_type($type, $source);
         if ($resolved['ok']) {
             return $resolved;

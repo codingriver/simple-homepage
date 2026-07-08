@@ -224,7 +224,7 @@ function admin_run_command(string $command, int $timeoutSeconds = 60): array {
 
 /**
  * 组装与「备份下载 / 导出配置」一致的 JSON 载荷（不写文件）。
- * 包含：config、scheduled_tasks（含各任务的 command 脚本）、dns_config（域名解析账户）、ddns_tasks。
+ * 包含：config、scheduled_tasks（含各任务的 command 脚本）、dns_config（域名解析账户）、ddns_tasks、domain_expiry。
  *
  * @param string $trigger 触发标识：manual / export / auto_import 等
  * @return array<string, mixed>
@@ -235,6 +235,7 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
+    $domain_expiry_file = DATA_DIR . '/domain_expiry.json';
     $scheduled_tasks = file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [];
     if (is_array($scheduled_tasks)) {
         require_once __DIR__ . '/cron_lib.php';
@@ -253,6 +254,7 @@ function backup_collect_payload(string $trigger = 'manual'): array {
         'scheduled_tasks' => $scheduled_tasks,
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
         'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
+        'domain_expiry'   => file_exists($domain_expiry_file) ? (json_decode(file_get_contents($domain_expiry_file), true) ?? []) : [],
     ];
 }
 
@@ -276,6 +278,7 @@ function backup_apply_restored_sections(array $data): void {
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
+    $domain_expiry_file = DATA_DIR . '/domain_expiry.json';
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
         file_put_contents($st_file,
             json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -295,6 +298,11 @@ function backup_apply_restored_sections(array $data): void {
             json_encode($data['ddns_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             LOCK_EX);
         $wrote_ddns = true;
+    }
+    if (isset($data['domain_expiry']) && is_array($data['domain_expiry'])) {
+        file_put_contents($domain_expiry_file,
+            json_encode($data['domain_expiry'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX);
     }
     if ($wrote_st) {
         require_once __DIR__ . '/cron_lib.php';

@@ -445,6 +445,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ═══════════════════════════ GET — 渲染准备 ═══════════════════════════
 $page_title = '域名解析';
 require_once __DIR__ . '/shared/dns_lib.php';
+require_once __DIR__ . '/shared/domain_expiry_lib.php';
 
 $cfg      = load_dns_config();
 $catalog  = dns_provider_catalog();
@@ -660,6 +661,16 @@ $filteredRecords = array_values(array_filter($records, function ($rec) use ($typ
     return mb_stripos($hay, $keyword) !== false;
 }));
 
+$selectedZoneExpiryRow = null;
+if ($selectedZoneName !== '' && domain_expiry_is_valid_domain(domain_expiry_normalize_domain($selectedZoneName))) {
+    $expiryData = domain_expiry_load();
+    $zoneDomain = domain_expiry_normalize_domain($selectedZoneName);
+    $selectedZoneExpiryRow = domain_expiry_row(
+        $zoneDomain,
+        is_array($expiryData['records'][$zoneDomain] ?? null) ? $expiryData['records'][$zoneDomain] : null
+    );
+}
+
 // JS 用账号数据（脱敏）
 $accountRowsForJs = [];
 foreach ($accounts as $account) {
@@ -807,6 +818,28 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
 </div>
 
 <?php if ($selectedAccount && $selectedZone): ?>
+
+<?php if ($selectedZoneExpiryRow): ?>
+<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+  <div>
+    <div class="card-title" style="margin-bottom:8px">域名有效期</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <code><?= htmlspecialchars((string)$selectedZoneExpiryRow['domain']) ?></code>
+      <span class="badge <?= htmlspecialchars((string)$selectedZoneExpiryRow['badge']) ?>"><?= htmlspecialchars((string)$selectedZoneExpiryRow['status_label']) ?></span>
+      <span style="color:var(--tx2);font-size:13px">
+        到期：<?= htmlspecialchars((string)($selectedZoneExpiryRow['expires_at'] ?: '未查询')) ?>
+        <?php if (is_int($selectedZoneExpiryRow['days_left'] ?? null)): ?>
+          ，剩余 <?= (int)$selectedZoneExpiryRow['days_left'] ?> 天
+        <?php endif; ?>
+      </span>
+    </div>
+    <?php if (($selectedZoneExpiryRow['error'] ?? '') !== ''): ?>
+      <div style="margin-top:8px;color:var(--red);font-size:12px"><?= htmlspecialchars((string)$selectedZoneExpiryRow['error']) ?></div>
+    <?php endif; ?>
+  </div>
+  <a class="btn btn-secondary" href="domain_expiry.php">查看/刷新有效期</a>
+</div>
+<?php endif; ?>
 
 <?php if ($recordsError !== ''): ?>
 <div class="alert alert-error">记录加载失败：<?= htmlspecialchars($recordsError) ?></div>

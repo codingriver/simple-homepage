@@ -42,6 +42,7 @@ $nav_items = [
     ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
+    ['file' => 'domain_expiry.php', 'icon' => '📅', 'label' => '域名有效期'],
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
 
     ['sep'],

@@ -1,6 +1,6 @@
 # Simple Homepage（后台管理面板）
 
-一个轻量、自托管的多功能 **后台管理面板**，集中管理 DNS / DDNS / 计划任务 / Nginx / 备份 / 用户 / API Token。
+一个轻量、自托管的多功能 **后台管理面板**，集中管理 DNS / DDNS / 域名有效期 / 计划任务 / Nginx / 备份 / 用户 / API Token。
 适合个人、家庭网络、NAS、软路由、小型 VPS 使用。
 
 > ⚠️ 项目历史上曾包含"导航首页"前台，目前已精简为**纯后台管理**。前台仅保留登录页，根路径 `/` 会自动跳转至 `/admin/index.php`。
@@ -10,6 +10,7 @@
 - 🔐 登录保护 + 多用户管理 + IP 锁定
 - 🌐 DNS 管理（阿里云 / Cloudflare）
 - 🔄 DDNS 动态解析（多 IP 来源 + fallback）
+- 📅 域名有效期监控（RDAP 查询 + 本地缓存）
 - ⏰ 计划任务（带日志、定时执行、模板）
 - 🛠️ Nginx 配置在线编辑（语法校验 + 兼容回滚）
 - 💾 配置备份与恢复 + 自动备份
@@ -65,6 +66,7 @@
 - **用户管理**：管理员/普通用户、密码修改、角色切换
 - **DNS 管理**：阿里云 / Cloudflare 解析记录增删改查
 - **DDNS 管理**：动态解析任务、自动同步、多 IP 源
+- **域名有效期**：自动收集 DNS Zone / DDNS 根域名，也可手动添加，定时刷新注册到期时间
 - **计划任务**：脚本编辑、定时执行、运行日志、模板
 - **Nginx 在线编辑**：主配置 / HTTP 模块 / PHP-FPM / PHP 自定义参数
 - **备份与恢复**：手动 / 自动备份、导出导入、保留策略
@@ -76,6 +78,7 @@
 
 - DNS 解析管理（阿里云 DNS、Cloudflare）
 - DDNS 动态解析，支持多 IP 来源与 fallback
+- 域名有效期监控，支持 RDAP 查询、本地缓存与计划任务刷新
 - 计划任务管理，支持立即执行、持续写日志、日志查看
 - 计划任务统一工作目录固定为 `data/tasks`
 - 每个计划任务的脚本会落地保存为 `data/tasks/<脚本文件名>.sh`
@@ -216,7 +219,8 @@ http://192.168.1.10:58080
 ### DNS / DDNS
 
 - **DNS 管理**：录入阿里云或 Cloudflare 凭据后，可在后台直接增删改解析记录。
-- **DDNS 管理**：创建动态解析任务，自动按周期检测公网 IP 并更新解析。
+- **DDNS 管理**：创建动态解析任务，自动按周期检测公网 IP 并更新解析；Cloudflare 优选 IP 来源支持 vps789、4ce、wetest、uouin、090227、164746 等多源 fallback。
+- **域名有效期**：从 DNS Zone、DDNS 目标域名和手动列表收集域名，查询并缓存注册到期时间。
 
 ### 计划任务
 
@@ -352,6 +356,8 @@ data/
 ├── scheduled_tasks.json    # 计划任务
 ├── dns_config.json         # DNS 配置
 ├── ddns_tasks.json         # DDNS 任务
+├── domain_expiry.json      # 域名有效期缓存与手动列表
+├── domain_expiry_rdap_bootstrap.json # RDAP bootstrap 缓存
 ├── notifications.json      # Webhook 通知配置
 ├── ip_locks.json           # IP 登录失败锁定
 ├── sessions.json           # 会话撤销记录

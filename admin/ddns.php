@@ -90,6 +90,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
             <select id="fm-source-type" onchange="toggleSourceFields()">
               <option value="vps789_cfip">vps789 Cloudflare 优选 IP</option>
               <option value="api4ce_cfip">4ce Cloudflare 优选 IP（三网）</option>
+              <option value="wetest_cfip">wetest Cloudflare 优选 IP（三网）</option>
               <option value="uouin_cfip">uouin Cloudflare 优选 IP（三网）</option>
               <option value="cf090227_line">090227 Cloudflare 优选 IP（三网）</option>
               <option value="addressesapi_164746">addressesapi Cloudflare 优选 IP（全局带速度）</option>
@@ -129,6 +130,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
             <select id="fm-fallback-type">
               <option value="">不启用回退</option>
               <option value="api4ce_cfip">4ce Cloudflare 优选 IP</option>
+              <option value="wetest_cfip">wetest Cloudflare 优选 IP</option>
               <option value="uouin_cfip">uouin Cloudflare 优选 IP</option>
               <option value="cf090227_line">090227 Cloudflare 优选 IP（三网）</option>
               <option value="addressesapi_164746">addressesapi Cloudflare 优选 IP（全局带速度）</option>
@@ -190,6 +192,7 @@ var DDNS_EDIT_ID = '';
 var DDNS_SOURCE_HINTS = {
   vps789_cfip: 'vps789：现有稳定来源，支持三网线路；适合继续沿用。',
   api4ce_cfip: '4ce：JSON API，结构最适合当前 DDNS，推荐作为主来源。',
+  wetest_cfip: 'wetest：参考 cfnew 抓取公开 HTML 页面 address_v4/address_v6 并解析表格；支持三网和 A/AAAA，但受页面限流或结构变化影响，建议配置回退来源。',
   uouin_cfip: 'uouin：HTML 表格抓取型来源，支持三网，适合作为备用源。',
   cf090227_line: '090227：纯文本 IP 列表，支持三网线路；无延迟/丢包数据，建议配合 first 策略使用。',
   addressesapi_164746: 'addressesapi：全局优选 IP，带速度数据（MB/s）；按速度排序，建议配合 best_score 策略。',
@@ -261,8 +264,8 @@ function renderRows() {
 
 function toggleSourceFields() {
   var type = document.getElementById('fm-source-type').value;
-  var needsLine = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line'].indexOf(type) !== -1;
-  var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'].indexOf(type) !== -1;
+  var needsLine = ['vps789_cfip', 'api4ce_cfip', 'wetest_cfip', 'uouin_cfip', 'cf090227_line'].indexOf(type) !== -1;
+  var needsFilters = ['vps789_cfip', 'api4ce_cfip', 'wetest_cfip', 'uouin_cfip', 'cf090227_line', 'addressesapi_164746', 'ipdb030101_bestcf', 'ymyuuu_ipdb_bestcf', 'cf164746_global'].indexOf(type) !== -1;
   var needsApiKey = type === 'api4ce_cfip';
   document.querySelectorAll('.vps789-only').forEach(function(el){ el.style.display = needsFilters ? '' : 'none'; });
   document.querySelectorAll('.line-only').forEach(function(el){ el.style.display = needsLine ? '' : 'none'; });
@@ -450,6 +453,7 @@ function formatSourceLabel(type) {
   return ({
     vps789_cfip: 'vps789 Cloudflare 优选 IP',
     api4ce_cfip: '4ce Cloudflare 优选 IP',
+    wetest_cfip: 'wetest Cloudflare 优选 IP',
     uouin_cfip: 'uouin Cloudflare 优选 IP',
     cf090227_line: '090227 Cloudflare 优选 IP（三网）',
     addressesapi_164746: 'addressesapi Cloudflare 优选 IP（全局带速度）',

@@ -40,6 +40,66 @@ final class DdnsLibTest extends TestCase
         $this->assertSame('', $task['schedule']['cron']);
     }
 
+    public function testNormalizeTaskKeepsWetestSourceAndFallback(): void
+    {
+        $task = ddns_normalize_task([
+            'name' => 'Wetest',
+            'source' => [
+                'type' => 'wetest_cfip',
+                'line' => 'CU',
+                'fallback_type' => 'api4ce_cfip',
+            ],
+        ]);
+
+        $this->assertSame('wetest_cfip', $task['source']['type']);
+        $this->assertSame('CU', $task['source']['line']);
+        $this->assertSame('api4ce_cfip', $task['source']['fallback_type']);
+    }
+
+    public function testParseWetestHtmlFiltersLineAndIpv4(): void
+    {
+        $html = <<<'HTML'
+<table>
+  <tr>
+    <td data-label="线路名称">中国电信</td>
+    <td data-label="优选地址">1.1.1.1</td>
+    <td data-label="数据中心">SJC</td>
+  </tr>
+  <tr>
+    <td data-label="线路名称">中国联通</td>
+    <td data-label="优选地址">2.2.2.2</td>
+    <td data-label="数据中心">LAX</td>
+  </tr>
+</table>
+HTML;
+
+        $rows = ddns_parse_wetest_cfip_html($html, 'CT', 'A');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('1.1.1.1', $rows[0]['ip']);
+        $this->assertSame('SJC', $rows[0]['colo']);
+        $this->assertSame('CT', $rows[0]['line']);
+    }
+
+    public function testParseWetestHtmlSupportsIpv6ForAaaa(): void
+    {
+        $html = <<<'HTML'
+<table>
+  <tr>
+    <td data-label="线路名称">移动</td>
+    <td data-label="优选地址">2606:4700:4700::1111</td>
+    <td data-label="数据中心">HKG</td>
+  </tr>
+</table>
+HTML;
+
+        $rows = ddns_parse_wetest_cfip_html($html, 'CM', 'AAAA');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('2606:4700:4700::1111', $rows[0]['ip']);
+        $this->assertSame('HKG', $rows[0]['colo']);
+    }
+
     public function testTaskLogPageEmptyLog(): void
     {
         $page = ddns_task_log_page('nonexistent_id', 1);
