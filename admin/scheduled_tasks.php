@@ -21,6 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name  = trim((string)($_POST['name']     ?? ''));
         $sched = trim((string)($_POST['schedule'] ?? ''));
         $cmd   = task_normalize_editor_contents((string)($_POST['command'] ?? ''));
+        $runtime = task_normalize_runtime((string)($_POST['runtime_type'] ?? 'shell'));
+        $dependencyInstall = !empty($_POST['dependency_install']);
         $en    = !empty($_POST['enabled']);
         if ($id === '') {
             $id = task_allocate_next_id();
@@ -61,6 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (($t['id'] ?? '') === $id) {
                 $t['name'] = $name; $t['enabled'] = $en;
                 $t['schedule'] = $sched; $t['command'] = $cmd;
+                $t['runtime_type'] = $runtime;
+                $t['dependency_install'] = $dependencyInstall;
                 unset($t['working_dir_mode'], $t['working_dir']);
                 $taskRow = $t;
                 $found = true; break;
@@ -69,7 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         unset($t);
         if (!$found) {
             $taskRow = ['id' => $id, 'name' => $name,
-                'enabled' => $en, 'schedule' => $sched, 'command' => $cmd, 'created_at' => date('Y-m-d H:i:s')];
+                'enabled' => $en, 'schedule' => $sched, 'runtime_type' => $runtime,
+                'dependency_install' => $dependencyInstall, 'command' => $cmd, 'created_at' => date('Y-m-d H:i:s')];
             array_unshift($data['tasks'], $taskRow);
         }
         if (is_array($taskRow)) {
@@ -197,6 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $id  = trim((string)($_POST['id'] ?? ''));
         $cmd = task_normalize_editor_contents((string)($_POST['command'] ?? ''));
+        $runtime = task_normalize_runtime((string)($_POST['runtime_type'] ?? 'shell'));
         if ($id === '') {
             header('Content-Type: application/json; charset=utf-8');
             echo json_encode(['ok' => false, 'msg' => '无效的任务 ID'], JSON_UNESCAPED_UNICODE);
@@ -219,6 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($data['tasks'] ?? [] as &$t) {
             if (($t['id'] ?? '') === $id) {
                 $t['command'] = $cmd;
+                $t['runtime_type'] = $runtime;
                 $task = $t;
                 break;
             }
@@ -289,6 +296,7 @@ $ddns_dispatcher = cron_sync_ddns_dispatcher_task();
 cron_sync_favicon_task();
 $tasks = task_sort_for_display(load_scheduled_tasks()['tasks'] ?? []);
 foreach ($tasks as &$_t) {
+    $_t['runtime_type'] = task_normalize_runtime((string)($_t['runtime_type'] ?? $_t['runtime'] ?? 'shell'));
     $_t['command'] = task_resolve_command_text($_t);
     $_t['_is_system'] = cron_is_system_task($_t);
     $_t['_running'] = cron_task_is_running($_t);
@@ -302,6 +310,8 @@ foreach ($tasks as &$_t) {
     $_t['_script_file'] = task_script_file_for_task($_t, $tasks);
     $_t['_log_filename'] = task_resolve_log_filename($_t, $tasks);
     $_t['_log_file'] = task_log_file_for_task($_t, $tasks);
+    $_t['_runtime_label'] = task_runtime_label($_t['runtime_type']);
+    $_t['_ace_mode'] = task_runtime_ace_mode($_t['runtime_type']);
 }
 unset($_t);
 $manual_tasks = array_values(array_filter($tasks, fn($row) => empty($row['_is_system'])));
@@ -341,6 +351,34 @@ echo
 echo "== all environment variables (sorted) =="
 env | sort
 BASH;
+$default_task_commands = [
+    'shell' => $default_task_command,
+    'php' => <<<'PHP'
+<?php
+echo "hello from php\n";
+echo "task id: " . getenv('TASK_ID') . "\n";
+echo "workdir: " . getenv('TASK_WORKDIR') . "\n";
+PHP,
+    'python' => <<<'PY'
+import os
+import sys
+
+print("hello from python")
+print("python:", sys.version)
+print("task id:", os.getenv("TASK_ID", ""))
+print("workdir:", os.getenv("TASK_WORKDIR", ""))
+PY,
+    'nodejs' => <<<'JS'
+console.log("hello from nodejs");
+console.log("node:", process.version);
+console.log("task id:", process.env.TASK_ID || "");
+console.log("workdir:", process.env.TASK_WORKDIR || "");
+JS,
+    'custom' => <<<'SH'
+#!/bin/sh
+echo "hello from custom executable script"
+SH,
+];
 $CSRF = csrf_field();
 ?>
 
@@ -369,6 +407,7 @@ $CSRF = csrf_field();
   <div class="table-wrap"><table>
     <thead><tr>
       <th>名称</th>
+      <th>运行类型</th>
       <th>Cron 表达式</th>
       <th>状态</th>
       <th>下次运行</th>
@@ -397,6 +436,7 @@ $CSRF = csrf_field();
           </div>
         <?php endif; ?>
       </td>
+      <td><span class="badge badge-purple"><?= htmlspecialchars($t['_runtime_label'] ?? 'Shell') ?></span></td>
       <td><code><?= htmlspecialchars($t['schedule'] ?? '') ?></code></td>
       <td data-task-status-cell>
         <span class="badge <?= $enabled ? 'badge-green' : 'badge-gray' ?>" data-task-enabled-badge>
@@ -616,6 +656,26 @@ $CSRF = csrf_field();
               </label>
             </div>
           </div>
+          <!-- Runtime -->
+          <div class="form-group">
+            <label>运行类型</label>
+            <select name="runtime_type" id="fm-runtime" onchange="onTaskRuntimeChange()" style="font-family:var(--mono)">
+              <option value="shell">Shell</option>
+              <option value="php">PHP</option>
+              <option value="python">Python</option>
+              <option value="nodejs">Node.js</option>
+              <option value="custom">自定义可执行脚本</option>
+            </select>
+            <span class="form-hint" id="fm-runtime-hint">Shell 任务使用 bash 执行。</span>
+          </div>
+          <div class="form-group">
+            <label>依赖处理</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--tx)">
+              <input type="checkbox" name="dependency_install" value="1" id="fm-dependency-install" style="width:16px;height:16px;accent-color:var(--ac)">
+              执行前安装当前任务目录依赖
+            </label>
+            <span class="form-hint">Node.js 检测 <code>package.json</code> 后在任务目录运行 npm；Python 检测 <code>requirements.txt</code> 后创建 <code>.venv</code>。</span>
+          </div>
         </div>
 
         <!-- 命令（20行可滚动）-->
@@ -628,7 +688,7 @@ $CSRF = csrf_field();
             placeholder="# 新建任务时会自动填充默认 bash 脚本"
             style="font-family:var(--mono);font-size:12px;resize:vertical;
                    min-height:120px;max-height:400px;overflow-y:auto;line-height:1.55"></textarea>
-          <span class="form-hint">保存时会直接把这里的文本写入上面的脚本文件；执行时等价于 <code style="font-family:var(--mono)">/bin/bash script.sh &gt;&gt; data/tasks/同名.log 2&gt;&amp;1</code>。脚本文件默认不删除，后续保存同一个任务时只更新这个固定脚本文件。如果要运行二进制，请直接写 <code style="font-family:var(--mono)">./your-binary args</code> 或绝对路径，不要写成 <code style="font-family:var(--mono)">bash your-binary</code>。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
+          <span class="form-hint" id="fm-exec-hint">保存时会直接把这里的文本写入任务目录入口文件；执行解释器由「运行类型」决定。DDNS 可调用本机 <code style="font-family:var(--mono)">http://127.0.0.1/api/dns.php</code>，说明见「域名解析」页底部。</span>
           <span class="form-hint" id="fm-workdir-hint" style="display:none">
             工作目录：<code id="fm-workdir" style="font-family:var(--mono)"></code>
           </span>
@@ -752,6 +812,7 @@ $CSRF = csrf_field();
 var TASK_ROWS = <?= json_encode($tasks, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var CSRF_TOKEN = <?= json_encode($GLOBALS['_nav_csrf_token'] ?? '') ?>;
 var DEFAULT_TASK_COMMAND = <?= json_encode($default_task_command, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
+var DEFAULT_TASK_COMMANDS = <?= json_encode($default_task_commands, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var TASKS_ROOT = '/var/www/nav/data/tasks';
 var taskStatusPollTimer = 0;
 var taskStatusPollInFlight = false;
@@ -937,17 +998,47 @@ function stopTaskAjax(id, btn) {
   });
 }
 
+function taskRuntimeMode(runtime) {
+  runtime = runtime || 'shell';
+  if (runtime === 'php') return 'php';
+  if (runtime === 'python') return 'python';
+  if (runtime === 'nodejs') return 'javascript';
+  return 'sh';
+}
+
+function taskRuntimeHint(runtime) {
+  if (runtime === 'php') return 'PHP 任务使用 php main.php 执行。';
+  if (runtime === 'python') return 'Python 任务优先使用任务目录 .venv/bin/python，否则使用 python3/python。';
+  if (runtime === 'nodejs') return 'Node.js 任务优先使用「运行环境」当前版本，否则使用系统 node。依赖保留在本任务目录。';
+  if (runtime === 'custom') return '自定义任务直接执行入口文件，请在首行写 shebang，例如 #!/bin/sh。';
+  return 'Shell 任务使用 bash run.sh 执行。';
+}
+
+function onTaskRuntimeChange() {
+  var runtime = document.getElementById('fm-runtime').value || 'shell';
+  var hint = document.getElementById('fm-runtime-hint');
+  if (hint) hint.textContent = taskRuntimeHint(runtime);
+  var task = window._currentEditingTask || {};
+  if ((!task || !task.id) && document.getElementById('fm-command')) {
+    document.getElementById('fm-command').value = DEFAULT_TASK_COMMANDS[runtime] || DEFAULT_TASK_COMMAND;
+  }
+}
+
 /* ---- 任务弹窗 ---- */
 function openTaskModal(task) {
   var m = document.getElementById('task-modal');
   var isNew = !task || !task.id;
   window._currentEditingTask = task || {};
+  var runtime = isNew ? 'shell' : (task.runtime_type || task.runtime || 'shell');
   document.getElementById('modal-title').textContent = isNew ? '新建任务' : '编辑任务';
   document.getElementById('fm-id').value       = isNew ? ''   : (task.id       || '');
   document.getElementById('fm-name').value     = isNew ? ''   : (task.name     || '');
   document.getElementById('fm-schedule').value = isNew ? '*/5 * * * *' : (task.schedule || '');
-  document.getElementById('fm-command').value  = isNew ? DEFAULT_TASK_COMMAND : (task.command || '');
+  document.getElementById('fm-runtime').value  = runtime;
+  document.getElementById('fm-command').value  = isNew ? (DEFAULT_TASK_COMMANDS[runtime] || DEFAULT_TASK_COMMAND) : (task.command || '');
   document.getElementById('fm-enabled').checked = isNew ? true  : !!task.enabled;
+  document.getElementById('fm-dependency-install').checked = isNew ? false : !!task.dependency_install;
+  onTaskRuntimeChange();
 
   // 新建任务时隐藏编辑器入口（无 task_id，无法直接写文件）
   var btnEditor = document.getElementById('btn-open-editor');
@@ -977,6 +1068,7 @@ function closeTaskModal() {
 function openTaskCommandEditor() {
   var content = document.getElementById('fm-command').value || '';
   var task = window._currentEditingTask || {};
+  var runtime = document.getElementById('fm-runtime').value || task.runtime_type || 'shell';
   var taskName = document.getElementById('fm-name').value || task.name || '';
   var scriptFile = task._script_file || '';
   var title = '编辑计划任务脚本';
@@ -984,7 +1076,7 @@ function openTaskCommandEditor() {
   if (scriptFile) title += ' · ' + scriptFile;
   NavAceEditor.open({
     title: title,
-    mode: 'sh',
+    mode: taskRuntimeMode(runtime),
     value: content,
     wrapMode: true,
     buttons: {
@@ -1015,6 +1107,7 @@ function openTaskCommandEditor() {
           body: new URLSearchParams({
             action: 'save_script',
             id: taskId,
+            runtime_type: runtime,
             command: value,
             _csrf: CSRF_TOKEN
           })

@@ -359,6 +359,12 @@ tr:hover td { background: rgba(0,212,170,.02); }
   gap: 14px;
 }
 
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-group.full { grid-column: 1 / -1; }
 
@@ -543,6 +549,7 @@ input::placeholder { color: var(--tm); }
   .sidebar-backdrop.open { display: block; }
   .main-wrap { margin-left: 0; }
   .form-grid { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
   .content { padding: 16px; }
   .topbar-title::before { display: none; }
   .sidebar-toggle { display: inline-flex; }
@@ -801,4 +808,3 @@ details summary:hover { color: var(--ac); }
   font-family: var(--mono);
   white-space: nowrap;
 }
-

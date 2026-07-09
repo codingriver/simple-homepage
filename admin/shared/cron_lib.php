@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../shared/auth.php';
 if (!function_exists('load_config')) {
     require_once __DIR__ . '/functions.php';
 }
+require_once __DIR__ . '/runtime_env_lib.php';
 
 define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
@@ -23,6 +24,36 @@ define('PHP_BIN_CANDIDATES', [
     '/opt/homebrew/bin/php',
     'php',
 ]);
+
+function task_runtime_catalog(): array {
+    return [
+        'shell' => ['label' => 'Shell', 'mode' => 'sh', 'filename' => 'run.sh'],
+        'php' => ['label' => 'PHP', 'mode' => 'php', 'filename' => 'main.php'],
+        'python' => ['label' => 'Python', 'mode' => 'python', 'filename' => 'main.py'],
+        'nodejs' => ['label' => 'Node.js', 'mode' => 'javascript', 'filename' => 'main.mjs'],
+        'custom' => ['label' => '自定义', 'mode' => 'sh', 'filename' => 'run.sh'],
+    ];
+}
+
+function task_normalize_runtime(?string $runtime): string {
+    $runtime = strtolower(trim((string)$runtime));
+    return isset(task_runtime_catalog()[$runtime]) ? $runtime : 'shell';
+}
+
+function task_runtime_label(?string $runtime): string {
+    $runtime = task_normalize_runtime($runtime);
+    return task_runtime_catalog()[$runtime]['label'] ?? 'Shell';
+}
+
+function task_runtime_ace_mode(?string $runtime): string {
+    $runtime = task_normalize_runtime($runtime);
+    return task_runtime_catalog()[$runtime]['mode'] ?? 'sh';
+}
+
+function task_runtime_default_filename(?string $runtime): string {
+    $runtime = task_normalize_runtime($runtime);
+    return task_runtime_catalog()[$runtime]['filename'] ?? 'run.sh';
+}
 
 function task_log_file(string $id): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
@@ -248,10 +279,10 @@ function task_is_valid_script_filename(string $filename): bool {
     if ($filename === '' || basename($filename) !== $filename) {
         return false;
     }
-    return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*\.sh$/', $filename) === 1;
+    return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:sh|php|py|mjs|js)$/', $filename) === 1;
 }
 
-function task_name_script_filename_candidate(string $name): string {
+function task_name_script_filename_candidate(string $name, ?string $runtime = 'shell'): string {
     $name = trim($name);
     if ($name === '') {
         return '';
@@ -259,18 +290,22 @@ function task_name_script_filename_candidate(string $name): string {
     if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name)) {
         return '';
     }
-    return $name . '.sh';
+    $default = task_runtime_default_filename($runtime);
+    $ext = pathinfo($default, PATHINFO_EXTENSION);
+    return $name . '.' . ($ext !== '' ? $ext : 'sh');
 }
 
-function task_default_script_filename(string $id): string {
+function task_default_script_filename(string $id, ?string $runtime = 'shell'): string {
     $clean = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     if (task_is_numeric_id($clean)) {
-        return 'run.sh';
+        return task_runtime_default_filename($runtime);
     }
     if ($clean === '') {
         $clean = substr(md5(uniqid((string)mt_rand(), true)), 0, 12);
     }
-    return 'task_' . $clean . '.sh';
+    $default = task_runtime_default_filename($runtime);
+    $ext = pathinfo($default, PATHINFO_EXTENSION);
+    return 'task_' . $clean . '.' . ($ext !== '' ? $ext : 'sh');
 }
 
 function task_log_filename_from_script_filename(string $scriptFilename): string {
@@ -278,7 +313,7 @@ function task_log_filename_from_script_filename(string $scriptFilename): string 
     if ($scriptFilename === '') {
         return '';
     }
-    return preg_replace('/\.sh$/i', '.log', $scriptFilename) ?: '';
+    return preg_replace('/\.(?:sh|php|py|mjs|js)$/i', '.log', $scriptFilename) ?: '';
 }
 
 function task_default_log_filename(string $id): string {
@@ -307,10 +342,11 @@ function task_script_filename_conflicts(string $filename, string $taskId, array 
 
 function task_resolve_script_filename(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
 
-    // 新版数字ID任务固定使用 run.sh
+    // 新版数字ID任务固定使用当前运行类型的入口文件
     if (task_is_numeric_id($id)) {
-        return 'run.sh';
+        return task_runtime_default_filename($runtime);
     }
 
     $explicit = trim((string)($task['script_filename'] ?? ''));
@@ -319,22 +355,22 @@ function task_resolve_script_filename(array $task, array $allTasks = []): string
     }
 
     $legacy = task_legacy_script_filename($id);
-    if ($id !== '' && is_file(task_script_path_from_filename($legacy))) {
+    if ($runtime === 'shell' && $id !== '' && is_file(task_script_path_from_filename($legacy))) {
         return $legacy;
     }
 
-    $candidate = task_name_script_filename_candidate((string)($task['name'] ?? ''));
+    $candidate = task_name_script_filename_candidate((string)($task['name'] ?? ''), $runtime);
     if ($candidate !== '' && !task_script_filename_conflicts($candidate, $id, $allTasks)) {
         return $candidate;
     }
 
-    return task_default_script_filename($id);
+    return task_default_script_filename($id, $runtime);
 }
 
 function task_script_file_for_task(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
     $filename = task_resolve_script_filename($task, $allTasks);
-    if (task_is_numeric_id($id) && $filename === 'run.sh') {
+    if (task_is_numeric_id($id)) {
         return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/' . $filename;
     }
     return task_script_path_from_filename($filename);
@@ -342,6 +378,9 @@ function task_script_file_for_task(array $task, array $allTasks = []): string {
 
 function task_resolve_log_filename(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
+    if (task_is_numeric_id($id)) {
+        return 'run.log';
+    }
     $fromScript = task_log_filename_from_script_filename(task_resolve_script_filename($task, $allTasks));
     if ($fromScript !== '') {
         return $fromScript;
@@ -352,8 +391,8 @@ function task_resolve_log_filename(array $task, array $allTasks = []): string {
 function task_log_file_for_task(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
     $logFilename = task_resolve_log_filename($task, $allTasks);
-    if (task_is_numeric_id($id) && $logFilename === 'run.log') {
-        return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/' . $logFilename;
+    if (task_is_numeric_id($id)) {
+        return rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id . '/run.log';
     }
     return task_log_path_from_filename($logFilename);
 }
@@ -432,7 +471,7 @@ function task_write_script_file(array $task, string $cmd, array $allTasks = []):
     }
     task_ensure_workdir_root();
     $filename = task_resolve_script_filename($task, $allTasks);
-    if (task_is_numeric_id($id) && $filename === 'run.sh') {
+    if (task_is_numeric_id($id)) {
         $subdir = rtrim(TASKS_WORKDIR_ROOT, '/') . '/task_' . $id;
         if (!is_dir($subdir)) {
             @mkdir($subdir, 0755, true);
@@ -455,7 +494,7 @@ function task_sync_script_for_task(array $task, array $allTasks = []): array {
     }
     $cmd = (string)($task['command'] ?? '');
     $filename = task_resolve_script_filename($task, $allTasks);
-    $path = task_script_path_from_filename($filename);
+    $path = task_script_file_for_task($task, $allTasks);
     if (trim($cmd) === '') {
         if (is_file($path)) {
             @unlink($path);
@@ -485,14 +524,16 @@ function task_sync_scripts_from_scheduled_tasks(array $data, bool $remove_orphan
     if (!$remove_orphans) {
         return;
     }
-    foreach (glob(TASKS_WORKDIR_ROOT . '/*.sh') ?: [] as $path) {
-        if (!isset($expected[$path])) {
-            @unlink($path);
+    foreach (['sh', 'php', 'py', 'mjs', 'js'] as $ext) {
+        foreach (glob(TASKS_WORKDIR_ROOT . '/*.' . $ext) ?: [] as $path) {
+            if (!isset($expected[$path])) {
+                @unlink($path);
+            }
         }
-    }
-    foreach (glob(TASKS_WORKDIR_ROOT . '/*/run.sh') ?: [] as $path) {
-        if (!isset($expected[$path])) {
-            @unlink($path);
+        foreach (glob(TASKS_WORKDIR_ROOT . '/*/*.' . $ext) ?: [] as $path) {
+            if (!isset($expected[$path])) {
+                @unlink($path);
+            }
         }
     }
 }
@@ -1588,6 +1629,141 @@ function cron_install_stdin(string $content): array {
     return ['ok' => false, 'msg' => 'crontab 安装失败：无权限执行 crontab 命令，且无法写入 crontab 文件。请重建容器。'];
 }
 
+function task_find_runtime_binary(array $candidates): string {
+    foreach ($candidates as $candidate) {
+        $candidate = trim((string)$candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        if (str_contains($candidate, '/') && is_file($candidate) && is_executable($candidate)) {
+            return $candidate;
+        }
+        if (!str_contains($candidate, '/')) {
+            $result = runtime_env_exec('command -v ' . escapeshellarg($candidate) . ' 2>/dev/null || true');
+            $path = trim((string)($result['stdout'] ?? ''));
+            if ($path !== '') {
+                return $candidate;
+            }
+        }
+    }
+    return '';
+}
+
+function task_runtime_env_path_prefix(array $task): string {
+    $parts = [];
+    if (is_dir(runtime_env_node_bin_dir())) {
+        $parts[] = runtime_env_node_bin_dir();
+    }
+    $workdir = task_resolve_workdir($task);
+    if ($workdir !== '' && is_file($workdir . '/.venv/bin/python')) {
+        $parts[] = $workdir . '/.venv/bin';
+    }
+    return implode(':', $parts);
+}
+
+function task_build_execution_command(array $task, string $scriptFile, string $logFile): array {
+    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
+    $workdir = task_resolve_workdir($task);
+    $prefix = task_runtime_env_path_prefix($task);
+    $basePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+    $path = $prefix !== '' ? $prefix . ':' . $basePath : $basePath;
+
+    $command = '';
+    $missing = '';
+    if ($runtime === 'php') {
+        $bin = task_find_runtime_binary(PHP_BIN_CANDIDATES);
+        if ($bin === '') {
+            $missing = 'php';
+        } else {
+            $command = escapeshellcmd($bin) . ' ' . escapeshellarg($scriptFile);
+        }
+    } elseif ($runtime === 'python') {
+        $venvPython = $workdir !== '' ? $workdir . '/.venv/bin/python' : '';
+        $bin = task_find_runtime_binary(array_filter([$venvPython, 'python3', 'python']));
+        if ($bin === '') {
+            $missing = 'python3';
+        } else {
+            $command = escapeshellcmd($bin) . ' ' . escapeshellarg($scriptFile);
+        }
+    } elseif ($runtime === 'nodejs') {
+        $bin = task_find_runtime_binary([runtime_env_node_binary('node'), 'node']);
+        if ($bin === '') {
+            $missing = 'node';
+        } else {
+            $command = escapeshellcmd($bin) . ' ' . escapeshellarg($scriptFile);
+        }
+    } elseif ($runtime === 'custom') {
+        $command = escapeshellarg($scriptFile);
+    } else {
+        $bin = task_find_runtime_binary(['/bin/bash', 'bash', '/bin/sh', 'sh']);
+        if ($bin === '') {
+            $missing = 'bash';
+        } else {
+            $command = escapeshellcmd($bin) . ' ' . escapeshellarg($scriptFile);
+        }
+    }
+
+    if ($missing !== '') {
+        return [
+            'ok' => false,
+            'msg' => '运行环境不可用：未找到 ' . $missing . '。请先前往「运行环境」安装，或切换任务运行类型。',
+            'cmdline' => '',
+            'path' => $path,
+            'runtime' => $runtime,
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'msg' => 'ok',
+        'cmdline' => $command . ' >> ' . escapeshellarg($logFile) . ' 2>&1',
+        'path' => $path,
+        'runtime' => $runtime,
+    ];
+}
+
+function task_install_dependencies_if_needed(array $task, string $logFile, array $env): array {
+    if (empty($task['dependency_install'])) {
+        return ['ok' => true, 'msg' => ''];
+    }
+    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
+    $workdir = task_resolve_workdir($task);
+    $installLog = rtrim($workdir, '/') . '/install.log';
+    $cmd = '';
+    if ($runtime === 'nodejs' && is_file($workdir . '/package.json')) {
+        $npm = task_find_runtime_binary([runtime_env_node_binary('npm'), 'npm']);
+        if ($npm === '') {
+            return ['ok' => false, 'msg' => '依赖安装失败：未找到 npm'];
+        }
+        $cache = $workdir . '/.npm-cache';
+        if (!is_dir($cache)) {
+            @mkdir($cache, 0775, true);
+        }
+        $cmd = escapeshellcmd($npm)
+            . (is_file($workdir . '/package-lock.json') ? ' ci --omit=dev' : ' install --omit=dev')
+            . ' --cache ' . escapeshellarg($cache);
+    } elseif ($runtime === 'python' && is_file($workdir . '/requirements.txt')) {
+        $python = task_find_runtime_binary(['python3', 'python']);
+        if ($python === '') {
+            return ['ok' => false, 'msg' => '依赖安装失败：未找到 python3'];
+        }
+        $cmd = escapeshellcmd($python) . ' -m venv .venv'
+            . ' && ./.venv/bin/python -m pip install -r requirements.txt';
+    } else {
+        return ['ok' => true, 'msg' => ''];
+    }
+
+    @file_put_contents($logFile, "[deps] 开始安装依赖，日志：" . $installLog . "\n", FILE_APPEND | LOCK_EX);
+    @file_put_contents($installLog, '[' . date('Y-m-d H:i:s') . "] $cmd\n", FILE_APPEND | LOCK_EX);
+    $result = runtime_env_exec($cmd . ' >> ' . escapeshellarg($installLog) . ' 2>&1', $workdir, $env);
+    if (!$result['ok']) {
+        @file_put_contents($logFile, "[deps] 依赖安装失败，退出码 " . (int)$result['code'] . "，请查看 install.log\n", FILE_APPEND | LOCK_EX);
+        return ['ok' => false, 'msg' => '依赖安装失败，退出码 ' . (int)$result['code'] . '，请查看任务目录 install.log'];
+    }
+    @file_put_contents($logFile, "[deps] 依赖安装完成\n", FILE_APPEND | LOCK_EX);
+    return ['ok' => true, 'msg' => '依赖安装完成'];
+}
+
 /**
  * 执行任务并更新 JSON（供 Web 立即执行，不退出进程）
  * @return array{ok:bool,code:int,output:string,msg:string}
@@ -1697,9 +1873,25 @@ function cron_execute_task(string $id): array {
         'TMPDIR' => $runtimeTmpDir,
         'TMP' => $runtimeTmpDir,
         'TEMP' => $runtimeTmpDir,
+        'NPM_CONFIG_USERCONFIG' => RUNTIME_NODE_ROOT . '/.npmrc',
+        'npm_config_userconfig' => RUNTIME_NODE_ROOT . '/.npmrc',
     ];
-    $cmdline = '/bin/bash ' . escapeshellarg($script_file)
-        . ' >> ' . escapeshellarg($log_file) . ' 2>&1';
+    $execution = task_build_execution_command($task, $script_file, $log_file);
+    $env['PATH'] = (string)($execution['path'] ?? $env['PATH']);
+    $env['TASK_RUNTIME'] = (string)($execution['runtime'] ?? 'shell');
+    if (empty($execution['ok'])) {
+        @file_put_contents($log_file, '[' . date('Y-m-d H:i:s') . '] [runtime] ' . ($execution['msg'] ?? '运行环境不可用') . "\n", FILE_APPEND | LOCK_EX);
+        $output = task_read_file_segment($log_file, $log_offset);
+        cron_store_run_result($id, 127, $output);
+        return ['ok' => false, 'code' => 127, 'output' => $output, 'msg' => (string)($execution['msg'] ?? '运行环境不可用')];
+    }
+    $deps = task_install_dependencies_if_needed($task, $log_file, $env);
+    if (empty($deps['ok'])) {
+        $output = task_read_file_segment($log_file, $log_offset);
+        cron_store_run_result($id, 1, $output);
+        return ['ok' => false, 'code' => 1, 'output' => $output, 'msg' => (string)($deps['msg'] ?? '依赖安装失败')];
+    }
+    $cmdline = (string)$execution['cmdline'];
     $proc = proc_open($cmdline, $desc, $pipes, $workdir, $env);
     $code   = -1;
     $status_exit_code = null;

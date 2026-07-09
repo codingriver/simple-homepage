@@ -43,4 +43,21 @@ final class CronLibTest extends TestCase
         $result = task_normalize_script_contents($input);
         $this->assertSame("a\nb\nc\nd\n", $result);
     }
+
+    public function testRuntimeDefaults(): void
+    {
+        $this->assertSame('shell', task_normalize_runtime(''));
+        $this->assertSame('nodejs', task_normalize_runtime('nodejs'));
+        $this->assertSame('shell', task_normalize_runtime('unknown'));
+        $this->assertSame('main.mjs', task_runtime_default_filename('nodejs'));
+        $this->assertSame('main.py', task_runtime_default_filename('python'));
+    }
+
+    public function testNumericTaskRuntimeScriptFilenames(): void
+    {
+        $this->assertSame('run.sh', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'shell']));
+        $this->assertSame('main.php', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'php']));
+        $this->assertSame('main.py', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'python']));
+        $this->assertSame('main.mjs', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'nodejs']));
+    }
 }

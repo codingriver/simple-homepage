@@ -442,6 +442,13 @@ navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat cfst
 navwww ALL=(ALL) NOPASSWD: /usr/local/bin/nav-task-compat lock *
 EOF
 chmod 440 /etc/sudoers.d/nav-task-compat
+
+# 运行环境管理由后台触发安装/更新 Node.js 等工具。按产品要求，容器内
+# navwww 允许免密执行所有 sudo 命令；错误由后台页面展示命令、退出码和日志。
+cat >/etc/sudoers.d/nav-runtime <<'EOF'
+navwww ALL=(ALL) NOPASSWD: ALL
+EOF
+chmod 440 /etc/sudoers.d/nav-runtime
 rm -f /tmp/cfst.lock 2>/dev/null || true
 
 # ── 运行时目录 ──

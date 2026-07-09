@@ -28,7 +28,7 @@
 | **容器化** | Docker，基于 `php:8.2-fpm-alpine`（Alpine Linux，musl libc），支持 `linux/amd64` 和 `linux/arm64` |
 | **测试** | Playwright 1.54.2（E2E）、PHPUnit 11（单元）、Lighthouse CI 0.15.1（性能） |
 | **包管理** | Composer（PHP）、npm（仅开发依赖） |
-| **辅助脚本** | Python 3（`python/dns_core.py`）、Bash（`docker/entrypoint.sh`、`local/docker-build.sh`） |
+| **辅助脚本** | Python 3（`python/dns_core.py`）、Bash（`docker/entrypoint.sh`、`local/docker-build.sh`）；后台「运行环境」可在 `data/runtime/` 中按需安装 Node.js/npm |
 
 ---
 
@@ -76,6 +76,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
   dns.php / ddns.php / ddns_ajax.php # DNS / DDNS
   domain_expiry.php / domain_expiry_ajax.php # 域名注册有效期监控（RDAP 查询 + 本地缓存）
   scheduled_tasks.php  # 计划任务（含日志）
+  runtime_env.php / runtime_env_ajax.php # 运行环境管理（Node.js/npm 检测、apk 安装、musl 多版本安装/切换、实时进度轮询）
   nginx.php            # Nginx / PHP-FPM / PHP 自定义参数 在线编辑器（语法校验 + 兼容回滚）
   backups.php          # 备份创建 / 恢复 / 下载 / 删除
   logs.php / logs_api.php  # 日志中心
@@ -86,7 +87,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
     header.php         # 后台页面模板头（权限校验、侧边栏、Flash Toast）
     footer.php         # 页面模板尾
     admin.css          # 后台暗色主题
-    dns_lib.php / dns_api_lib.php / ddns_lib.php / domain_expiry_lib.php / cron_lib.php / alidns.php 等  # 各业务领域函数库
+    dns_lib.php / dns_api_lib.php / ddns_lib.php / domain_expiry_lib.php / cron_lib.php / runtime_env_lib.php / alidns.php 等  # 各业务领域函数库
   assets/              # Ace Editor（本地）、SortableJS（CDN）
 
 shared/          # 核心共享库
@@ -294,6 +295,12 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - 任务执行必须设置**硬超时**（默认 3600s），防止用户脚本死循环挂起 PHP 进程。
 - 任务结果写入 `scheduled_tasks.json` 时必须使用 **`flock(LOCK_EX)`** 保护，防止并发结果覆盖。
 - 任务执行锁文件必须记录 PID，并支持**僵尸锁自动清理**（OOM/SIGKILL 场景）。
+- 手动计划任务支持 `shell` / `php` / `python` / `nodejs` / `custom` 运行类型；旧任务默认 `shell`，保持兼容。
+- 数字 ID 任务使用独立目录 `data/tasks/task_{id}/`，入口文件按运行类型区分：`run.sh` / `main.php` / `main.py` / `main.mjs`；日志固定为 `run.log`。
+- 启用「执行前安装依赖」时，Node.js 任务只在当前任务目录处理 `package.json`（`node_modules/`、`.npm-cache/`、`install.log`），Python 任务只在当前任务目录处理 `requirements.txt`（`.venv/`、`install.log`），禁止写入全局项目依赖。
+- `runtime_env_lib.php` 管理 `data/runtime/node/versions/` 与 `data/runtime/node/current`，计划任务执行时会将当前 Node.js 版本的 `bin` 目录注入 `PATH`。
+- Node.js 安装由 `cli/runtime_env_job.php` 后台执行，job 状态写入 `data/runtime/jobs/*.json`，日志写入 `data/runtime/jobs/*.log`；前端必须轮询 `runtime_env_ajax.php?action=job_status` 展示阶段、百分比、下载大小、安装日志和失败建议。
+- Docker 容器按产品要求允许 `navwww` 免密 sudo 执行所有命令，用于后台安装运行环境；相关错误必须在页面展示命令、退出码、stdout/stderr 和建议。
 
 ### 10. Ace Editor 作为项目默认文本编辑器
 
@@ -780,7 +787,8 @@ function openLogViewer(logContent, logName) {
 - `auth_secret.key` — 认证密钥（权限 600）
 - `backups/` — 备份快照
 - `logs/` — 各类日志
-- `tasks/` — 计划任务脚本（`*.sh`）和日志（`*.log`）共享目录
+- `tasks/` — 计划任务目录；数字 ID 任务在 `task_{id}/` 下保存入口脚本、`run.log`、依赖目录和 `install.log`
+- `runtime/` — 后台安装的运行环境，例如 `runtime/node/versions/` 与 `runtime/node/current`
 - `favicon_cache/` — 自动抓取的 favicon 缓存
 - `bg/` — 背景图上传目录
 - `nginx/` — Nginx 代理参数模板

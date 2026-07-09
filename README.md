@@ -79,12 +79,17 @@
 - DNS 解析管理（阿里云 DNS、Cloudflare）
 - DDNS 动态解析，支持多 IP 来源与 fallback
 - 域名有效期监控，支持 RDAP 查询、本地缓存与计划任务刷新
-- 计划任务管理，支持立即执行、持续写日志、日志查看
-- 计划任务统一工作目录固定为 `data/tasks`
-- 每个计划任务的脚本会落地保存为 `data/tasks/<脚本文件名>.sh`
-- 计划任务脚本和运行日志都落地在 `data/tasks/`
-  - 脚本文件为 `xxx.sh`
-  - 对应日志文件为同名 `xxx.log`---
+- 计划任务管理，支持 Shell / PHP / Python / Node.js / 自定义脚本、立即执行、依赖安装、持续写日志、日志查看
+- 运行环境管理，支持后台检测 Node.js/npm、通过 Alpine apk 安装系统版本、安装/切换/卸载 musl 多版本 Node.js，并显示下载进度、安装进度与实时日志
+- 数字 ID 计划任务使用独立目录 `data/tasks/task_<id>/`
+  - Shell 入口：`run.sh`
+  - PHP 入口：`main.php`
+  - Python 入口：`main.py`
+  - Node.js 入口：`main.mjs`
+  - 日志：`run.log`
+  - 依赖：Node.js 保留 `node_modules/`，Python 保留 `.venv/`
+
+---
 
 ## 部署前准备
 
@@ -226,10 +231,11 @@ http://192.168.1.10:58080
 
 进入 **计划任务**：
 
-1. 新建任务，选择模板或自行编写 shell 脚本
+1. 新建任务，选择 Shell / PHP / Python / Node.js / 自定义脚本
 2. 设置 cron 表达式
-3. 任务脚本会写入 `data/tasks/<id>.sh`，对应日志为 `data/tasks/<id>.log`
-4. 支持手动 **立即执行**，并实时查看输出
+3. 任务脚本会写入 `data/tasks/task_<id>/`，对应日志为 `data/tasks/task_<id>/run.log`
+4. 可勾选执行前安装依赖：Node.js 使用当前任务目录的 `package.json`，Python 使用当前任务目录的 `requirements.txt`
+5. 支持手动 **立即执行**，并实时查看输出
 
 ### Nginx 在线编辑
 
@@ -376,7 +382,11 @@ data/
 ./data/tasks
 ```
 
-所有计划任务共享这个目录。
+数字 ID 任务会在该目录下生成独立子目录，例如 `task_1/`。后台「运行环境」安装的 Node.js/npm 保存在：
+
+```text
+./data/runtime/node
+```
 
 ---
 

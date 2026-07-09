@@ -44,6 +44,7 @@ $nav_items = [
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
     ['file' => 'domain_expiry.php', 'icon' => '📅', 'label' => '域名有效期'],
     ['file' => 'scheduled_tasks.php', 'icon' => '⏱', 'label' => '计划任务'],
+    ['file' => 'runtime_env.php', 'icon' => '🧰', 'label' => '运行环境'],
 
     ['sep'],
     ['file' => 'api_tokens.php','icon' => '🔑', 'label' => 'API Token'],

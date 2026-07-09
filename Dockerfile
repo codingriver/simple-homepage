@@ -100,7 +100,9 @@ RUN mkdir -p \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/bin/crontab' >> /etc/sudoers.d/nav-nginx && \
+    echo 'navwww ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/nav-runtime && \
     chmod 440 /etc/sudoers.d/nav-nginx && \
+    chmod 440 /etc/sudoers.d/nav-runtime && \
     # 创建空的反代配置文件
     touch /etc/nginx/conf.d/nav-proxy.conf \
           /etc/nginx/http.d/nav-proxy-domains.conf && \
