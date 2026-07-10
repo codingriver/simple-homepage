@@ -56,6 +56,29 @@ final class SharedFunctionsTest extends TestCase
         $this->assertArrayNotHasKey('sites', $payload);
     }
 
+    public function testBackupCollectPayloadAcceptsTaskRuntimeStateArray(): void
+    {
+        file_put_contents(DATA_DIR . '/scheduled_tasks.json', json_encode([
+            'tasks' => [[
+                'id' => '1',
+                'name' => 'Runtime state task',
+                'command' => 'echo ok',
+                'runtime' => [
+                    'running' => false,
+                    'started_at' => '',
+                    'pid' => 123,
+                ],
+            ]],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $payload = backup_collect_payload('export');
+
+        $this->assertSame(
+            'echo ok',
+            trim((string)$payload['scheduled_tasks']['tasks'][0]['command'])
+        );
+    }
+
     public function testBackupDeleteAndCleanup(): void
     {
         $path = backup_create('manual');

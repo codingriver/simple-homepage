@@ -40,6 +40,18 @@ function task_normalize_runtime(?string $runtime): string {
     return isset(task_runtime_catalog()[$runtime]) ? $runtime : 'shell';
 }
 
+function task_runtime_from_task(array $task): string {
+    $runtimeType = $task['runtime_type'] ?? null;
+    if (is_string($runtimeType) && trim($runtimeType) !== '') {
+        return task_normalize_runtime($runtimeType);
+    }
+
+    // Legacy tasks stored the runtime type in `runtime`; current tasks use it
+    // for execution state, so only accept the legacy value when it is a string.
+    $legacyRuntime = $task['runtime'] ?? null;
+    return task_normalize_runtime(is_string($legacyRuntime) ? $legacyRuntime : null);
+}
+
 function task_runtime_label(?string $runtime): string {
     $runtime = task_normalize_runtime($runtime);
     return task_runtime_catalog()[$runtime]['label'] ?? 'Shell';
@@ -342,7 +354,7 @@ function task_script_filename_conflicts(string $filename, string $taskId, array 
 
 function task_resolve_script_filename(array $task, array $allTasks = []): string {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
-    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
+    $runtime = task_runtime_from_task($task);
 
     // 新版数字ID任务固定使用当前运行类型的入口文件
     if (task_is_numeric_id($id)) {
@@ -1662,7 +1674,7 @@ function task_runtime_env_path_prefix(array $task): string {
 }
 
 function task_build_execution_command(array $task, string $scriptFile, string $logFile): array {
-    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
+    $runtime = task_runtime_from_task($task);
     $workdir = task_resolve_workdir($task);
     $prefix = task_runtime_env_path_prefix($task);
     $basePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
@@ -1726,7 +1738,7 @@ function task_install_dependencies_if_needed(array $task, string $logFile, array
     if (empty($task['dependency_install'])) {
         return ['ok' => true, 'msg' => ''];
     }
-    $runtime = task_normalize_runtime((string)($task['runtime_type'] ?? $task['runtime'] ?? 'shell'));
+    $runtime = task_runtime_from_task($task);
     $workdir = task_resolve_workdir($task);
     $installLog = rtrim($workdir, '/') . '/install.log';
     $cmd = '';

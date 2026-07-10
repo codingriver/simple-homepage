@@ -296,7 +296,7 @@ $ddns_dispatcher = cron_sync_ddns_dispatcher_task();
 cron_sync_favicon_task();
 $tasks = task_sort_for_display(load_scheduled_tasks()['tasks'] ?? []);
 foreach ($tasks as &$_t) {
-    $_t['runtime_type'] = task_normalize_runtime((string)($_t['runtime_type'] ?? $_t['runtime'] ?? 'shell'));
+    $_t['runtime_type'] = task_runtime_from_task($_t);
     $_t['command'] = task_resolve_command_text($_t);
     $_t['_is_system'] = cron_is_system_task($_t);
     $_t['_running'] = cron_task_is_running($_t);

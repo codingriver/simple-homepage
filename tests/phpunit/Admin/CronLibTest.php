@@ -53,6 +53,29 @@ final class CronLibTest extends TestCase
         $this->assertSame('main.py', task_runtime_default_filename('python'));
     }
 
+    public function testRuntimeFromTaskIgnoresExecutionStateArray(): void
+    {
+        $task = [
+            'runtime' => [
+                'running' => false,
+                'started_at' => '',
+                'pid' => 123,
+            ],
+        ];
+
+        $this->assertSame('shell', task_runtime_from_task($task));
+        $this->assertSame('run.sh', task_resolve_script_filename(['id' => '1'] + $task));
+    }
+
+    public function testRuntimeFromTaskSupportsLegacyStringAndPrefersRuntimeType(): void
+    {
+        $this->assertSame('python', task_runtime_from_task(['runtime' => 'python']));
+        $this->assertSame('nodejs', task_runtime_from_task([
+            'runtime_type' => 'nodejs',
+            'runtime' => ['running' => true],
+        ]));
+    }
+
     public function testNumericTaskRuntimeScriptFilenames(): void
     {
         $this->assertSame('run.sh', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'shell']));
