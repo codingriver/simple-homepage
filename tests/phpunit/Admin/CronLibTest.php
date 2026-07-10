@@ -83,4 +83,46 @@ final class CronLibTest extends TestCase
         $this->assertSame('main.py', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'python']));
         $this->assertSame('main.mjs', task_resolve_script_filename(['id' => '1', 'runtime_type' => 'nodejs']));
     }
+
+    public function testRetiredSystemTasksAreFilteredWithoutRemovingActiveTasks(): void
+    {
+        $result = scheduled_tasks_filter_retired([
+            'tasks' => [
+                ['id' => '1', 'name' => 'manual'],
+                ['id' => 'sys_favicon_sync', 'name' => 'retired'],
+                ['id' => DOMAIN_EXPIRY_SYNC_TASK_ID, 'name' => 'active system'],
+            ],
+        ]);
+
+        $this->assertSame(['1', DOMAIN_EXPIRY_SYNC_TASK_ID], array_column($result['data']['tasks'], 'id'));
+        $this->assertSame(['sys_favicon_sync'], array_column($result['removed'], 'id'));
+    }
+
+    public function testPruneRetiredSystemTasksPersistsDataAndDeletesArtifacts(): void
+    {
+        @mkdir(TASKS_WORKDIR_ROOT, 0777, true);
+        file_put_contents(SCHEDULED_TASKS_FILE, json_encode([
+            'tasks' => [
+                ['id' => '1', 'name' => 'manual'],
+                [
+                    'id' => 'sys_favicon_sync',
+                    'name' => 'retired',
+                    'command' => '/usr/local/bin/php /var/www/nav/cli/favicon_sync.php',
+                ],
+            ],
+        ]));
+        file_put_contents(task_script_file('sys_favicon_sync'), "echo retired\n");
+        file_put_contents(task_log_path_from_filename(task_default_log_filename('sys_favicon_sync')), "failed\n");
+        @mkdir(dirname(task_lock_file('sys_favicon_sync')), 0777, true);
+        file_put_contents(task_lock_file('sys_favicon_sync'), '123');
+
+        $result = scheduled_tasks_prune_retired();
+        $saved = load_scheduled_tasks();
+
+        $this->assertSame(1, $result['removed']);
+        $this->assertSame(['1'], array_column($saved['tasks'], 'id'));
+        $this->assertFileDoesNotExist(task_script_file('sys_favicon_sync'));
+        $this->assertFileDoesNotExist(task_log_path_from_filename(task_default_log_filename('sys_favicon_sync')));
+        $this->assertFileDoesNotExist(task_lock_file('sys_favicon_sync'));
+    }
 }

@@ -66,7 +66,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: nginx.php');
         exit;
       }
-      nginx_mark_applied();
       audit_log('nginx_save_reload', ['target' => $ptarget]);
       if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => true, 'msg' => '保存并 Reload 成功'], JSON_UNESCAPED_UNICODE); exit; }
       flash_set('success', '保存并 Reload 成功');
@@ -82,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   }
 
   if ($action === 'syntax_test') {
-    $test = nginx_test_config_isolated();
+    $test = nginx_test_config();
     $msg = $test['msg'];
     if (trim((string)$test['test_output']) !== '') $msg .= '｜' . $test['test_output'];
     if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => $test['ok'], 'msg' => $msg], JSON_UNESCAPED_UNICODE); exit; }
@@ -257,8 +256,6 @@ foreach ($targets as $k => $meta) {
   ];
 }
 
-// 代理配置状态
-$cfg = load_config();
 ?>
 <style>
 .ngx-status-bar {

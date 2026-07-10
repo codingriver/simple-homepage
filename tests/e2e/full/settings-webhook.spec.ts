@@ -40,7 +40,7 @@ async function saveWebhook(page: Page) {
 }
 
 async function restoreWebhookState(page: Page, state: WebhookState) {
-  await page.goto('/admin/settings.php#webhook');
+  await page.goto('/admin/notifications.php');
 
   const enabled = page.locator('input[name="webhook_enabled"]');
   if (state.enabled) await enabled.check();
@@ -68,7 +68,7 @@ test('settings webhook section toggles type-specific field and persists fallback
   });
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/settings.php#webhook');
+  await page.goto('/admin/notifications.php');
   const original = await readWebhookState(page);
 
   try {
@@ -112,7 +112,7 @@ test('settings webhook test action reports missing url and invalid custom url cl
   });
 
   await loginAsDevAdmin(page);
-  await page.goto('/admin/settings.php#webhook');
+  await page.goto('/admin/notifications.php');
   const original = await readWebhookState(page);
 
   try {
@@ -123,20 +123,22 @@ test('settings webhook test action reports missing url and invalid custom url cl
     await setWebhookEvents(page, ['FAIL']);
     await saveWebhook(page);
 
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: /发送测试消息/ }).click();
+    await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+    await page.locator('#nav-confirm-ok').click();
     await expect(page.locator('body')).toContainText('未配置 Webhook URL');
 
-    await page.goto('/admin/settings.php#webhook');
+    await page.goto('/admin/notifications.php');
     await page.locator('input[name="webhook_enabled"]').check();
     await page.locator('select[name="webhook_type"]').selectOption('custom');
     await page.locator('input[name="webhook_url"]').fill('http://127.0.0.1:9/webhook');
     await saveWebhook(page);
 
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: /发送测试消息/ }).click();
+    await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+    await page.locator('#nav-confirm-ok').click();
     await expect(page.locator('body')).toContainText(/发送失败：|发送失败，HTTP 状态码：/);
-    await expect(page).toHaveURL(/settings\.php#webhook/);
+    await expect(page).toHaveURL(/notifications\.php/);
   } finally {
     await restoreWebhookState(page, original);
   }

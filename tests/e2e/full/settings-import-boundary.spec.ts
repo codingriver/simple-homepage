@@ -1,9 +1,7 @@
-import fs from 'fs/promises';
-import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
-test('settings import rejects oversized files larger than 4MB', async ({ page }, testInfo) => {
+test('settings rejects overlong site name', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
@@ -12,16 +10,19 @@ test('settings import rejects oversized files larger than 4MB', async ({ page },
     ignoredFailedRequests: [/POST .*\/admin\/settings\.php :: net::ERR_ABORTED/],
   });
 
-  const oversizedFile = testInfo.outputPath('oversized-import.json');
-  // Create a file slightly larger than 4MB
-  const padding = 'x'.repeat(5 * 1024 * 1024);
-  await fs.writeFile(oversizedFile, `{"padding":"${padding}"}`, 'utf8');
-
   await loginAsDevAdmin(page);
   await page.goto('/admin/settings.php');
 
-  await page.locator('#importFile').setInputFiles(oversizedFile);
-  await expect(page.locator('body')).toContainText(/文件过大|不应超过 4MB/);
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+  const response = await page.request.post('/admin/settings.php', {
+    form: {
+      _csrf: csrf,
+      action: 'save_settings',
+      site_name: 'x'.repeat(61),
+    },
+  });
+  expect(response.status()).toBe(200);
+  expect(await response.text()).toContain('站点名称不能超过 60 个字符');
 
   await tracker.assertNoClientErrors();
 });

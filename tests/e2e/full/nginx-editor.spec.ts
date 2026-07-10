@@ -14,8 +14,8 @@ test('nginx editor supports direct open from config list modal open close syntax
 
   await expect(page.locator('.topbar-title')).toHaveText('Nginx 管理');
 
-  // 配置列表应包含 6 个编辑项
-  await expect(page.locator('[data-edit-target]')).toHaveCount(6);
+  // 容器内应展示 Nginx、HTTP、PHP-FPM、PHP ini 四个配置目标
+  await expect(page.locator('[data-edit-target]')).toHaveCount(4);
 
   // 点击「HTTP 模块」的编辑按钮
   await page.locator('[data-edit-target="http"]').click();
@@ -23,18 +23,26 @@ test('nginx editor supports direct open from config list modal open close syntax
   await expect(page.locator('#nav-ace-title')).toContainText(/HTTP 模块/);
 
   // 关闭弹窗
-  await page.locator('#nav-ace-editor-modal .ngx-close-btn').click();
+  await page.evaluate(() => {
+    const editor = (window as Window & { NavAceEditor?: { close(): void } }).NavAceEditor;
+    if (!editor) throw new Error('NavAceEditor not found');
+    editor.close();
+  });
   await expect(page.locator('#nav-ace-editor-modal')).not.toHaveClass(/open/);
 
-  // 点击「反代参数模板 — 精简」的编辑按钮
-  await page.locator('[data-edit-target="proxy_params_simple"]').click();
+  // 点击主配置并验证可编辑操作
+  await page.locator('[data-edit-target="main"]').click({ force: true });
   await expect(page.locator('#nav-ace-editor-modal')).toHaveClass(/open/);
-  await expect(page.locator('#nav-ace-title')).toContainText(/精简/);
+  await expect(page.locator('#nav-ace-title')).toContainText(/主配置/);
   await expect(page.locator('#nav-ace-toolbar-actions button[data-action="syntax"]')).toBeVisible();
   await expect(page.locator('#nav-ace-toolbar-actions button[data-action="save"]')).toBeVisible();
 
   // 关闭弹窗
-  await page.locator('#nav-ace-editor-modal .ngx-close-btn').click();
+  await page.evaluate(() => {
+    const editor = (window as Window & { NavAceEditor?: { close(): void } }).NavAceEditor;
+    if (!editor) throw new Error('NavAceEditor not found');
+    editor.close();
+  });
   await expect(page.locator('#nav-ace-editor-modal')).not.toHaveClass(/open/);
 
   await tracker.assertNoClientErrors();

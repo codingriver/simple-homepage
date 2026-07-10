@@ -112,34 +112,20 @@ test('max-session page allows multi-select kick and falls back to oldest when no
   }
 });
 
-test('auth_request denial writes reason to auth log', async ({ page }) => {
-  const tracker = await attachClientErrorTracking(page, {
-    ignoredMessages: [
-      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
-      /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
-    ],
-  });
-
-  await page.context().clearCookies();
-  await page.context().addCookies([
-    {
-      name: 'nav_session',
-      value: 'malformed-token',
-      domain: '127.0.0.1',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax',
-    },
-  ]);
-  await page.goto('/admin/index.php');
-  await expect(page).toHaveURL(/login\.php\?redirect=/);
-
+test('internal auth verification denial writes reason to auth log', async () => {
+  const result = runDockerPhpInline(
+    [
+      '$_SERVER["HTTP_COOKIE"] = "nav_session=malformed-token";',
+      '$_SERVER["HTTP_HOST"] = "127.0.0.1:58080";',
+      '$_SERVER["REQUEST_URI"] = "/admin/index.php";',
+      '$_SERVER["REMOTE_ADDR"] = "127.0.0.1";',
+      'require "/var/www/nav/public/auth/verify.php";',
+    ].join(' ')
+  );
+  expect(result.code, result.output).toBe(0);
   const log = readContainerFile('/var/www/nav/data/logs/auth.log');
   expect(log).toContain('AUTH_DENY');
   expect(log).toContain('reason=malformed');
-
-  await tracker.assertNoClientErrors();
 });
 
 test('revoked server session cookie can recover through fresh login then survives refresh and new tab', async ({ page }) => {

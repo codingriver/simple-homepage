@@ -33,8 +33,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
 $cfg_admin = auth_get_config();
 $site_name_admin = $cfg_admin['site_name'] ?? '后台中心';
 
-$_pending_proxy = [];
-
 // 导航菜单项定义
 $nav_items = [
     ['file' => 'index.php',    'icon' => '📊', 'label' => '控制台'],
@@ -369,23 +367,6 @@ function submitConfirmForm(btn, options) {
 <?php endif; ?>
 </div>
 <script>showToast(<?= json_encode($flash['msg']) ?>, <?= json_encode($flash_toast_type) ?>);</script>
-<?php endif; ?>
-
-<?php if (!empty($_pending_proxy)): ?>
-<div id="proxy-pending-bar" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-  <span style="color:#f87171;font-size:13px;flex:1">
-    ⚠️
-    <?php if (count($_pending_proxy) <= 3): ?>
-      以下代理站点配置已修改但尚未生效：
-      <strong><?= implode('、', array_map(function($s){ return htmlspecialchars($s['name']); }, $_pending_proxy)) ?></strong>
-    <?php else: ?>
-      有 <strong><?= count($_pending_proxy) ?></strong> 个代理站点配置已修改但尚未生效，请及时前往「Nginx 管理」点击「🔄 生成配置并 Reload」。
-    <?php endif; ?>
-  </span>
-  <?php if (($current_admin['role'] ?? '') === 'admin'): ?>
-  <a href="nginx.php" style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.5);color:#f87171;border-radius:8px;padding:6px 14px;font-size:12px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center">🔄 前往 Nginx 管理</a>
-  <?php endif; ?>
-</div>
 <?php endif; ?>
 
 <script>

@@ -80,7 +80,7 @@ $apiTokens = api_tokens_load();
   <?php endif; ?>
 
   <div class="form-hint" style="margin-top:10px">
-    使用方式：<code>GET /api/sites.php?token=&lt;TOKEN&gt;</code> 或 Header <code>Authorization: Bearer &lt;TOKEN&gt;</code>
+    使用方式：<code>GET /api/dns.php?action=query&amp;domain=example.com&amp;token=&lt;TOKEN&gt;</code> 或 Header <code>Authorization: Bearer &lt;TOKEN&gt;</code>
   </div>
 </div>
 

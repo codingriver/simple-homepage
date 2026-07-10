@@ -77,24 +77,24 @@ test('ddns run and log modal support execution pagination search and clear', asy
     { id: taskId, name: taskName }
   );
   await logResponse;
-  await expect(page.locator('#ddns-log-modal')).toBeVisible();
-  await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|成功|失败|跳过|\[/);
+  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    return editor?.getValue() || '';
+  })).toMatch(/（空）|成功|失败|跳过|\[/);
 
-  await page.locator('#ddns-log-search').fill('success');
-  await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|当前页没有匹配|success|成功/);
-  await page.evaluate(() => {
-    const fn = (window as Window & { clearDdnsLogSearch?: () => void }).clearDdnsLogSearch;
-    if (typeof fn !== 'function') throw new Error('clearDdnsLogSearch not found');
-    fn();
-  });
-
-  page.once('dialog', (dialog) => dialog.accept());
+  await expect(page.locator('#nav-ace-pag-label')).toBeVisible();
   await page.evaluate(() => {
     const fn = (window as Window & { clearCurrentDdnsLog?: () => Promise<void> }).clearCurrentDdnsLog;
     if (typeof fn !== 'function') throw new Error('clearCurrentDdnsLog not found');
     void fn();
   });
-  await expect(page.locator('#ddns-log-body')).toContainText(/暂无日志记录|当前页没有匹配/);
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
+  await expect.poll(() => page.evaluate(() => {
+    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    return editor?.getValue() || '';
+  })).toMatch(/（空）|加载中/);
 
   await tracker.assertNoClientErrors();
 });

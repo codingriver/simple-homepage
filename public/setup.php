@@ -151,7 +151,7 @@ text-decoration:none;margin-top:8px}
     <div class="fg"><label>站点名称<em>*</em></label>
       <input type="text" name="site_name" required
              value="<?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?>"></div>
-    <div class="fg"><label>导航站域名</label>
+    <div class="fg"><label>后台域名</label>
       <input type="text" name="nav_domain" placeholder="nav.yourdomain.com"
              value="<?= htmlspecialchars($_POST['nav_domain'] ?? '') ?>">
       <div class="ht">用于生成 Nginx 配置，可稍后在后台修改</div></div>

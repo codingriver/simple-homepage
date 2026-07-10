@@ -8,10 +8,16 @@ type LocalSnapshot = Record<string, Buffer | null>;
 type ContainerSnapshot = Record<string, { exists: boolean; contentBase64: string }>;
 
 export function runDockerCommand(args: string[]) {
-  const result = spawnSync('docker', args, {
+  const direct = spawnSync('docker', args, {
     encoding: 'utf8',
     cwd: path.resolve(__dirname, '../..'),
   });
+  const result = direct.error && process.platform === 'win32'
+    ? spawnSync('wsl.exe', ['-d', process.env.WSL_DISTRO || 'Ubuntu-24.04', '--', 'docker', ...args], {
+        encoding: 'utf8',
+        cwd: path.resolve(__dirname, '../..'),
+      })
+    : direct;
   return {
     code: result.status ?? 1,
     stdout: result.stdout ?? '',
@@ -25,7 +31,17 @@ export function runDockerPhp(scriptPath: string, args: string[] = []) {
 }
 
 export function runDockerPhpInline(code: string, args: string[] = []) {
-  return runDockerCommand(['exec', containerName, 'php', '-r', code, ...args]);
+  const encodedCode = Buffer.from(code, 'utf8').toString('base64');
+  return runDockerCommand([
+    'exec',
+    '-e',
+    `NAV_PHP_INLINE=${encodedCode}`,
+    containerName,
+    'php',
+    '-r',
+    'eval(base64_decode(getenv("NAV_PHP_INLINE")));',
+    ...args,
+  ]);
 }
 
 export function runDockerShell(command: string) {

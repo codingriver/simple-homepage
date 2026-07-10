@@ -3,7 +3,7 @@ import path from 'path';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
-const simpleParamsPath = path.resolve(__dirname, '../../../data/nginx/proxy-params-simple.conf');
+const nginxMainPath = path.resolve(__dirname, '../../../data/nginx/nginx.conf');
 
 function normalizeLineEndings(value: string) {
   return value.replace(/\r\n/g, '\n');
@@ -30,7 +30,7 @@ test('nginx editor supports advanced controls plus real save syntax and reload s
       /Failed to load resource: the server responded with a status of 404 \(Not Found\)/,
     ],
   });
-  const originalContent = await fs.readFile(simpleParamsPath, 'utf8');
+  const originalContent = await fs.readFile(nginxMainPath, 'utf8');
   const marker = `# playwright nginx e2e ${Date.now()}`;
   const updatedContent = `${originalContent.trimEnd()}\n${marker}\n`;
 
@@ -38,8 +38,8 @@ test('nginx editor supports advanced controls plus real save syntax and reload s
     await loginAsDevAdmin(page);
     await page.goto('/admin/nginx.php');
 
-    // 通过列表直接打开「反代参数模板 — 精简」编辑器
-    await openEditorForTarget(page, 'proxy_params_simple');
+    // 通过列表直接打开 Nginx 主配置编辑器
+    await openEditorForTarget(page, 'main');
 
     // 调整编辑器控件
     await page.locator('#nav-ace-fontsize').selectOption('18');
@@ -52,14 +52,14 @@ test('nginx editor supports advanced controls plus real save syntax and reload s
 
     // 保存
     await page.locator('#nav-ace-toolbar-actions button[data-action="save"]').click();
-    await expect.poll(async () => fs.readFile(simpleParamsPath, 'utf8')).toContain(marker);
+    await expect.poll(async () => fs.readFile(nginxMainPath, 'utf8')).toContain(marker);
 
     // 关闭弹窗
     await page.locator('#nav-ace-editor-modal .ngx-close-btn').click();
     await expect(page.locator('#nav-ace-editor-modal')).not.toHaveClass(/open/);
 
     // 重新打开并恢复内容
-    await openEditorForTarget(page, 'proxy_params_simple');
+    await openEditorForTarget(page, 'main');
     await setAceValue(page, originalContent);
 
     // 保存并 Reload（会弹出确认框）
@@ -78,11 +78,11 @@ test('nginx editor supports advanced controls plus real save syntax and reload s
     expect([200, 302]).toContain(reloadPost.status());
 
     await expect
-      .poll(async () => normalizeLineEndings(await fs.readFile(simpleParamsPath, 'utf8')))
+      .poll(async () => normalizeLineEndings(await fs.readFile(nginxMainPath, 'utf8')))
       .toBe(normalizeLineEndings(originalContent));
 
     await tracker.assertNoClientErrors();
   } finally {
-    await fs.writeFile(simpleParamsPath, originalContent, 'utf8');
+    await fs.writeFile(nginxMainPath, originalContent, 'utf8');
   }
 });

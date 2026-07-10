@@ -14,8 +14,9 @@ test('debug advanced flows cover display_errors toggles and logs api csrf reject
   await page.goto('/admin/debug.php');
 
   const toggleForm = page.locator('form:has(input[name="action"][value="toggle_display_errors"])');
-  page.once('dialog', (dialog) => dialog.accept());
   await toggleForm.getByRole('button').click();
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
   await expect(page.locator('body')).toContainText(/display_errors 已开启|display_errors 已关闭/);
 
   const csrfMissing = await page.request.post('http://127.0.0.1:58080/admin/logs_api.php?action=clear&type=dns', {

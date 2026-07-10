@@ -18,11 +18,13 @@ function load_config(): array {
     $raw = file_exists(CONFIG_FILE)
         ? (json_decode(file_get_contents(CONFIG_FILE), true) ?? [])
         : [];
+    $raw = auth_remove_retired_config($raw);
     return $raw + auth_default_config();
 }
 
 /** 写入系统配置 */
 function save_config(array $cfg): void {
+    $cfg = auth_remove_retired_config($cfg);
     file_put_contents(CONFIG_FILE,
         json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         LOCK_EX);
@@ -230,7 +232,10 @@ function admin_run_command(string $command, int $timeoutSeconds = 60): array {
  * @return array<string, mixed>
  */
 function backup_collect_payload(string $trigger = 'manual'): array {
-    $config_data = file_exists(CONFIG_FILE) ? file_get_contents(CONFIG_FILE) : '{}';
+    $config_data = file_exists(CONFIG_FILE)
+        ? (json_decode((string) file_get_contents(CONFIG_FILE), true) ?? [])
+        : [];
+    $config_data = auth_remove_retired_config($config_data);
 
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
     $dns_file  = DATA_DIR . '/dns_config.json';
@@ -239,6 +244,7 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     $scheduled_tasks = file_exists($st_file) ? (json_decode(file_get_contents($st_file), true) ?? []) : [];
     if (is_array($scheduled_tasks)) {
         require_once __DIR__ . '/cron_lib.php';
+        $scheduled_tasks = scheduled_tasks_filter_retired($scheduled_tasks)['data'];
         foreach ($scheduled_tasks['tasks'] ?? [] as $idx => $task) {
             if (!is_array($task)) {
                 continue;
@@ -250,7 +256,7 @@ function backup_collect_payload(string $trigger = 'manual'): array {
     return [
         'created_at'      => date('Y-m-d H:i:s'),
         'trigger'         => $trigger,
-        'config'          => json_decode($config_data, true) ?? [],
+        'config'          => $config_data,
         'scheduled_tasks' => $scheduled_tasks,
         'dns_config'      => file_exists($dns_file) ? (json_decode(file_get_contents($dns_file), true) ?? []) : [],
         'ddns_tasks'      => file_exists($ddns_file) ? (json_decode(file_get_contents($ddns_file), true) ?? []) : [],
@@ -270,8 +276,9 @@ function backup_apply_restored_sections(array $data): void {
     $wrote_ddns = false;
 
     if (isset($data['config']) && is_array($data['config'])) {
+        $restored_config = auth_remove_retired_config($data['config']);
         file_put_contents(CONFIG_FILE,
-            json_encode($data['config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            json_encode($restored_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
             LOCK_EX);
     }
 
@@ -280,12 +287,14 @@ function backup_apply_restored_sections(array $data): void {
     $ddns_file = DATA_DIR . '/ddns_tasks.json';
     $domain_expiry_file = DATA_DIR . '/domain_expiry.json';
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
+        require_once __DIR__ . '/cron_lib.php';
+        $scheduled_tasks = scheduled_tasks_filter_retired($data['scheduled_tasks'])['data'];
         file_put_contents($st_file,
-            json_encode($data['scheduled_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            json_encode($scheduled_tasks, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             LOCK_EX);
         $wrote_st = true;
-        require_once __DIR__ . '/cron_lib.php';
-        task_sync_scripts_from_scheduled_tasks($data['scheduled_tasks']);
+        task_sync_scripts_from_scheduled_tasks($scheduled_tasks);
+        scheduled_tasks_cleanup_retired_artifacts();
     }
     if (isset($data['dns_config']) && is_array($data['dns_config'])) {
         file_put_contents($dns_file,
@@ -830,8 +839,8 @@ function webhook_test(): array {
     $type = $cfg['webhook_type'] ?? 'custom';
     if (!$url) return ['ok' => false, 'msg' => '未配置 Webhook URL'];
 
-    $site_name = $cfg['site_name'] ?? '导航中心';
-    $text = "🔔 [{$site_name}] Webhook 测试消息\n这是一条来自导航站后台的测试通知，发送时间：" . date('Y-m-d H:i:s');
+    $site_name = $cfg['site_name'] ?? '后台中心';
+    $text = "🔔 [{$site_name}] Webhook 测试消息\n这是一条来自后台管理面板的测试通知，发送时间：" . date('Y-m-d H:i:s');
 
     switch ($type) {
         case 'telegram':
@@ -1180,16 +1189,6 @@ function php_fpm_reload(): array {
     ];
 }
 
-/**
- * 隔离反代配置后执行 nginx -t
- * 用于编辑系统配置时的语法检测，避免反代配置错误干扰结果
- *
- * @return array{ok:bool,msg:string,test_output:string}
- */
-function nginx_test_config_isolated(): array {
-    return nginx_test_config();
-}
-
 function nginx_test_config_preview(string $target, string $content): array {
     $targets = nginx_editable_targets();
     if (!isset($targets[$target])) {
@@ -1224,8 +1223,8 @@ function nginx_test_config_preview(string $target, string $content): array {
         return ['ok' => false, 'msg' => '写入预览文件失败，请检查文件权限：' . $path, 'test_output' => ''];
     }
 
-    // 执行语法检测（隔离反代配置，避免反代错误干扰系统配置检测）
-    $test = nginx_test_config_isolated();
+    // 对临时写入的完整运行配置执行语法检测
+    $test = nginx_test_config();
 
     // 恢复原文件（无论检测成功与否）
     @file_put_contents($path, $backup, LOCK_EX);

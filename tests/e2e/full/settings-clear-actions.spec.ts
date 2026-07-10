@@ -59,9 +59,10 @@ test('settings clear scheduled tasks and clear ddns tasks remove all user tasks'
   await page.goto('/admin/settings.php#advanced');
 
   // clear scheduled tasks
-  page.once('dialog', (dialog) => dialog.accept());
   await page.locator('form').filter({ has: page.locator('input[name="action"][value="clear_scheduled_tasks"]') }).getByRole('button').click();
-  await expect(page.locator('.alert-success')).toContainText('已清空');
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('body')).toContainText('已清空');
 
   const scheduledAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8').catch(() => '{}'));
   const userTasks = Object.values(scheduledAfter.tasks ?? {}).filter((t: any) => t.type === 'manual');
@@ -70,9 +71,10 @@ test('settings clear scheduled tasks and clear ddns tasks remove all user tasks'
 
   // clear ddns tasks
   await page.goto('/admin/settings.php#advanced');
-  page.once('dialog', (dialog) => dialog.accept());
   await page.locator('form').filter({ has: page.locator('input[name="action"][value="clear_ddns_tasks"]') }).getByRole('button').click();
-  await expect(page.locator('.alert-success')).toContainText('已清空');
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('body')).toContainText('已清空');
 
   const ddnsAfter = JSON.parse(await fs.readFile(ddnsTasksFile, 'utf8').catch(() => '{}'));
   expect(Object.keys(ddnsAfter.tasks ?? {}).length).toBe(0);

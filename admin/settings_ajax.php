@@ -36,10 +36,5 @@ if ($action === 'nginx_sudo') {
     exit;
 }
 
-if ($action === 'health_sites_meta') {
-    echo json_encode(['ok' => true, 'sites' => []], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
 http_response_code(404);
 echo json_encode(['ok' => false, 'msg' => '未知 action'], JSON_UNESCAPED_UNICODE);

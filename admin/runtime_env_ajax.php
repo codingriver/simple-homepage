@@ -65,6 +65,10 @@ if ($action === 'job_status') {
     runtime_env_ajax_response(['ok' => true, 'data' => ['job' => $job]]);
 }
 
+if ($action === 'current_job') {
+    runtime_env_ajax_response(['ok' => true, 'data' => ['job' => runtime_env_current_install_job()]]);
+}
+
 if (in_array($action, ['save_config', 'install_apk', 'install_version', 'switch_version', 'uninstall_version', 'test'], true)) {
     runtime_env_ajax_require_csrf($input);
 }

@@ -13,6 +13,7 @@ define('RUNTIME_NODE_VERSIONS_DIR', RUNTIME_NODE_ROOT . '/versions');
 define('RUNTIME_NODE_CURRENT_LINK', RUNTIME_NODE_ROOT . '/current');
 define('RUNTIME_NODE_LOG_FILE', RUNTIME_NODE_ROOT . '/install.log');
 define('RUNTIME_ENV_JOBS_DIR', RUNTIME_ENV_ROOT . '/jobs');
+define('RUNTIME_ENV_JOB_START_LOCK', RUNTIME_ENV_JOBS_DIR . '/install.lock');
 define('RUNTIME_ENV_JOB_LOG_BYTES', 60000);
 
 function runtime_env_ensure_dirs(): void {
@@ -100,7 +101,17 @@ function runtime_env_job_read(string $jobId): ?array {
     if (!is_file($file)) {
         return null;
     }
-    $raw = @file_get_contents($file);
+    $handle = @fopen($file, 'rb');
+    if (!is_resource($handle)) {
+        return null;
+    }
+    if (!@flock($handle, LOCK_SH)) {
+        @fclose($handle);
+        return null;
+    }
+    $raw = stream_get_contents($handle);
+    @flock($handle, LOCK_UN);
+    @fclose($handle);
     $data = json_decode(is_string($raw) ? $raw : '{}', true);
     return is_array($data) ? $data : null;
 }
@@ -148,16 +159,109 @@ function runtime_env_job_finish(string $jobId, bool $ok, string $message, array 
     return $data;
 }
 
+function runtime_env_job_process_exists(int $pid, string $jobId = ''): bool {
+    if ($pid <= 0) {
+        return false;
+    }
+    if (is_dir('/proc')) {
+        $procDir = '/proc/' . $pid;
+        if (!is_dir($procDir)) {
+            return false;
+        }
+        $stat = @file_get_contents($procDir . '/stat');
+        if (is_string($stat) && preg_match('/^\d+ \(.+\) ([A-Z]) /', $stat, $matches) && $matches[1] === 'Z') {
+            return false;
+        }
+        if ($jobId !== '') {
+            $cmdline = @file_get_contents($procDir . '/cmdline');
+            if (is_string($cmdline) && $cmdline !== '') {
+                return str_contains(str_replace("\0", ' ', $cmdline), runtime_env_clean_job_id($jobId));
+            }
+        }
+        return true;
+    }
+    if (function_exists('posix_kill')) {
+        return @posix_kill($pid, 0);
+    }
+    if (DIRECTORY_SEPARATOR === '\\') {
+        return false;
+    }
+    $output = [];
+    $code = 0;
+    @exec('kill -0 ' . $pid . ' >/dev/null 2>&1', $output, $code);
+    return $code === 0;
+}
+
+function runtime_env_job_timestamp(array $job, string $field): int {
+    $value = trim((string)($job[$field] ?? ''));
+    if ($value === '') {
+        return 0;
+    }
+    $timestamp = strtotime($value);
+    return $timestamp === false ? 0 : $timestamp;
+}
+
+function runtime_env_job_reconcile(string $jobId, array $job): array {
+    $status = (string)($job['status'] ?? '');
+    if (!in_array($status, ['queued', 'running'], true)) {
+        return $job;
+    }
+
+    $pid = (int)($job['pid'] ?? 0);
+    $updatedAt = runtime_env_job_timestamp($job, 'updated_at');
+    $createdAt = runtime_env_job_timestamp($job, 'created_at');
+    $lastActivity = max($updatedAt, $createdAt);
+    $age = $lastActivity > 0 ? time() - $lastActivity : 0;
+    $graceSeconds = $pid > 0 ? 5 : 30;
+
+    if ($age < $graceSeconds || ($pid > 0 && runtime_env_job_process_exists($pid, $jobId))) {
+        return $job;
+    }
+
+    runtime_env_job_append_log($jobId, '后台安装进程已退出，任务未正常写入完成状态');
+    return runtime_env_job_finish($jobId, false, '后台安装进程异常退出，安装未完成', [
+        'percent' => (int)($job['percent'] ?? 0),
+        'suggestion' => '请检查安装日志、容器是否重启以及下载源网络状态，然后重新安装。',
+    ]);
+}
+
 function runtime_env_job_public_payload(string $jobId): ?array {
     $job = runtime_env_job_read($jobId);
     if ($job === null) {
         return null;
     }
+    $job = runtime_env_job_reconcile($jobId, $job);
     $job['log'] = runtime_env_job_tail_log($jobId);
     if (($job['status'] ?? '') === 'success') {
         $job['node'] = runtime_env_detect_node();
     }
     return $job;
+}
+
+function runtime_env_current_install_job(): ?array {
+    runtime_env_ensure_dirs();
+    $files = glob(RUNTIME_ENV_JOBS_DIR . '/*.json') ?: [];
+    usort($files, static function (string $a, string $b): int {
+        return ((int)@filemtime($b)) <=> ((int)@filemtime($a));
+    });
+
+    $latestJob = null;
+    foreach ($files as $file) {
+        $jobId = basename($file, '.json');
+        $job = runtime_env_job_public_payload($jobId);
+        if ($job === null) {
+            continue;
+        }
+        if ($latestJob === null) {
+            $latestJob = $job;
+        }
+        if (in_array((string)($job['status'] ?? ''), ['queued', 'running'], true)) {
+            return $job;
+        }
+    }
+    return $latestJob !== null && (string)($latestJob['message'] ?? '') === '后台安装进程异常退出，安装未完成'
+        ? $latestJob
+        : null;
 }
 
 function runtime_env_shell_arg_array(array $args): string {
@@ -169,9 +273,28 @@ function runtime_env_start_install_job(string $type, array $args = []): array {
     if (!in_array($type, ['apk', 'version'], true)) {
         return ['ok' => false, 'msg' => '未知安装类型'];
     }
+    runtime_env_ensure_dirs();
+    $startLock = @fopen(RUNTIME_ENV_JOB_START_LOCK, 'c+');
+    if (!is_resource($startLock) || !@flock($startLock, LOCK_EX)) {
+        if (is_resource($startLock)) {
+            @fclose($startLock);
+        }
+        return ['ok' => false, 'msg' => '无法锁定运行环境安装队列，请稍后重试'];
+    }
+    $currentJob = runtime_env_current_install_job();
+    if ($currentJob !== null && in_array((string)($currentJob['status'] ?? ''), ['queued', 'running'], true)) {
+        @flock($startLock, LOCK_UN);
+        @fclose($startLock);
+        return [
+            'ok' => true,
+            'msg' => '已有安装任务正在运行，已恢复当前任务进度',
+            'data' => ['job_id' => (string)$currentJob['id'], 'existing' => true],
+        ];
+    }
     $jobId = runtime_env_job_id();
     runtime_env_job_write($jobId, [
         'type' => $type,
+        'args' => array_values(array_map('strval', $args)),
         'status' => 'queued',
         'phase' => '排队中',
         'percent' => 0,
@@ -189,17 +312,24 @@ function runtime_env_start_install_job(string $type, array $args = []): array {
         $argv[] = (string)$arg;
     }
     $command = runtime_env_shell_arg_array($argv);
-    $shell = 'cd ' . escapeshellarg(dirname(__DIR__, 2)) . ' && nohup ' . $command . ' >/dev/null 2>&1 </dev/null & printf %s "$!"';
+    $shell = 'cd ' . escapeshellarg(dirname(__DIR__, 2))
+        . ' && if command -v setsid >/dev/null 2>&1; then nohup setsid ' . $command
+        . ' >/dev/null 2>&1 </dev/null & else nohup ' . $command
+        . ' >/dev/null 2>&1 </dev/null & fi; printf %s "$!"';
     $output = [];
     $code = 0;
     @exec('/bin/sh -lc ' . escapeshellarg($shell), $output, $code);
     $pid = trim(implode("\n", $output));
     if ($code !== 0 || !preg_match('/^\d+$/', $pid)) {
         runtime_env_job_finish($jobId, false, '无法启动后台安装进程', ['percent' => 0]);
+        @flock($startLock, LOCK_UN);
+        @fclose($startLock);
         return ['ok' => false, 'msg' => '无法启动后台安装进程', 'data' => ['job_id' => $jobId, 'code' => $code, 'output' => $output]];
     }
     runtime_env_job_update($jobId, ['status' => 'running', 'pid' => (int)$pid, 'phase' => '启动中', 'percent' => 3, 'message' => '后台安装进程已启动']);
     runtime_env_job_append_log($jobId, '后台进程 PID ' . $pid);
+    @flock($startLock, LOCK_UN);
+    @fclose($startLock);
     return ['ok' => true, 'msg' => '安装任务已启动', 'data' => ['job_id' => $jobId]];
 }
 

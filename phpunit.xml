@@ -12,9 +12,6 @@
         <testsuite name="Admin">
             <directory>tests/phpunit/Admin</directory>
         </testsuite>
-        <testsuite name="Subsite">
-            <directory>tests/phpunit/Subsite</directory>
-        </testsuite>
         <testsuite name="Public">
             <directory>tests/phpunit/Public</directory>
         </testsuite>

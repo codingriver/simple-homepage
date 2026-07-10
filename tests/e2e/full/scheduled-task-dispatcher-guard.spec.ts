@@ -2,8 +2,14 @@ import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 async function openDdnsDispatcherTab(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  await page.getByRole('tab', { name: /DDNS 调度器/ }).click();
+  await page.getByRole('tab', { name: /系统任务/ }).click();
   await expect(page.locator('#scheduled-tab-panel-ddns')).toBeVisible();
+}
+
+async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  await page.locator('#task-modal button[form="task-form"]').click({ force: true });
+  await navPromise;
 }
 
 async function ensureDdnsDispatcherExists(page: Parameters<typeof loginAsDevAdmin>[0]) {
@@ -112,8 +118,9 @@ test('scheduled tasks system dispatchers remain view-only while manual tasks sta
   await page.locator('#fm-name').fill(`手动任务 ${Date.now()}`);
   await page.locator('#fm-schedule').fill('*/20 * * * *');
   await page.locator('#fm-command').fill('echo dispatcher-guard');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
+  await page.getByRole('tab', { name: /手动任务/ }).click();
   await expect(page.locator('#scheduled-tab-panel-tasks')).toBeVisible();
   const manualRow = page.locator('tr:has-text("手动任务")').first();
   await expect(manualRow.getByRole('button', { name: /编辑/ })).toBeVisible();
@@ -137,17 +144,20 @@ test('scheduled tasks reject direct save delete and toggle posts for DDNS dispat
 
   const systemRow = page.locator('tr:has-text("DDNS 调度器")').first();
   await expect(systemRow).toBeVisible();
-  const dispatcherId = await systemRow.locator('input[name="id"]').first().inputValue();
+  const dispatcherId = await page.evaluate(() => {
+      const rows = (window as Window & { TASK_ROWS?: Array<Record<string, any>> }).TASK_ROWS || [];
+      return rows.find((row) => String(row.id || '').startsWith('sys_ddns_dispatcher_'))?.id || '';
+    });
   expect(dispatcherId).toMatch(/^sys_ddns_dispatcher_/);
 
   await submitSystemTaskAction(page, 'task_toggle', dispatcherId);
   await expect(page.locator('body')).toContainText('DDNS 调度器由系统自动维护，不能手动启停');
 
   await submitSystemTaskAction(page, 'task_delete', dispatcherId);
-  await expect(page.locator('body')).toContainText('DDNS 调度器由系统自动维护，不能手动删除');
+  await expect(page.locator('body')).toContainText(/DDNS 调度器由系统自动维护，不能手动删除|系统调度器由系统自动维护，不能手动删除/);
 
   await submitSystemTaskAction(page, 'task_save', dispatcherId);
-  await expect(page.locator('body')).toContainText('DDNS 调度器由系统自动维护，不能手动编辑');
+  await expect(page.locator('body')).toContainText(/DDNS 调度器由系统自动维护，不能手动编辑|系统调度器由系统自动维护，不能手动编辑/);
 
   await tracker.assertNoClientErrors();
 });

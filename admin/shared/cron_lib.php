@@ -12,7 +12,7 @@ define('SCHEDULED_TASKS_FILE', DATA_DIR . '/scheduled_tasks.json');
 define('TASKS_WORKDIR_ROOT', DATA_DIR . '/tasks');
 define('DDNS_DISPATCHER_TASK_PREFIX', 'sys_ddns_dispatcher_');
 define('DOMAIN_EXPIRY_SYNC_TASK_ID', 'sys_domain_expiry_sync');
-define('FAVICON_SYNC_TASK_ID', 'sys_favicon_sync');
+define('RETIRED_SYSTEM_TASK_IDS', ['sys_favicon_sync']);
 define('TASK_DISPATCH_LOG_FILE', DATA_DIR . '/logs/task_dispatch.log');
 define('SCHEDULED_TASKS_LOCK_FILE', DATA_DIR . '/.scheduled_tasks.lock');
 define('TASK_EXECUTION_TIMEOUT', 7200);
@@ -501,7 +501,7 @@ function task_write_script_file(array $task, string $cmd, array $allTasks = []):
 
 function task_sync_script_for_task(array $task, array $allTasks = []): array {
     $id = (string)($task['id'] ?? '');
-    if ($id === '' || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
+    if ($id === '' || scheduled_task_is_retired_id($id) || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
         return ['ok' => true, 'path' => ''];
     }
     $cmd = (string)($task['command'] ?? '');
@@ -521,7 +521,7 @@ function task_sync_scripts_from_scheduled_tasks(array $data, bool $remove_orphan
     $expected = [];
     foreach ($data['tasks'] ?? [] as $task) {
         $id = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($task['id'] ?? ''));
-        if ($id === '' || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
+        if ($id === '' || scheduled_task_is_retired_id($id) || cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
             continue;
         }
         $path = task_script_file_for_task($task, $data['tasks'] ?? []);
@@ -1059,6 +1059,48 @@ function task_cleanup_on_delete(array $task): void {
     }
 }
 
+function scheduled_task_is_retired_id(string $id): bool {
+    return in_array($id, RETIRED_SYSTEM_TASK_IDS, true);
+}
+
+/** @return array{data:array,removed:array<int,array>} */
+function scheduled_tasks_filter_retired(array $data): array {
+    $tasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    $kept = [];
+    $removed = [];
+    foreach ($tasks as $task) {
+        if (!is_array($task)) {
+            continue;
+        }
+        if (scheduled_task_is_retired_id((string)($task['id'] ?? ''))) {
+            $removed[] = $task;
+            continue;
+        }
+        $kept[] = $task;
+    }
+    $data['tasks'] = $kept;
+    return ['data' => $data, 'removed' => $removed];
+}
+
+/** @return array{removed:int} */
+function scheduled_tasks_prune_retired(): array {
+    $lock = scheduled_tasks_lock_exclusive();
+    $filtered = scheduled_tasks_filter_retired(load_scheduled_tasks());
+    if ($filtered['removed'] !== []) {
+        save_scheduled_tasks($filtered['data'], $lock);
+    }
+    scheduled_tasks_unlock($lock);
+
+    scheduled_tasks_cleanup_retired_artifacts();
+    return ['removed' => count($filtered['removed'])];
+}
+
+function scheduled_tasks_cleanup_retired_artifacts(): void {
+    foreach (RETIRED_SYSTEM_TASK_IDS as $id) {
+        task_cleanup_on_delete(['id' => $id]);
+    }
+}
+
 function scheduled_tasks_clear_manual_tasks(): array {
     $data = load_scheduled_tasks();
     $allTasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
@@ -1103,6 +1145,9 @@ function scheduled_task_upsert(array $input): array {
     }
     if (!preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
         return ['ok' => false, 'msg' => '任务 ID 仅允许字母数字、下划线、短横线'];
+    }
+    if (scheduled_task_is_retired_id($id)) {
+        return ['ok' => false, 'msg' => '该任务 ID 已退役，不能重新创建'];
     }
     if ($name === '') {
         return ['ok' => false, 'msg' => '请填写任务名称'];
@@ -1453,14 +1498,6 @@ function cron_sync_domain_expiry_task(): array {
     return ['ok' => true, 'task_id' => DOMAIN_EXPIRY_SYNC_TASK_ID];
 }
 
-function cron_is_favicon_sync_id(string $id): bool {
-    return false;
-}
-
-function cron_sync_favicon_task(): array {
-    return ['ok' => true, 'task' => null];
-}
-
 /**
  * 严格验证单个 cron 字段。
  * 支持的语法：* 、 n 、 n,m 、 n-m 、 * /step 、 n-m/step
@@ -1543,6 +1580,7 @@ function cron_validate_schedule(string $line): bool {
 }
 
 function cron_regenerate(): array {
+    scheduled_tasks_prune_retired();
     cron_sync_ddns_dispatcher_task();
     cron_sync_domain_expiry_task();
     $lines   = [];

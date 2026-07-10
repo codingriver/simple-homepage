@@ -41,10 +41,10 @@
 | `playwright.config.ts` | Playwright 配置：`testDir: './tests/e2e/full'`，`workers: 1`，`fullyParallel: false`，Projects: `chromium`（桌面端）和 `mobile-chrome`（Pixel 7），CI 时 `retries: 1` |
 | `tsconfig.json` | TypeScript 配置：`target: ES2022`，`module: commonjs`，`strict: true`，供 Playwright 测试和配置脚本使用 |
 | `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data`；运行期可透传 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 等出站代理变量 |
-| `phpunit.xml` | PHPUnit 配置：三个测试套件 `Shared` / `Admin` / `Subsite`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
+| `phpunit.xml` | PHPUnit 配置：测试套件 `Shared` / `Admin` / `Public` / `Cli` / `Docker`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
 | `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + Supervisor + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
-| `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、反代配置预生成、sudo 白名单设置 |
+| `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、系统配置持久化、sudo 白名单设置 |
 | `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
 | `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；构建期和运行期均支持代理环境变量透传 |
@@ -130,15 +130,13 @@ data/            # 持久化数据目录（必须挂载到宿主机）
 
 tests/
   e2e/full/      # Playwright E2E 测试（已大幅精简，仅保留与后台仍存模块对应的用例）
-  phpunit/       # PHPUnit 单元测试，套件：Shared / Admin / Subsite / Public / Cli / Docker
+  phpunit/       # PHPUnit 单元测试，套件：Shared / Admin / Public / Cli / Docker
   helpers/       # auth.ts（登录/登出）、fixtures.ts、data.ts（resetVolatileAppData）、cli.ts
 
 local/           # 本地开发环境
   docker-compose.yml / docker-compose.dev.yml / docker-compose.test.yml
   docker-build.sh / .env.example / php-dev.ini / README.md
 
-subsite-middleware/
-  auth_check.php # 历史保留的子站统一鉴权中间件（独立可复用脚本；本后台已不再生成反代）
 ```
 
 ### 页面与 API 的两种模式
@@ -197,9 +195,6 @@ npm install
 npm run test:e2e:full:chromium          # 桌面端
 npm run test:e2e:full:mobile-chrome     # 移动端
 npm run test:e2e:headed                 # headed 模式调试
-
-# 本地 qB 子域名代理登录回归（默认跳过，需当前代理环境可用）
-RUN_QB_PROXY_E2E=1 PLAYWRIGHT_REPORTER=line npx playwright test tests/e2e/full/qb-local-proxy-login-regression.spec.ts --project=chromium --headed
 
 # 登录 / Cookie / Session 回归（默认环境可跑）
 PLAYWRIGHT_REPORTER=line npx playwright test tests/e2e/full/auth-cookie-session-regression.spec.ts --project=chromium
@@ -274,21 +269,13 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 ### 8. Nginx + PHP-FPM 死锁规避
 
 - 在 `admin/` 等使用 `auth_request` 的 location 中，PHP 子 location 必须加 `auth_request off;`，由 PHP 自行鉴权。
-- 子域名代理的未登录回跳必须同时兼容外层 HTTPS 反代和内网 HTTP 调试：每个代理 `server` 块必须设置 `absolute_redirect off;`，未登录时跳转到 `/login.php?redirect=$nav_forwarded_proto://$http_host$request_uri`。`$nav_forwarded_proto` 由外层 `X-Forwarded-Proto` 决定，未设置时回退到 `$scheme`，因此外网 HTTPS 不会暴露 `:58080`，内网 `http://*.local.303066.xyz:58080/` 仍保留 HTTP 和端口。
-- 子域名代理必须提供同源 `/login.php`、`/login.css`、`/gesture-guard.js` 入口，未登录时跳转到 `/login.php?redirect=$scheme://$http_host$request_uri`。不要统一跳到 `https://nav_domain/login.php`，否则 HTTPS 登录页下发的 Secure Cookie 无法回传到 HTTP 调试入口，导致重定向循环。
-- qBittorrent WebUI 代理（当前 `192.168.2.2:9097`）需要向上游发送 `$proxy_host`，并清空 `Referer` / `Origin`，否则 qB API 登录会因 Host/来源校验返回 `401 Unauthorized`。
-- 通用反代参数里的 WebSocket 头必须使用 `proxy_set_header Connection $connection_upgrade;`，禁止对所有请求强制 `"upgrade"`，否则普通 JS/CSS/字体资源在多层代理下可能长时间挂起。
-- Homepage 自身的 PHP Session Cookie 使用专用名称 `nav_php_session`，不要再和后端常见的 `PHPSESSID` 混用，否则代理站点会污染登录页 CSRF 会话。
+- Homepage 自身的 PHP Session Cookie 使用专用名称 `nav_php_session`，避免与外层部署环境中其他 PHP 应用的 `PHPSESSID` 冲突。
 - 登录 Cookie `nav_session` 在配置了 `cookie_domain` 时，需要同时写入站群 Domain Cookie 和当前 Host 的 host-only Cookie；服务端读取 Cookie 时必须兼容同名 Cookie 多值，逐个验证 token，避免旧 Domain Cookie 遮住新的本域登录态。`public/auth/verify.php` 作为 Nginx `auth_request` 入口也必须走同一套多 Cookie 验证逻辑，不能直接读 `$_COOKIE[SESSION_COOKIE_NAME]`。
-- 登录成功后先跳同源 `/login.php?complete=1&redirect=...`，由 200 HTML 完成页二次写入 `nav_session` 后再跳目标地址，避免部分浏览器在 302 后立刻进入代理鉴权时还未稳定带回新 Cookie。
+- 登录成功后先跳同源 `/login.php?complete=1&redirect=...`，由 200 HTML 完成页二次写入 `nav_session` 后再跳目标地址，避免部分浏览器在 302 后立刻进入后台鉴权时还未稳定带回新 Cookie。
 - `auth_request` 失败必须写入 `AUTH_DENY` 登录日志并包含 `reason=...`，便于区分 `no_cookie`、`malformed`、`bad_signature`、`expired`、`session_missing`、`blocked_ip`、`blocked_domain` 等原因。
-- `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免代理站点大量静态资源并发请求时把有效登录误判为 `session_missing`。
-- 站点代理不再依赖一份“万能 full 参数”覆盖所有场景；`sites.json` 中的代理站点应支持 `proxy_profile`（如 `default` / `qbittorrent` / `spa` / `synology_dsm` / `media` / `websocket`），生成器需按 profile 注入专用头与静态资源 location。默认 profile 仍保持兼容旧站点的自动推断。
-- 站点可在 `sites.json` 中保存测试凭据字段 `credential_username` / `credential_password` / `credential_note`，当前按产品要求明文保存，并随导入、导出、备份、恢复一起保留。后台页面可回显给管理员编辑；公共 `public/api/sites.php` 返回站点数据时必须调用 `sites_strip_credentials()` 移除这些字段，避免 API Token 消费端拿到明文密码。
-- 真实浏览器回归时应同时验收：外网域名、内网直连目标、登录后页面、静态资源是否仍被误导到 `/login.php`、以及是否存在后端写死 `127.0.0.1` 之类的应用配置问题；这类问题要在诊断报告中与反代问题分开标记。
-- 后台提供 `admin/proxy_diagnose.php` 作为单站点代理诊断接口，返回目标 URL、代理 URL、profile、资源采样和问题列表；同一接口支持 `action=browser` 触发真实浏览器诊断。若容器内没有 Node.js / Playwright，后台必须给出宿主机可执行命令，不能让诊断卡死或报含糊错误。本地浏览器级诊断脚本位于 `scripts/proxy_browser_diagnose.js`，用于捕获运行时 JS 请求失败、慢资源和控制台错误，并支持复用当前 `nav_session` Cookie。
-- PHPUnit 测试 Nginx 配置生成时必须通过 `NAV_NGINX_CONF_D_DIR` / `NAV_NGINX_HTTP_D_DIR` 指向临时目录，禁止写入真实 `/etc/nginx/conf.d` 或 `/etc/nginx/http.d`。
-- 反向代理生成配置以 `data/nginx` 为唯一持久化源：`data/nginx/conf.d/nav-proxy.conf` 和 `data/nginx/http.d/nav-proxy-domains.conf`。容器启动时将 `/etc/nginx/conf.d/nav-proxy.conf`、`/etc/nginx/http.d/nav-proxy-domains.conf` 软链到上述文件；禁止让 `/etc/nginx` 与 `data/nginx` 形成两份可写配置。
+- `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免后台静态资源并发请求时把有效登录误判为 `session_missing`。
+- 面板可以部署在宿主机 Nginx/Caddy 等外层反向代理之后；必须保留 `X-Forwarded-Proto` 与真实客户端 IP 的识别逻辑。该能力仅用于部署适配，不包含站点代理生成或管理功能。
+- Nginx 在线编辑仅管理主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数；不得重新引入站点代理模板、`nav-proxy*.conf` 或代理目标诊断逻辑。
 
 ### 9. 计划任务健壮性
 
@@ -300,7 +287,9 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - 启用「执行前安装依赖」时，Node.js 任务只在当前任务目录处理 `package.json`（`node_modules/`、`.npm-cache/`、`install.log`），Python 任务只在当前任务目录处理 `requirements.txt`（`.venv/`、`install.log`），禁止写入全局项目依赖。
 - `runtime_env_lib.php` 管理 `data/runtime/node/versions/` 与 `data/runtime/node/current`，计划任务执行时会将当前 Node.js 版本的 `bin` 目录注入 `PATH`。
 - Node.js 安装由 `cli/runtime_env_job.php` 后台执行，job 状态写入 `data/runtime/jobs/*.json`，日志写入 `data/runtime/jobs/*.log`；前端必须轮询 `runtime_env_ajax.php?action=job_status` 展示阶段、百分比、下载大小、安装日志和失败建议。
+- 运行环境页面重新进入时必须通过 `runtime_env_ajax.php?action=current_job` 恢复仍在执行的安装任务，并继续轮询；后台任务需与 PHP-FPM 请求会话脱离，任务 PID 消失时必须将残留的 `queued` / `running` 状态收敛为失败，禁止永久显示“下载中”。同一时间只允许一个运行环境安装任务。
 - Docker 容器按产品要求允许 `navwww` 免密 sudo 执行所有命令，用于后台安装运行环境；相关错误必须在页面展示命令、退出码、stdout/stderr 和建议。
+- 已退役的系统任务 ID 必须登记在 `RETIRED_SYSTEM_TASK_IDS`。计划任务页面加载、crontab 重建、备份导出和恢复时必须过滤这些任务，并清理对应脚本、日志和锁文件。当前退役 ID：`sys_favicon_sync`。
 
 ### 10. Ace Editor 作为项目默认文本编辑器
 
@@ -359,15 +348,10 @@ if (session_status() === PHP_SESSION_NONE) session_start();
     - **编辑 + 语法检查**（如 Nginx 配置）：`[dirty, 检查语法, 关闭, 保存, 保存并 Reload]`
     - **文件管理**（如 files.php）：`[dirty, 关闭, 下载, 删除, 保存]`
     - **只读查看**（如 logs.php）：`[关闭]`
-- **参考实现**：`admin/files.php` 中的文件管理器弹窗编辑器（`fm-editor-modal`）和 `admin/nginx.php` 中的 Nginx 配置编辑器弹窗。
+- **参考实现**：`admin/nginx.php` 中的 Nginx 配置编辑器弹窗和 `admin/logs.php` 中的只读日志查看器。
 - **待改造清单**（当前仍使用原生 `<textarea>`，需逐步替换为 Ace Editor 弹窗）：
-  - `scheduled_tasks.php`：计划任务命令脚本
   - `settings.php`：自定义 CSS、文件系统允许根目录
   - `dns.php`：DNS JSON 批量导入
-  - `manifests.php`：Manifest YAML/JSON 编辑
-  - `configs.php`：系统配置编辑
-- **保持现状（≤5 行短文本，无需改造）**：
-  - `sites.php`：站点备注（3 行）
 
 #### 10.1 NavAceEditor 统一封装接口完整规范
 
@@ -708,9 +692,8 @@ function openLogViewer(logContent, logName) {
 
 #### 10.2 改造优先级建议
 
-1. **P0（先封装）**：实现 `admin/shared/ace_editor_modal.php` 统一接口，将 `files.php`、`nginx.php`、`logs.php` 迁移到统一接口，验证稳定性。
-2. **P1（再迁移）**：改造 `scheduled_tasks.php`、`manifests.php`。
-3. **P2（最后）**：改造 `settings.php`（2 处）、`dns.php`、`configs.php`。`sites.php` 保持 `<textarea>` 不变。
+1. **P0（先封装）**：维护 `admin/shared/ace_editor_modal.php` 统一接口，并以 `nginx.php`、`logs.php`、`scheduled_tasks.php` 验证稳定性。
+2. **P1（后迁移）**：改造 `settings.php` 和 `dns.php` 中仍符合条件的多行文本输入。
 
 ---
 
@@ -729,8 +712,7 @@ function openLogViewer(logContent, logName) {
 - **数据隔离**:
   - `tests/helpers/fixtures.ts` 扩展 Playwright base test，在每个测试前自动调用 `resetVolatileAppData()`。
   - `auth-cookie-session-regression.spec.ts` 覆盖登录完成页、旧 Cookie、max session 多选下线、`kick_oldest` 兜底、`auth_request` 失败日志、服务端 session 被撤销后重新登录、刷新与新标签页。
-  - `qb-local-proxy-login-regression.spec.ts` 是面向当前局域网 qB 代理的显式本地回归，默认跳过；仅在设置 `RUN_QB_PROXY_E2E=1` 或 `QB_PROXY_URL` 时运行，测试只清理 `sessions.json` / `ip_locks.json`，避免重置站点配置。
-  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，重置 `sites.json` 为空分组、清空日志和备份、重置各类任务/会话等 JSON。
+  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，清空日志和备份、重置各类任务/会话等 JSON。
   - 创建型数据需使用唯一值（`Date.now()` 时间戳），禁止测试间残留数据依赖。
   - 修改全局配置/文件后需在 `try/finally` 中回滚。
 - **定位策略**: 优先使用 `getByRole` / `getByLabel`，其次稳定 `id/name`，禁止把 `waitForTimeout` 当作主要同步手段。
@@ -740,15 +722,11 @@ function openLogViewer(logContent, logName) {
 ### PHPUnit
 
 - **配置文件**: `phpunit.xml`
-- **测试套件**: `Shared`、`Admin`、`Subsite`
+- **测试套件**: `Shared`、`Admin`、`Public`、`Cli`、`Docker`
 - **包含源码**: `shared/`、`admin/shared/`
 - **Bootstrap**: `tests/phpunit/bootstrap.php`（创建临时 `DATA_DIR`，测试结束后自动清理）
 - **隔离方式**: 每个测试类的 `setUp()` 中手动 `unlink()` 相关 JSON 文件，确保零残留。
-- **当前覆盖**: 9 个测试类
-  - `Shared` 套件（4 个）：`AuthTest`、`NotifyTest`、`RequestTimingTest`、`SessionManagementTest`
-  - `Admin` 套件（5 个）：`ApiTokenTest`、`AuditLogTest`、`HealthCheckTest`、`SharedFunctionsTest`、`ThemeConfigTest`
-  - `Subsite` 套件：当前暂无测试类
-  - 涵盖范围：Token 生成验证、密码哈希、用户生命周期、IP 锁定、备份创建/恢复、Nginx 配置生成、API Token、审计日志、主题配置等。
+- **当前覆盖**: 以 `tests/phpunit/` 下实际测试类为准，涵盖认证、会话、HTTP 客户端、计划任务、DNS/DDNS、域名有效期、运行环境、备份恢复、Nginx 配置、API Token 和审计日志等。
 
 ### Lighthouse 性能测试
 
@@ -776,7 +754,6 @@ function openLogViewer(logContent, logName) {
 
 常见文件：
 - `config.json` — 系统配置
-- `sites.json` — 站点与分组
 - `users.json` — 用户数据
 - `scheduled_tasks.json` — 计划任务
 - `dns_config.json` — DNS 配置
@@ -789,9 +766,7 @@ function openLogViewer(logContent, logName) {
 - `logs/` — 各类日志
 - `tasks/` — 计划任务目录；数字 ID 任务在 `task_{id}/` 下保存入口脚本、`run.log`、依赖目录和 `install.log`
 - `runtime/` — 后台安装的运行环境，例如 `runtime/node/versions/` 与 `runtime/node/current`
-- `favicon_cache/` — 自动抓取的 favicon 缓存
-- `bg/` — 背景图上传目录
-- `nginx/` — Nginx 代理参数模板
+- `nginx/` — 持久化的 Nginx 主配置和站点配置
 
 ### 环境变量
 
@@ -826,7 +801,6 @@ function openLogViewer(logContent, logName) {
 
 以下问题已在 `docs/项目问题分析与设计缺陷.md` 中记录，修改相关代码时需特别注意：
 
-- **P0**: `subsite-middleware/auth_check.php` 中 `_nav_token` Cookie 写入/URL 清理逻辑位于 `exit` 之后，正常流程下不可达。
 - **P1**: `public/index.php` 体积过大（880+ 行），承担职责过多；`admin/shared/functions.php` 中的 `admin_run_command()` 缺少超时控制。
 - **P1**: Webhook HTTP 请求逻辑存在重复代码，未统一收敛到 `shared/http_client.php`。
 - **P2**: 缺少统一异常处理层；配置读取缺少统一抽象；权限粒度较粗；测试层对 `shared/auth.php`、`shared/request_timing.php` 缺少底层单元测试。

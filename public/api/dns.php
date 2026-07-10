@@ -9,7 +9,7 @@ header('Content-Type: application/json; charset=utf-8');
 $isLocalhost = dns_api_is_localhost();
 
 if (!$isLocalhost) {
-    // 非本机访问需校验 API Token（与 sites.php 保持一致）
+    // 非本机访问需校验 API Token
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     $token = '';
     if (str_starts_with($authHeader, 'Bearer ')) {

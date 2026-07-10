@@ -174,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 检查 users.json 是否为空（已安装但数据损坏）
 $users_empty = empty(auth_load_users());
 $cfg         = auth_get_config();
-$site_name   = $cfg['site_name'] ?? '导航中心';
+$site_name   = $cfg['site_name'] ?? '后台中心';
 $theme       = $cfg['theme'] ?? 'dark';
 ?>
 <!DOCTYPE html>

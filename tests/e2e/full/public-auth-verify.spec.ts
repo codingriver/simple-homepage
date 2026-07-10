@@ -1,10 +1,6 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
-
-const execFileAsync = promisify(execFile);
-const dockerBin = '/usr/local/bin/docker';
+import { runDockerPhpInline } from '../../helpers/cli';
 
 test('auth verify endpoint is not publicly exposed to anonymous browser requests', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
@@ -43,17 +39,10 @@ test('auth verify endpoint returns authenticated user headers after login', asyn
 
   await loginAsDevAdmin(page);
 
-  const { stdout } = await execFileAsync(
-    dockerBin,
-    [
-      'exec',
-      'simple-homepage',
-      'php',
-      '-r',
-      `
+  const result = runDockerPhpInline(`
 require_once '/var/www/nav/shared/auth.php';
 register_shutdown_function(function () {
-    $payload = $GLOBALS['payload'] ?? null;
+    $payload = auth_get_current_user();
     echo json_encode([
         'status' => http_response_code(),
         'headers' => headers_list(),
@@ -65,11 +54,9 @@ $_COOKIE['nav_session'] = auth_generate_token('e2e-auth-verify', 'admin', false)
 $_SERVER['HTTP_HOST'] = '127.0.0.1:58080';
 $_SERVER['REQUEST_METHOD'] = 'GET';
 include '/var/www/nav/public/auth/verify.php';
-      `,
-    ],
-    { cwd: '/Users/mrwang/project/simple-homepage' }
-  );
-  const payload = JSON.parse(stdout.trim()) as {
+  `);
+  expect(result.code, result.output).toBe(0);
+  const payload = JSON.parse(result.stdout.trim()) as {
     status: number;
     headers: string[];
     payload_user: string;

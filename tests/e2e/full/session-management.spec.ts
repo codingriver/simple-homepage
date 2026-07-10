@@ -20,12 +20,12 @@ test('session management lists and revokes sessions', async ({ page, browser }) 
   await expect(page.locator('table tbody tr').first()).toBeVisible();
 
   // 点击第一个强制下线按钮
-  page.once('dialog', dialog => dialog.accept());
   const firstRow = page.locator('table tbody tr').first();
-  const [response] = await Promise.all([
-    page.waitForResponse((resp) => resp.url().includes('sessions_api.php?action=revoke') && resp.request().method() === 'POST'),
-    firstRow.locator('button:has-text("强制下线")').click(),
-  ]);
+  await firstRow.locator('button:has-text("强制下线")').click();
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  const responsePromise = page.waitForResponse((resp) => resp.url().includes('sessions_api.php?action=revoke') && resp.request().method() === 'POST');
+  await page.locator('#nav-confirm-ok').click();
+  const response = await responsePromise;
   const respBody = await response.json();
   expect(respBody.ok).toBe(true);
   await expect(page.locator('body')).toContainText('会话已强制下线');

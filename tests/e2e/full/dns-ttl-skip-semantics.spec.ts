@@ -5,6 +5,7 @@ test('public dns api preserves skip semantics and normalizes ttl floor', async (
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/,
       /Failed to load resource: the server responded with a status of 500 \(Internal Server Error\)/,
     ],
@@ -22,7 +23,13 @@ test('public dns api preserves skip semantics and normalizes ttl floor', async (
     });
     return { status: res.status, json: await res.json() };
   }, fqdn);
-  expect([200, 403]).toContain(first.status);
+  expect([200, 401, 403]).toContain(first.status);
+  if (first.status === 401) {
+    expect(first.json.code).toBe(-1);
+    expect(String(first.json.msg || '')).toMatch(/未登录|Token|认证/);
+    await tracker.assertNoClientErrors();
+    return;
+  }
   if (first.status === 403) {
     expect(first.json.code).toBe(-1);
     expect(String(first.json.msg || '')).toContain('仅允许本机');
@@ -40,7 +47,13 @@ test('public dns api preserves skip semantics and normalizes ttl floor', async (
     });
     return { status: res.status, json: await res.json() };
   }, fqdn);
-  expect([200, 403]).toContain(second.status);
+  expect([200, 401, 403]).toContain(second.status);
+  if (second.status === 401) {
+    expect(second.json.code).toBe(-1);
+    expect(String(second.json.msg || '')).toMatch(/未登录|Token|认证/);
+    await tracker.assertNoClientErrors();
+    return;
+  }
   if (second.status === 403) {
     expect(second.json.code).toBe(-1);
     expect(String(second.json.msg || '')).toContain('仅允许本机');

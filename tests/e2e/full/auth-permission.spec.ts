@@ -31,16 +31,11 @@ test('non-admin user cannot access admin-only pages', async ({ page }) => {
   await page.getByRole('button', { name: /登\s*录/ }).click();
   await expect(page).toHaveURL(/index\.php|\/$/);
 
-  await page.goto('/admin/users.php');
-  await expect(page).not.toHaveURL(/\/admin\/users\.php/);
-  await expect(page.locator('body')).not.toContainText('添加用户');
-  await expect(page.locator('body')).not.toContainText('用户管理');
-
-  await page.goto('/admin/settings.php');
-  await expect(page.locator('body')).toContainText(/403 Forbidden: 需要管理员权限。|系统设置/);
-
-  await page.goto('/admin/debug.php');
-  await expect(page.locator('body')).toContainText(/403 Forbidden: 需要管理员权限。|调试工具/);
+  for (const path of ['/admin/users.php', '/admin/settings.php', '/admin/debug.php']) {
+    const response = await page.request.get(path);
+    expect(response.status()).toBe(403);
+    expect(await response.text()).toContain('403 Forbidden: 需要管理员权限。');
+  }
 
   await tracker.assertNoClientErrors();
 });

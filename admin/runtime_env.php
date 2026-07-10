@@ -92,6 +92,7 @@ var CSRF_TOKEN = <?= json_encode($CSRF, JSON_UNESCAPED_SLASHES) ?>;
 var NODE_STATE = <?= json_encode($node, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS) ?>;
 var CURRENT_JOB_ID = '';
 var JOB_POLL_TIMER = 0;
+var JOB_STORAGE_KEY = 'nav-runtime-env-job-id';
 
 function runtimeEscape(value) {
   return String(value == null ? '' : value)
@@ -292,6 +293,7 @@ function renderJob(job) {
 function pollJob(jobId) {
   if (!jobId) return;
   CURRENT_JOB_ID = jobId;
+  try { window.localStorage.setItem(JOB_STORAGE_KEY, jobId); } catch (e) {}
   if (JOB_POLL_TIMER) {
     clearTimeout(JOB_POLL_TIMER);
     JOB_POLL_TIMER = 0;
@@ -301,12 +303,16 @@ function pollJob(jobId) {
     renderJob(job);
     if (job.status === 'success') {
       setInstallButtonsDisabled(false);
+      CURRENT_JOB_ID = '';
+      try { window.localStorage.removeItem(JOB_STORAGE_KEY); } catch (e) {}
       if (job.node) renderNode(job.node);
       showToast(job.message || '安装完成', 'success');
       return;
     }
     if (job.status === 'failed') {
       setInstallButtonsDisabled(false);
+      CURRENT_JOB_ID = '';
+      try { window.localStorage.removeItem(JOB_STORAGE_KEY); } catch (e) {}
       var msg = job.message || '安装失败';
       if (job.stderr) msg += '：' + job.stderr;
       if (job.suggestion) msg += '；' + job.suggestion;
@@ -316,7 +322,35 @@ function pollJob(jobId) {
     JOB_POLL_TIMER = window.setTimeout(function() { pollJob(jobId); }, 1000);
   }).catch(function(err) {
     setInstallButtonsDisabled(false);
+    CURRENT_JOB_ID = '';
+    try { window.localStorage.removeItem(JOB_STORAGE_KEY); } catch (e) {}
     showToast(err.message, 'error');
+  });
+}
+
+function restoreInstallJob() {
+  var storedJobId = '';
+  try { storedJobId = window.localStorage.getItem(JOB_STORAGE_KEY) || ''; } catch (e) {}
+  ajax('current_job', {}, 'GET').then(function(res) {
+    var job = res.data && res.data.job ? res.data.job : null;
+    if (!job || !job.id) {
+      try { window.localStorage.removeItem(JOB_STORAGE_KEY); } catch (e) {}
+      return;
+    }
+    renderJob(job);
+    if (job.status === 'queued' || job.status === 'running') {
+      setInstallButtonsDisabled(true);
+      pollJob(job.id);
+      return;
+    }
+    setInstallButtonsDisabled(false);
+  }).catch(function(err) {
+    if (storedJobId) {
+      setInstallButtonsDisabled(true);
+      pollJob(storedJobId);
+      return;
+    }
+    console.warn('恢复运行环境安装任务失败', err);
   });
 }
 
@@ -340,6 +374,7 @@ function startInstallJob(action, data, startMessage) {
 }
 
 renderNode(NODE_STATE);
+restoreInstallJob();
 </script>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

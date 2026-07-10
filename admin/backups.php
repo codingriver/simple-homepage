@@ -86,7 +86,8 @@ if (isset($_GET['download']) || isset($_GET['export']) || $_SERVER['REQUEST_METH
                 $apply['config'] = $merged_cfg;
             }
             if (isset($obj['scheduled_tasks']) && is_array($obj['scheduled_tasks'])) {
-                $apply['scheduled_tasks'] = $obj['scheduled_tasks'];
+                require_once __DIR__ . '/shared/cron_lib.php';
+                $apply['scheduled_tasks'] = scheduled_tasks_filter_retired($obj['scheduled_tasks'])['data'];
             }
             if (isset($obj['dns_config']) && is_array($obj['dns_config'])) {
                 $apply['dns_config'] = $obj['dns_config'];

@@ -47,19 +47,19 @@ Token 数据格式（`data/api_tokens.json`）：
 
 ### 1.3 认证方式
 
-目前仅 `public/api/sites.php` 支持 API Token 认证。支持两种传参方式：
+当前 `public/api/dns.php` 支持 API Token 认证。支持两种传参方式：
 
 **方式一：HTTP Authorization Header（推荐）**
 
 ```http
-GET /api/sites.php HTTP/1.1
+GET /api/dns.php?action=query&domain=www.example.com&type=A HTTP/1.1
 Authorization: Bearer np_xxxxxxxx...
 ```
 
 **方式二：URL Query Parameter**
 
 ```http
-GET /api/sites.php?token=np_xxxxxxxx...
+GET /api/dns.php?action=query&domain=www.example.com&type=A&token=np_xxxxxxxx...
 ```
 
 > **注意**：Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。
@@ -82,53 +82,11 @@ GET /api/sites.php?token=np_xxxxxxxx...
 }
 ```
 
-### 1.5 请求与响应示例
-
-**请求：**
-
-```http
-GET /api/sites.php HTTP/1.1
-Host: 127.0.0.1:58080
-Authorization: Bearer np_a1b2c3d4e5f6...
-```
-
-**成功响应（HTTP 200）：**
-
-```json
-{
-  "ok": true,
-  "site_name": "导航中心",
-  "groups": [
-    {
-      "id": "default",
-      "name": "我的应用",
-      "icon": "🌐",
-      "order": 0,
-      "auth_required": true,
-      "visible_to": "all",
-      "sites": [
-        {
-          "id": "site_xxx",
-          "name": "NAS",
-          "url": "https://nas.local",
-          "icon": "💾",
-          "description": "家庭 NAS",
-          "group_id": "default",
-          "order": 0
-        }
-      ]
-    }
-  ]
-}
-```
-
-> **数据权限说明**：`sites.php` 返回全部站点数据，不过滤权限。API 消费端需自行根据 `auth_required`、`visible_to` 等字段处理访问控制。
-
-### 1.6 与其他认证体系的关系
+### 1.5 与其他认证体系的关系
 
 | 认证方式 | 用途 | 存储位置 | 说明 |
 |----------|------|----------|------|
-| API Token | 程序化 API 访问 | `data/api_tokens.json` | 本文档所述；`sites.php` 和 `dns.php` 均支持 |
+| API Token | DNS API 程序化访问 | `data/api_tokens.json` | 本文档所述；`dns.php` 支持 |
 | Session JWT | Web 登录会话 | Cookie (`nav_session`) | `shared/auth.php` 管理，用于前后台页面 |
 | Nginx auth_request | 反向代理子站鉴权 | Cookie | `public/auth/verify.php` 验证 Session JWT |
 
@@ -156,7 +114,7 @@ API Token 与 Session JWT 完全独立，API Token 不关联任何用户。DNS A
 
 #### 方式二：外网 Token 认证
 
-非本机访问需提供有效的 API Token，认证方式与 `sites.php` 完全一致：
+非本机访问需提供有效的 API Token：
 
 **HTTP Authorization Header（推荐）**
 
@@ -466,7 +424,6 @@ public/api/dns.php
 |------|----------|
 | API Token 验证 | `admin/shared/functions.php` → `api_token_verify()` |
 | API Token 管理页 | `admin/api_tokens.php` |
-| 站点数据 API | `public/api/sites.php` |
 | DNS 公共 API | `public/api/dns.php` |
 | DNS API 库 | `admin/shared/dns_api_lib.php` |
 | DNS 配置库 | `admin/shared/dns_lib.php` |

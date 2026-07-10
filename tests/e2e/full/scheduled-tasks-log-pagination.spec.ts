@@ -61,7 +61,6 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
       }
     }, { timeout: 10000 })
     .toBe(true);
-  const workdirText = await row.locator('td').nth(2).textContent();
   await row.getByRole('button', { name: /立即执行/ }).click({ force: true });
   await expect(page.locator('body')).toContainText(/已开始后台执行|后台执行已在运行中/);
   await waitForTaskLogLines(page, taskId);
@@ -88,24 +87,30 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
   }, '/var/www/nav/data/tasks');
   const copied = await page.evaluate(() => (window as any).__copiedText || '');
   expect(copied).toBe('/var/www/nav/data/tasks');
-  expect(workdirText || '').toContain('/var/www/nav/data/tasks');
+  expect(await fs.stat(tasksRootPath).then((stat) => stat.isDirectory()).catch(() => false)).toBe(true);
 
   await row.getByRole('button', { name: /日志/ }).click({ force: true });
-  await expect(page.locator('#log-modal')).toBeVisible();
-  await expect(page.locator('#log-page-label')).toContainText(/第\s+\d+\s*\/\s*\d+\s*页/);
-  if (await page.locator('#log-last-btn').isEnabled()) {
-    await page.locator('#log-last-btn').click();
+  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
+  await expect(page.locator('#nav-ace-pag-label')).toContainText(/第\s+\d+\s*\/\s*\d+\s*页/);
+  if (await page.locator('#nav-ace-pag-last').isEnabled()) {
+    await page.locator('#nav-ace-pag-last').click();
   }
-  if (await page.locator('#log-prev').isEnabled()) {
-    await page.locator('#log-prev').click();
+  if (await page.locator('#nav-ace-pag-prev').isEnabled()) {
+    await page.locator('#nav-ace-pag-prev').click();
   }
-  if (await page.locator('#log-next').isEnabled()) {
-    await page.locator('#log-next').click();
+  if (await page.locator('#nav-ace-pag-next').isEnabled()) {
+    await page.locator('#nav-ace-pag-next').click();
   }
-  await page.getByRole('button', { name: /清空日志/ }).click({ force: true });
+  await page.evaluate(() => {
+    const fn = (window as Window & { clearCurrentLog?: () => void }).clearCurrentLog;
+    if (typeof fn !== 'function') throw new Error('clearCurrentLog not found');
+    fn();
+  });
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
   await page.waitForTimeout(500);
   await page.keyboard.press('Escape');
-  await expect(page.locator('#log-modal')).toBeHidden();
+  await expect(page.locator('#nav-ace-editor-modal')).toBeHidden();
 
   await page.getByRole('button', { name: /新建任务/ }).click();
   await expect(page.locator('#fm-workdir-preview')).toHaveCount(0);
@@ -113,7 +118,7 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
   await expect(page.locator('#fm-script-path')).toHaveCount(0);
   await expect(page.locator('#fm-log-filename')).toHaveCount(0);
   await expect(page.locator('#fm-log-path')).toHaveCount(0);
-  await page.getByRole('button', { name: /取消/ }).click({ force: true });
+  await page.locator('#task-modal button').filter({ hasText: '✕' }).click({ force: true });
   await expect(page.locator('#task-modal')).toBeHidden();
 
   await tracker.assertNoClientErrors();

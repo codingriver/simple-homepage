@@ -6,7 +6,7 @@
 set -e
 umask 027
 
-echo "[entrypoint] 导航网站容器启动..."
+echo "[entrypoint] 后台管理面板容器启动..."
 
 # ── 环境变量默认值 ──
 export NAV_PORT=${NAV_PORT:-58080}
@@ -130,14 +130,14 @@ fi
 # 仅放宽代码目录读取权限；data 目录权限改为显式可写性检查，不再递归 chown/chmod
 if [ -d /var/www/nav ]; then
     chmod 755 /var/www/nav || true
-    for d in /var/www/nav/public /var/www/nav/shared /var/www/nav/admin /var/www/nav/cli /var/www/nav/docker /var/www/nav/python /var/www/nav/subsite-middleware /var/www/nav/nginx-conf; do
+    for d in /var/www/nav/public /var/www/nav/shared /var/www/nav/admin /var/www/nav/cli /var/www/nav/docker /var/www/nav/python /var/www/nav/nginx-conf; do
         [ -d "$d" ] && chmod -R a+rX "$d" || true
     done
 fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p /var/spool/cron/crontabs
-if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/nginx /var/www/nav/data/nginx/conf.d /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
+if ! nav_run "mkdir -p /var/www/nav/data/backups /var/www/nav/data/logs /var/www/nav/data/nginx /var/www/nav/data/nginx/http.d /var/www/nav/data/php /var/www/nav/data/php-fpm"; then
     echo "[entrypoint][ERROR] 无法在 /var/www/nav/data 下创建运行目录，请检查宿主机挂载目录权限，或设置 PUID/PGID 对齐。"
     exit 1
 fi
@@ -161,18 +161,16 @@ if [ -n "${ADMIN:-}" ]; then
     if [ ! -f /var/www/nav/data/.installed ] && { [ ! -f /var/www/nav/data/users.json ] || [ ! -s /var/www/nav/data/users.json ]; }; then
         export ADMIN
         export PASSWORD="${PASSWORD:-}"
-        export NAME="${NAME:-导航中心}"
+        export NAME="${NAME:-后台中心}"
         export DOMAIN="${DOMAIN:-}"
-        nav_run "php -r '\$d=\"/var/www/nav/data\"; if(!is_dir(\$d)) @mkdir(\$d,0750,true); \$j=[\"ADMIN\"=>(string)getenv(\"ADMIN\"),\"PASSWORD\"=>(string)getenv(\"PASSWORD\"),\"NAME\"=>(string)(getenv(\"NAME\")?:\"导航中心\"),\"DOMAIN\"=>(string)(getenv(\"DOMAIN\")?:\"\")]; file_put_contents(\$d.\"/.initial_admin.json\", json_encode(\$j, JSON_UNESCAPED_UNICODE));'"
+        nav_run "php -r '\$d=\"/var/www/nav/data\"; if(!is_dir(\$d)) @mkdir(\$d,0750,true); \$j=[\"ADMIN\"=>(string)getenv(\"ADMIN\"),\"PASSWORD\"=>(string)getenv(\"PASSWORD\"),\"NAME\"=>(string)(getenv(\"NAME\")?:\"后台中心\"),\"DOMAIN\"=>(string)(getenv(\"DOMAIN\")?:\"\")]; file_put_contents(\$d.\"/.initial_admin.json\", json_encode(\$j, JSON_UNESCAPED_UNICODE));'"
         chmod 600 /var/www/nav/data/.initial_admin.json 2>/dev/null || true
         echo "[entrypoint] 已写入 .initial_admin.json（无人值守安装，首次访问即完成初始化）"
     fi
 fi
 
 # ── 确保 nginx 运行时目录存在 ──
-mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
-
-# ⚠️ 后台管理版本不再生成倒反代配置，nav-proxy.conf 软链逻辑已移除
+mkdir -p /etc/nginx/http.d
 
 # ── 系统配置文件持久化到 data 目录（容器重建后配置不丢失）──
 
@@ -231,21 +229,6 @@ fi
 ln -sf /var/www/nav/data/php-fpm/nav.conf /usr/local/etc/php-fpm.d/nav.conf
 chown root:navwww /var/www/nav/data/php-fpm/nav.conf
 chmod 664 /var/www/nav/data/php-fpm/nav.conf
-# ── 从镜像复制 Nginx 代理模板到数据目录（始终同步，确保模板更新及时生效）──
-for tmpl in proxy-params-simple.conf proxy-params-full.conf proxy-template-path.conf proxy-template-domain.conf; do
-    src="/var/www/nav/nginx-conf/$tmpl"
-    dst="/var/www/nav/data/nginx/$tmpl"
-    if [ -f "$src" ] && [ -r "$src" ]; then
-        # 使用 cmp 比较差异，避免无意义的写入；若文件不存在或内容不同则复制
-        if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst"; then
-            cp "$src" "$dst"
-            chown navwww:navwww "$dst"
-            chmod 755 "$dst"
-            echo "[entrypoint] 已同步 $tmpl 到 data/nginx/"
-        fi
-    fi
-done
-
 # ── 系统配置启动前校验与兼容模式切换 ──
 # 分别测试 Nginx 和 PHP-FPM（含 PHP ini）配置
 nginx_ok=0
@@ -322,8 +305,6 @@ else
         exit 1
     fi
 fi
-
-# ⚠️ 后台管理版本不再从 sites.json 预生成反代配置
 
 # ── 根据持久化数据预生成 crontab（容器重建后 /var/spool/cron/crontabs 下的配置会丢失）──
 if [ -f /var/www/nav/data/scheduled_tasks.json ]; then
@@ -458,7 +439,7 @@ mkdir -p /home/navwww
 chown -R navwww:navwww /home/navwww /var/spool/cron/crontabs
 # Nginx 上传临时目录（文件上传必须可写）
 mkdir -p /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/fastcgi \
-         /var/lib/nginx/tmp/proxy /var/lib/nginx/tmp/scgi /var/lib/nginx/tmp/uwsgi
+         /var/lib/nginx/tmp/scgi /var/lib/nginx/tmp/uwsgi
 chown -R navwww:navwww /var/lib/nginx
 chmod -R 755 /var/lib/nginx/tmp
 # 确保日志文件存在且可读

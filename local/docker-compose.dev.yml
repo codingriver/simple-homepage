@@ -1,5 +1,5 @@
 # ============================================================
-# 导航网站 Docker Compose 开发覆盖配置（代码热更新）
+# 后台管理面板 Docker Compose 开发覆盖配置（代码热更新）
 # 推荐入口（在项目根目录）：
 #   bash local/docker-build.sh dev
 # 说明：local/README.md

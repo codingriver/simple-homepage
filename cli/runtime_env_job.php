@@ -13,5 +13,26 @@ if ($jobId === '' || $type === '') {
     exit(1);
 }
 
+$jobId = runtime_env_clean_job_id($jobId);
+runtime_env_job_update($jobId, [
+    'status' => 'running',
+    'pid' => getmypid(),
+    'started_at' => date('Y-m-d H:i:s'),
+]);
+
+register_shutdown_function(static function () use ($jobId): void {
+    $job = runtime_env_job_read($jobId);
+    if ($job === null || !in_array((string)($job['status'] ?? ''), ['queued', 'running'], true)) {
+        return;
+    }
+    $error = error_get_last();
+    $message = '后台安装进程意外结束，安装未完成';
+    $extra = ['percent' => (int)($job['percent'] ?? 0)];
+    if (is_array($error) && !empty($error['message'])) {
+        $extra['stderr'] = (string)$error['message'];
+    }
+    runtime_env_job_finish($jobId, false, $message, $extra);
+});
+
 $result = runtime_env_run_install_job($jobId, $type, $args);
 exit(!empty($result['ok']) ? 0 : 1);

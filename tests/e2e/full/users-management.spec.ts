@@ -6,6 +6,7 @@ test('admin can create edit and delete users with role changes', async ({ page }
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/,
       /Pattern attribute value \[a-zA-Z0-9_-\]\{2,32\} is not a valid regular expression/,
     ],
   });
@@ -68,6 +69,7 @@ test('user management enforces validation self-protection and non-admin restrict
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
+      /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/,
       /Pattern attribute value \[a-zA-Z0-9_-\]\{2,32\} is not a valid regular expression/,
     ],
   });
@@ -126,8 +128,8 @@ test('user management enforces validation self-protection and non-admin restrict
   await page.getByRole('button', { name: /登\s*录/ }).click();
   await expect(page).toHaveURL(/index\.php|\/$/);
 
-  await page.goto('/admin/users.php');
-  await expect(page).not.toHaveURL(/admin\/users\.php/);
+  const deniedUsers = await page.request.get('/admin/users.php');
+  expect(deniedUsers.status()).toBe(403);
 
   const anonContext = await browser.newContext({ baseURL: 'http://127.0.0.1:58080' });
   const anonPage = await anonContext.newPage();

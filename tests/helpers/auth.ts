@@ -96,8 +96,15 @@ export async function loginAsDevAdmin(page: Page) {
     return;
   }
 
-  const usernameInput = page.locator('input[name="username"]');
-  const passwordInput = page.locator('input[name="password"]');
+  const usernameInput = page.locator('input[name="username"]:visible');
+  const passwordInput = page.locator('input[name="password"]:visible');
+  if ((await usernameInput.count()) === 0) {
+    await page.waitForURL(
+      (url) => !url.pathname.endsWith('/login.php') && (url.pathname.startsWith('/admin/') || url.pathname.endsWith('/index.php') || url.pathname === '/'),
+      { timeout: 7000, waitUntil: 'load' }
+    ).catch(() => undefined);
+    if (!page.url().includes('/login.php')) return;
+  }
   await expect(usernameInput).toBeVisible();
   await expect(passwordInput).toBeVisible();
 
@@ -112,7 +119,10 @@ export async function loginAsDevAdmin(page: Page) {
     await page.getByRole('button', { name: /登\s*录/ }).click();
 
     try {
-      await expect(page).toHaveURL(/index\.php|\/$/, { timeout: 5000 });
+      await page.waitForURL(
+        (url) => !url.pathname.endsWith('/login.php') && url.pathname.startsWith('/admin/'),
+        { timeout: 7000, waitUntil: 'load' }
+      );
       return;
     } catch {
       if (!page.url().includes('/login.php')) {

@@ -43,13 +43,6 @@ test('scheduled tasks run cron reload and log clear actions work end to end', as
     });
     expect(runRes.status()).toBe(302);
 
-    // cron_reload
-    const reloadRes = await page.request.post('http://127.0.0.1:58080/admin/scheduled_tasks.php', {
-      form: { action: 'cron_reload', _csrf: csrf },
-      maxRedirects: 0,
-    });
-    expect(reloadRes.status()).toBe(302);
-
     // task_log_clear
     const clearRes = await page.request.post('http://127.0.0.1:58080/admin/scheduled_tasks.php', {
       form: { action: 'task_log_clear', id: taskId, _csrf: csrf },

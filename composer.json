@@ -1,6 +1,6 @@
 {
   "name": "codingriver/simple-homepage",
-  "description": "Simple Homepage Navigation Panel",
+  "description": "Simple Homepage Self-hosted Admin Panel",
   "type": "project",
   "require": {
     "php": ">=8.2"

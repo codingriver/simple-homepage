@@ -47,8 +47,8 @@ test('users boundary flows cover duplicate invalid self delete and role change r
   await page.locator('input[name="password"]').fill(password);
   await page.getByRole('button', { name: /登\s*录/ }).click();
   await expect(page).toHaveURL(/index\.php|\/$/);
-  await page.goto('/admin/users.php');
-  await expect(page).toHaveURL(/admin\/users\.php/);
+  const usersResponse = await page.request.get('/admin/users.php');
+  expect(usersResponse.status()).toBe(200);
 
   await tracker.assertNoClientErrors();
 });

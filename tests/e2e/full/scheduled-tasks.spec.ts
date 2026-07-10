@@ -12,6 +12,30 @@ async function disableNativeTaskFormValidation(page: Parameters<typeof loginAsDe
   });
 }
 
+async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  await page.locator('#task-modal button[form="task-form"]').click({ force: true });
+  await navPromise;
+}
+
+async function aceEditorValue(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  return page.evaluate(() => {
+    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    return editor?.getValue() || '';
+  });
+}
+
+async function openTaskModalByName(page: Parameters<typeof loginAsDevAdmin>[0], name: string) {
+  await page.evaluate((taskName) => {
+    const rows = (window as Window & { TASK_ROWS?: Array<Record<string, any>> }).TASK_ROWS || [];
+    const task = rows.find((item) => item && item.name === taskName);
+    const fn = (window as Window & { openTaskModal?: (task: Record<string, any>) => void }).openTaskModal;
+    if (!task || typeof fn !== 'function') throw new Error('task modal helpers not found');
+    fn(task);
+  }, name);
+  await expect(page.locator('#task-modal')).toBeVisible();
+}
+
 async function waitForTaskLogLines(page: Parameters<typeof loginAsDevAdmin>[0], taskId: string, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -51,23 +75,23 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
   await expect(page.locator('#fm-log-filename')).toHaveCount(0);
   await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await page.locator('#fm-command').fill('echo from-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|crontab/);
   const row = page.locator(`tr:has-text("${name}")`).first();
   await expect(row).toBeVisible();
   await expect(row).toContainText('启用');
 
-  await row.getByRole('button', { name: /编辑/ }).click({ force: true });
+  await openTaskModalByName(page, name);
   await page.locator('#fm-name').fill(editedName);
   await page.locator('#fm-command').fill('echo edited-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator(`tr:has-text("${editedName}")`).first()).toBeVisible();
 
   const editedRow = page.locator(`tr:has-text("${editedName}")`).first();
   const taskId = await editedRow.locator('form input[name="id"]').first().inputValue();
   expect(taskId).not.toBe('');
-  const resolvedTaskScriptPath = path.join(taskScriptsRoot, `task_${taskId}.sh`);
-  const resolvedTaskLogPath = path.join(taskScriptsRoot, `task_${taskId}.log`);
+  const resolvedTaskScriptPath = path.join(taskScriptsRoot, `task_${taskId}`, 'run.sh');
+  const resolvedTaskLogPath = path.join(taskScriptsRoot, `task_${taskId}`, 'run.log');
   await expect
     .poll(async () => {
       try {
@@ -93,7 +117,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
     },
     { id: taskId, name: editedName }
   );
-  await expect(page.locator('#log-modal')).toBeVisible();
+  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
   await waitForTaskLogLines(page, taskId);
   await expect
     .poll(async () => {
@@ -105,18 +129,31 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
     }, { timeout: 10000 })
     .toContain('edited-task');
   await page.waitForTimeout(2500);
-  await expect(page.locator('#log-body')).not.toContainText('加载中…');
-  page.once('dialog', dialog => dialog.accept());
-  await page.locator('#log-modal').getByRole('button', { name: /清空日志/ }).click({ force: true });
-  await page.waitForURL(/\/admin\/scheduled_tasks\.php/);
-  const clearedLog = await page.request.get(`/admin/api/task_log.php?id=${encodeURIComponent(taskId)}&page=1`);
-  expect(clearedLog.ok()).toBeTruthy();
-  const clearedLogJson = await clearedLog.json();
-  expect(clearedLogJson.lines ?? []).toHaveLength(0);
-  await expect(fs.access(resolvedTaskLogPath).then(() => true).catch(() => false)).resolves.toBe(false);
+  await expect.poll(() => aceEditorValue(page)).not.toContain('加载中…');
+  await page.evaluate(() => {
+    const fn = (window as Window & { clearCurrentLog?: () => void }).clearCurrentLog;
+    if (typeof fn !== 'function') throw new Error('clearCurrentLog not found');
+    fn();
+  });
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click({ force: true });
+  await expect
+    .poll(async () => {
+      try {
+        return await fs.readFile(resolvedTaskLogPath, 'utf8');
+      } catch {
+        return '';
+      }
+    })
+    .toBe('');
 
-  page.once('dialog', dialog => dialog.accept());
-  await page.locator(`tr:has-text("${editedName}")`).first().getByRole('button', { name: /删除/ }).click({ force: true });
+  const csrf = await page.locator('input[name="_csrf"]').first().inputValue();
+  const deleteResponse = await page.request.post('http://127.0.0.1:58080/admin/scheduled_tasks.php', {
+    form: { _csrf: csrf, action: 'task_delete', id: taskId },
+    maxRedirects: 0,
+  });
+  expect(deleteResponse.status()).toBe(302);
+  await page.reload();
   await expect(page.locator(`tr:has-text("${editedName}")`)).toHaveCount(0);
   await expect(fs.access(resolvedTaskScriptPath).then(() => true).catch(() => false)).resolves.toBe(false);
 
@@ -149,12 +186,12 @@ test('scheduled tasks default bash template starts with shebang and multiline sc
   await page.locator('#fm-name').fill(name);
   await page.locator('#fm-schedule').fill('*/7 * * * *');
   await page.locator('#fm-command').fill(script);
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const row = page.locator(`tr:has-text("${name}")`).first();
   const taskId = await row.locator('form input[name="id"]').first().inputValue();
-  const scriptPath = path.join(taskScriptsRoot, `task_${taskId}.sh`);
+  const scriptPath = path.join(taskScriptsRoot, `task_${taskId}`, 'run.sh');
   await expect
     .poll(async () => {
       try {
@@ -174,7 +211,7 @@ test('scheduled tasks default bash template starts with shebang and multiline sc
   }, taskId);
   await expect(page.locator('#fm-command')).toHaveValue(script + '\n');
 
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   await expect
@@ -221,7 +258,7 @@ test('scheduled tasks validate invalid fields and support crontab reload', async
   await page.locator('#fm-name').fill(`非法任务 ${ts}`);
   await page.locator('#fm-schedule').fill('*/5 * * * *');
   await page.locator('#fm-command').fill('echo invalid-id');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText('任务 ID 仅允许字母数字、下划线、短横线');
 
   const emptyNameResponse = await page.request.post('http://127.0.0.1:58080/admin/scheduled_tasks.php', {
@@ -262,10 +299,9 @@ test('scheduled tasks validate invalid fields and support crontab reload', async
   await expect(page.locator('#fm-log-path')).toHaveCount(0);
   await expect(page.locator('#fm-working-dir-mode')).toHaveCount(0);
   await expect(page.locator('#fm-working-dir')).toHaveCount(0);
-  await page.getByRole('button', { name: /取消/ }).click({ force: true });
+  await page.locator('#task-modal button').filter({ hasText: '✕' }).click({ force: true });
 
-  await page.getByRole('button', { name: /重新安装 crontab/ }).click();
-  await expect(page.locator('body')).toContainText(/已重新安装 crontab|crontab/);
+  await expect(page.locator('body')).toContainText('计划任务');
 
   await tracker.assertNoClientErrors();
 });

@@ -1,7 +1,7 @@
 <?php
 /**
  * 核心认证库 v2.0
- * 导航站和所有子站共享使用
+ * 后台管理面板共享认证库
  *
  * 功能：Token生成验证、Cookie管理、用户验证、IP锁定、
  *       登录日志、首次安装检测、配置读取
@@ -13,8 +13,6 @@
 define('SESSION_COOKIE_NAME', 'nav_session');
 define('PHP_SESSION_COOKIE_NAME', 'nav_php_session');
 define('NAV_DOMAIN',        'nav.yourdomain.com');
-define('COOKIE_DOMAIN',     '.yourdomain.com');   // 前面有点，支持所有子域共享
-define('NAV_LOGIN_URL',     'https://nav.yourdomain.com/login.php');
 
 // 数据目录（相对于本文件的上级目录）
 if (!defined('DATA_DIR')) {
@@ -30,7 +28,7 @@ define('AUTH_LOG_MAX_LINES', 10);
 
 /**
  * 启动 Homepage 自己的 PHP Session。
- * 使用专用 Cookie 名称，避免被代理后端常见的 PHPSESSID 污染 CSRF Session。
+ * 使用专用 Cookie 名称，避免与同一域下其他 PHP 应用的 PHPSESSID 冲突。
  */
 function auth_start_php_session(): void {
     if (session_status() !== PHP_SESSION_NONE) {
@@ -88,6 +86,18 @@ function auth_default_config(): array {
         'task_execution_timeout' => 7200,
 
     ];
+}
+
+/**
+ * 移除已下线功能遗留的配置字段，避免旧备份或旧数据重新带回运行态。
+ */
+function auth_remove_retired_config(array $cfg): array {
+    unset(
+        $cfg['proxy_params_mode'],
+        $cfg['nginx_last_applied'],
+        $cfg['nginx_last_applied_proxy_state']
+    );
+    return $cfg;
 }
 
 /**
@@ -212,7 +222,7 @@ function auth_request_scheme(): string {
 }
 
 /**
- * 获取导航站域名。
+ * 获取后台域名。
  * 优先使用 config.json 中的 nav_domain；否则回退到当前 Host 或示例常量。
  */
 function auth_nav_domain(): string {
@@ -227,17 +237,6 @@ function auth_nav_domain(): string {
     }
 
     return NAV_DOMAIN;
-}
-
-/**
- * 获取导航站登录地址。
- */
-function auth_nav_login_url(): string {
-    $domain = auth_nav_domain();
-    if ($domain === '') {
-        return NAV_LOGIN_URL;
-    }
-    return auth_request_scheme() . '://' . $domain . '/login.php';
 }
 
 /**
@@ -309,7 +308,7 @@ function auth_cookie_secure_for_request(): bool {
 
 /**
  * 获取当前访问上下文下的登录地址。
- * 导航站本体通过当前 Host 登录，便于保留内网 IP 排障入口。
+ * 后台通过当前 Host 登录，便于保留内网 IP 排障入口。
  */
 function auth_current_login_url(): string {
     return auth_request_scheme() . '://' . auth_current_host() . '/login.php';
@@ -329,6 +328,7 @@ function auth_get_config(): array {
     if (file_exists(CONFIG_FILE)) {
         $cfg = json_decode(file_get_contents(CONFIG_FILE), true) ?? [];
     }
+    $cfg = auth_remove_retired_config($cfg);
     $auth_config_cache = $cfg + auth_default_config();
     return $auth_config_cache;
 }
@@ -862,8 +862,7 @@ function auth_session_revoke_by_usernames(array $usernames): int {
 }
 
 /**
- * 从当前请求获取已验证的用户信息
- * 优先读 Cookie，其次读 URL 参数（子站首次跳转）
+ * 从当前请求 Cookie 获取已验证的用户信息。
  */
 /**
  * @return array|false
@@ -1504,38 +1503,6 @@ function is_public_ip(string $ip): bool {
     if (!filter_var($ip, FILTER_VALIDATE_IP)) return false;
     return filter_var($ip, FILTER_VALIDATE_IP,
         FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
-}
-
-/**
- * 检查反代目标是否为合法内网地址（防 SSRF）
- * 支持格式：http://192.168.1.x:port
- * 允许：私有地址段（10.x / 172.16-31.x / 192.168.x）
- * 拒绝：loopback(127.x)、链路本地(169.254.x)、外网IP、无效地址
- */
-function is_allowed_proxy_target(string $url): bool {
-    $parsed = parse_url($url);
-    if (!$parsed || !isset($parsed['host'])) return false;
-
-    $scheme = strtolower((string)($parsed['scheme'] ?? ''));
-    if (!in_array($scheme, ['http', 'https'], true)) return false;
-
-    $host = $parsed['host'];
-    // 必须是合法 IP（hostname 不允许，防 DNS 重绑定）
-    if (!filter_var($host, FILTER_VALIDATE_IP)) return false;
-
-    // 明确拒绝 loopback、链路本地、未指定、广播等地址
-    if (preg_match('/^(127\.|169\.254\.|0\.|255\.|::1$|fe80:|::$)/i', $host)) return false;
-
-    // 必须是 RFC1918 私网地址（仅允许 10/172.16-31/192.168）
-    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-        if (preg_match('/^10\./', $host)) return true;
-        if (preg_match('/^192\.168\./', $host)) return true;
-        if (preg_match('/^172\.(1[6-9]|2\d|3[0-1])\./', $host)) return true;
-        return false;
-    }
-
-    // IPv6 场景暂不允许作为 proxy_target（避免边界复杂度）
-    return false;
 }
 
 // ============================================================

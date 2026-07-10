@@ -1,5 +1,6 @@
 import { test, expect } from '../../helpers/fixtures';
 import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
+import { runDockerPhpInline } from '../../helpers/cli';
 
 async function readSessionCookie(page: Parameters<typeof attachClientErrorTracking>[0]) {
   const cookies = await page.context().cookies();
@@ -16,6 +17,7 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
     ],
     ignoredFailedRequests: [
       /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+      /GET .*\/admin\/index\.php :: net::ERR_ABORTED/,
     ],
   });
 
@@ -47,6 +49,7 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
     ],
     ignoredFailedRequests: [
       /GET .*\/admin\/settings_ajax\.php\?action=nginx_sudo :: net::ERR_ABORTED/,
+      /GET .*\/admin\/index\.php :: net::ERR_ABORTED/,
     ],
   });
 
@@ -63,17 +66,19 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
 
   await ipContext.close();
 
-  const resetContext = await browser.newContext({ baseURL: 'http://127.0.0.1:58080' });
-  const resetPage = await resetContext.newPage();
-  await loginAsDevAdmin(resetPage);
-  await resetPage.goto('/admin/settings.php');
-  await resetPage.locator('select[name="cookie_secure"]').selectOption(originalPolicy);
-  await resetPage.locator('input[name="cookie_domain"]').fill(originalDomain);
-  await resetPage.getByRole('button', { name: /保存设置/ }).click();
-  await expect(resetPage.locator('body')).toContainText('设置已保存');
+  const restore = runDockerPhpInline(
+    [
+      '$file="/var/www/nav/data/config.json";',
+      '$cfg=file_exists($file)?(json_decode(file_get_contents($file), true)?:[]):[];',
+      '$cfg["cookie_secure"]=$argv[1];',
+      '$cfg["cookie_domain"]=$argv[2];',
+      'file_put_contents($file, json_encode($cfg, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES), LOCK_EX);',
+    ].join(' '),
+    [originalPolicy, originalDomain]
+  );
+  expect(restore.code, restore.output).toBe(0);
 
   await tracker.assertNoClientErrors();
   await ipTracker.assertNoClientErrors();
 
-  await resetContext.close();
 });

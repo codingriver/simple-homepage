@@ -7,6 +7,12 @@ import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 const scheduledTasksFile = path.resolve(__dirname, '../../../data/scheduled_tasks.json');
 const containerScheduledTasksFile = '/var/www/nav/data/scheduled_tasks.json';
 
+async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
+  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  await page.locator('#task-modal button[form="task-form"]').click({ force: true });
+  await navPromise;
+}
+
 test('scheduled tasks advanced cases normalize invalid pages and keep system dispatchers guarded', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
     ignoredMessages: [
@@ -23,7 +29,7 @@ test('scheduled tasks advanced cases normalize invalid pages and keep system dis
   await page.locator('#fm-name').fill(name);
   await page.locator('#fm-schedule').fill('*/12 * * * *');
   await page.locator('#fm-command').fill('echo scheduled-advanced');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const row = page.locator(`tr:has-text("${name}")`).first();
@@ -47,7 +53,7 @@ test('scheduled tasks advanced cases normalize invalid pages and keep system dis
   expect(pageLarge.status()).toBe(200);
   const pageLargePayload = await pageLarge.json();
   expect(pageLargePayload.page).toBeGreaterThanOrEqual(1);
-  expect(pageLargePayload.pages).toBeGreaterThanOrEqual(0);
+  expect(pageLargePayload.total_pages ?? pageLargePayload.pages).toBeGreaterThanOrEqual(0);
 
   const missingTask = await page.request.get('http://127.0.0.1:58080/admin/api/task_log.php?id=missing-task-id&page=1');
   expect(missingTask.status()).toBe(200);
@@ -74,14 +80,14 @@ test('scheduled tasks default to newest-first order by creation time', async ({ 
   await page.locator('#fm-name').fill(olderName);
   await page.locator('#fm-schedule').fill('*/17 * * * *');
   await page.locator('#fm-command').fill('echo older-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   await page.getByRole('button', { name: /新建任务/ }).click();
   await page.locator('#fm-name').fill(newerName);
   await page.locator('#fm-schedule').fill('*/19 * * * *');
   await page.locator('#fm-command').fill('echo newer-task');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const firstRowText = await page.locator('#scheduled-tab-panel-tasks tbody tr').first().textContent();
@@ -107,7 +113,7 @@ test('scheduled tasks refresh running state per row without full page reload', a
   await page.locator('#fm-name').fill(name);
   await page.locator('#fm-schedule').fill('*/11 * * * *');
   await page.locator('#fm-command').fill('echo polling-start\nsleep 3\necho polling-end');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const rowSelector = `tr[data-task-row]:has-text("${name}")`;
@@ -153,7 +159,7 @@ test('scheduled tasks auto-correct stale running state when no active lock exist
   await page.locator('#fm-name').fill(name);
   await page.locator('#fm-schedule').fill('*/13 * * * *');
   await page.locator('#fm-command').fill('echo stale-running-fix');
-  await page.locator('#task-form').getByRole('button', { name: /保存/ }).click({ force: true });
+  await saveTaskModal(page);
   await expect(page.locator('body')).toContainText(/已保存并更新 crontab|已保存/);
 
   const row = page.locator(`tr[data-task-row]:has-text("${name}")`).first();

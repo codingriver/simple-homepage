@@ -1,5 +1,5 @@
 import { test, expect } from '../../helpers/fixtures';
-import { attachClientErrorTracking, clickAdminNav, loginAsDevAdmin, submitVisibleModal } from '../../helpers/auth';
+import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 
 test('admin dashboard stat cards reflect created data and quick actions work', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
@@ -13,8 +13,6 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
     ],
   });
   const ts = Date.now();
-  const gid = `dash-group-${ts}`;
-  const sid = `dash-site-${ts}`;
   const regularUser = `regular_${ts}`;
 
   await loginAsDevAdmin(page);
@@ -22,38 +20,26 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
   // Get baseline stats
   await page.goto('/admin/index.php');
   await expect(page.locator('.stat-grid')).toBeVisible();
-  const baseSiteCount = parseInt(await page.locator('.stat-card:has-text("站点数量") .stat-val').textContent() || '0', 10);
-  const baseGroupCount = parseInt(await page.locator('.stat-card:has-text("分组数量") .stat-val').textContent() || '0', 10);
   const baseUserCount = parseInt(await page.locator('.stat-card:has-text("账户数量") .stat-val').textContent() || '0', 10);
+  const baseAdminCount = parseInt(await page.locator('.stat-card:has-text("管理员数量") .stat-val').textContent() || '0', 10);
   const baseBackupCount = parseInt(await page.locator('.stat-card:has-text("备份记录") .stat-val').textContent() || '0', 10);
-
-  // Create a group
-  await clickAdminNav(page, /分组管理/);
-  await page.getByRole('button', { name: /添加分组/ }).click();
-  await page.locator('#fi_id').fill(gid);
-  await page.locator('#fi_name').fill(`仪表分组 ${ts}`);
-  await page.locator('#fi_auth').selectOption('0');
-  await submitVisibleModal(page);
-
-  // Create a site
-  await clickAdminNav(page, /站点管理/);
-  await page.getByRole('button', { name: /添加站点/ }).click();
-  await page.locator('#fi_sid').fill(sid);
-  await page.locator('#fi_name').fill(`仪表站点 ${ts}`);
-  await page.locator('#fi_gid').selectOption(gid);
-  await page.locator('#fi_type').selectOption('external');
-  await page.locator('#fi_url').fill('https://example.com/dash');
-  await submitVisibleModal(page);
 
   // Create a backup
   await page.goto('/admin/backups.php');
+  const baselineFiles = new Set(
+    await page.locator('input[name="filename"]').evaluateAll((inputs) =>
+      inputs.map((input) => (input as HTMLInputElement).value)
+    )
+  );
   await page.getByRole('button', { name: /立即备份/ }).click();
   await expect(page.locator('body')).toContainText('备份已创建');
+  const backupFilesAfterCreate = await page.locator('input[name="filename"]').evaluateAll((inputs) =>
+    inputs.map((input) => (input as HTMLInputElement).value)
+  );
+  const createdBackup = backupFilesAfterCreate.find((filename) => !baselineFiles.has(filename)) ?? backupFilesAfterCreate[0];
 
-  // Verify stats increased
+  // Verify backup stats increased
   await page.goto('/admin/index.php');
-  await expect(page.locator('.stat-card:has-text("站点数量") .stat-val')).toHaveText(String(baseSiteCount + 1));
-  await expect(page.locator('.stat-card:has-text("分组数量") .stat-val')).toHaveText(String(baseGroupCount + 1));
   await expect(page.locator('.stat-card:has-text("备份记录") .stat-val')).toHaveText(String(baseBackupCount + 1));
 
   // Create a regular user
@@ -66,15 +52,16 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
 
   await page.goto('/admin/index.php');
   await expect(page.locator('.stat-card:has-text("账户数量") .stat-val')).toHaveText(String(baseUserCount + 1));
+  await expect(page.locator('.stat-card:has-text("管理员数量") .stat-val')).toHaveText(String(baseAdminCount));
 
   // Delete backup and verify count decreased
   await page.goto('/admin/backups.php');
-  await expect.poll(() => page.locator('table tbody tr:has(td)').count()).toBeGreaterThan(0);
-  const backupRow = page.locator('table tbody tr:has(td)').first();
-  const backupFile = await backupRow.locator('td').first().textContent() || '';
-  // Extract filename from the row if possible, otherwise just delete the first one
-  page.once('dialog', (dialog) => dialog.accept());
+  const backupRow = page.locator(`tr:has(input[name="filename"][value="${createdBackup}"])`).first();
+  await expect(backupRow).toBeVisible();
   await backupRow.getByRole('button', { name: /删除/ }).click();
+  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
+  await page.locator('#nav-confirm-ok').click();
+  await page.waitForLoadState('domcontentloaded');
 
   await page.goto('/admin/index.php');
   await expect(page.locator('.stat-card:has-text("备份记录") .stat-val')).toHaveText(String(baseBackupCount));
@@ -83,14 +70,6 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
   await page.goto('/admin/index.php');
   await expect(page.locator('.quick-actions')).toBeVisible();
 
-  await page.locator('.quick-actions').getByRole('link', { name: /添加站点/ }).click();
-  await expect(page).toHaveURL(/admin\/sites\.php/);
-
-  await page.goto('/admin/index.php');
-  await page.locator('.quick-actions').getByRole('link', { name: /添加分组/ }).click();
-  await expect(page).toHaveURL(/admin\/groups\.php/);
-
-  await page.goto('/admin/index.php');
   await page.locator('.quick-actions').getByRole('link', { name: /系统设置/ }).click();
   await expect(page).toHaveURL(/admin\/settings\.php/);
 
@@ -99,8 +78,8 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
   await expect(page).toHaveURL(/admin\/backups\.php/);
 
   await page.goto('/admin/index.php');
-  const viewFrontLink = page.locator('.quick-actions').getByRole('link', { name: /查看前台/ });
-  await expect(viewFrontLink).toHaveAttribute('href', '/index.php');
+  await page.locator('.quick-actions').getByRole('link', { name: /计划任务/ }).click();
+  await expect(page).toHaveURL(/admin\/scheduled_tasks\.php/);
 
   // Test non-admin user cannot access dashboard
   const regularContext = await page.context().browser()?.newContext();

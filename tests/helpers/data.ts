@@ -27,10 +27,6 @@ export async function resetVolatileAppData(): Promise<void> {
     const configPath = path.join(dataDir, 'config.json');
     const configRaw = await fs.readFile(configPath, 'utf8').catch(() => '{}');
     const config = JSON.parse(configRaw);
-    delete config.card_size;
-    delete config.card_height;
-    delete config.card_size_custom;
-    delete config.card_height_custom;
     const configContent = JSON.stringify(config, null, 2);
     await fs.writeFile(configPath, configContent, { mode: 0o644 });
     writeContainerFile('/var/www/nav/data/config.json', configContent);
@@ -98,10 +94,6 @@ export async function resetVolatileAppData(): Promise<void> {
     { file: 'ip_locks.json.lock', content: '' },
     { file: 'logs/auth.log', content: '' },
     { file: 'logs/audit.log', content: '' },
-    { file: 'logs/ssh_audit.log', content: '' },
-    { file: 'logs/share_service_audit.log', content: '' },
-
-    { file: 'logs/ssh_manager_audit.log', content: '' },
     { file: 'logs/dns.log', content: '' },
     { file: 'logs/dns_python.log', content: '' },
     { file: 'logs/task_dispatch.log', content: '' },

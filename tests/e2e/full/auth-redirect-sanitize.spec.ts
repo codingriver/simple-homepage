@@ -6,6 +6,10 @@ test('login redirect sanitizes external absolute urls down to safe local path', 
     ignoredMessages: [
       /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/,
       /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/,
+      /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/,
+    ],
+    ignoredFailedRequests: [
+      /GET .*\/shared\/admin\.css.* :: net::ERR_ABORTED/,
     ],
   });
 

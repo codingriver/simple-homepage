@@ -29,8 +29,8 @@
 | `PGID` | 空 | 可选；显式指定容器运行用户 GID |
 | `ADMIN` | 空 | 首次启动时自动创建管理员用户名 |
 | `PASSWORD` | 空 | 首次启动时自动创建管理员密码 |
-| `NAME` | `导航中心` | 首次启动时站点名称 |
-| `DOMAIN` | 空 | 首次启动时导航站域名 |
+| `NAME` | `后台中心` | 首次启动时后台名称 |
+| `DOMAIN` | 空 | 首次启动时后台域名 |
 | `NAV_DEV_MODE` | 空 | 开发模式，会启用内置测试管理员 |
 | `NAV_REQUEST_TIMING` | `1` | 设为 `0` 可关闭请求耗时日志 |
 | `AUTH_SECRET_KEY` | 空 | 可显式指定认证密钥 |
@@ -50,22 +50,26 @@ data/
 ├── .installed
 ├── auth_secret.key
 ├── config.json
-├── sites.json
 ├── users.json
 ├── scheduled_tasks.json
 ├── dns_config.json
+├── ddns_tasks.json
+├── domain_expiry.json
+├── notifications.json
 ├── ip_locks.json
+├── sessions.json
 ├── backups/
 ├── logs/
 ├── tasks/
-├── bg/
-└── favicon_cache/
+├── runtime/
+├── nginx/
+├── php-fpm/
+└── php/
 ```
 
 说明：
 
 - `users.json` 保存用户
-- `sites.json` 保存站点和分组
 - `scheduled_tasks.json` 保存计划任务定义和运行结果
 - `logs/` 保存各类日志
 - `tasks/` 是计划任务共享工作目录，任务脚本会持久保存为 `data/tasks/<脚本文件名>.sh`
@@ -112,7 +116,7 @@ docker exec simple-homepage php /var/www/nav/manage_users.php del admin
 docker exec simple-homepage php /var/www/nav/manage_users.php reset
 ```
 
-`reset` 会清空安装状态、站点配置、登录锁定和反代配置，并重新进入安装向导。备份文件会保留。
+`reset` 会清空安装状态、登录锁定等账户数据，并重新进入安装向导。备份文件会保留。
 
 ## 3. 本地 Docker 开发
 
@@ -206,7 +210,7 @@ docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f lo
 | `ADMIN` | 管理员用户名 |
 | `PASSWORD` | 管理员密码，可留空但不建议 |
 | `NAME` | 站点名称 |
-| `DOMAIN` | 导航站域名 |
+| `DOMAIN` | 后台域名 |
 
 首次访问时会自动创建账户、配置与 `.installed`。
 

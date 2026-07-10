@@ -37,6 +37,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', '任务 ID 仅允许字母数字、下划线、短横线');
             header('Location: scheduled_tasks.php'); exit;
         }
+        if (scheduled_task_is_retired_id($id)) {
+            scheduled_tasks_unlock($lock);
+            flash_set('error', '该任务 ID 已退役，不能重新创建');
+            header('Location: scheduled_tasks.php'); exit;
+        }
         if ($name === '') {
             scheduled_tasks_unlock($lock);
             flash_set('error', '请填写任务名称');
@@ -45,11 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (cron_is_ddns_dispatcher_id($id) || $id === DOMAIN_EXPIRY_SYNC_TASK_ID) {
             scheduled_tasks_unlock($lock);
             flash_set('error', '系统调度器由系统自动维护，不能手动编辑');
-            header('Location: scheduled_tasks.php'); exit;
-        }
-        if (cron_is_favicon_sync_id($id)) {
-            scheduled_tasks_unlock($lock);
-            flash_set('error', '站点图标预抓取任务由系统自动维护，不能手动编辑');
             header('Location: scheduled_tasks.php'); exit;
         }
         if (!cron_validate_schedule($sched)) {
@@ -110,10 +110,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', '系统调度器由系统自动维护，不能手动删除');
             header('Location: scheduled_tasks.php'); exit;
         }
-        if (cron_is_favicon_sync_id($id)) {
-            flash_set('error', '站点图标预抓取任务由系统自动维护，不能手动删除');
-            header('Location: scheduled_tasks.php'); exit;
-        }
         $data = load_scheduled_tasks();
         $deleted = null;
         foreach ($data['tasks'] ?? [] as $row) {
@@ -171,10 +167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash_set('error', 'DDNS 调度器由系统自动维护，不能手动启停');
             header('Location: scheduled_tasks.php'); exit;
         }
-        if (cron_is_favicon_sync_id($id)) {
-            flash_set('error', '站点图标预抓取任务由系统自动维护，请通过「编辑周期」修改启用状态');
-            header('Location: scheduled_tasks.php'); exit;
-        }
         $new = task_toggle_enabled($id);
         flash_set('success', $new === null ? '任务不存在' : ($new ? '已启用' : '已禁用'));
         header('Location: scheduled_tasks.php'); exit;
@@ -213,12 +205,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['ok' => false, 'msg' => 'DDNS 调度器由系统自动维护，不能手动编辑'], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        if (cron_is_favicon_sync_id($id)) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['ok' => false, 'msg' => '站点图标预抓取任务由系统自动维护，不能手动编辑'], JSON_UNESCAPED_UNICODE);
-            exit;
-        }
-
         $lock = scheduled_tasks_lock_exclusive();
         $data = load_scheduled_tasks();
         $task = null;
@@ -251,40 +237,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    /* ------ 保存系统任务的执行周期（仅 schedule / enabled） ------ */
-    if ($action === 'task_save_schedule') {
-        $id = trim((string)($_POST['id'] ?? ''));
-        if (!cron_is_favicon_sync_id($id)) {
-            flash_set('error', '该任务不支持手动修改执行周期');
-            header('Location: scheduled_tasks.php'); exit;
-        }
-        $sched = trim((string)($_POST['schedule'] ?? ''));
-        $en = !empty($_POST['enabled']);
-        if (!cron_validate_schedule($sched)) {
-            flash_set('error', '执行周期格式无效：' . htmlspecialchars($sched) . ' 不是合法的 5 段 Cron 表达式');
-            header('Location: scheduled_tasks.php'); exit;
-        }
-        $data = load_scheduled_tasks();
-        $found = false;
-        foreach ($data['tasks'] as &$t) {
-            if (($t['id'] ?? '') === $id) {
-                $t['schedule'] = $sched;
-                $t['enabled'] = $en;
-                $found = true;
-                break;
-            }
-        }
-        unset($t);
-        if (!$found) {
-            flash_set('error', '任务不存在');
-            header('Location: scheduled_tasks.php'); exit;
-        }
-        save_scheduled_tasks($data);
-        $r = cron_regenerate();
-        flash_set($r['ok'] ? 'success' : 'error', $r['ok'] ? '已更新执行周期并同步 crontab' : $r['msg']);
-        header('Location: scheduled_tasks.php'); exit;
-    }
-
 }
 
 $page_title = '计划任务';
@@ -292,8 +244,8 @@ require_once __DIR__ . '/shared/header.php';
 require_once __DIR__ . '/shared/cron_lib.php';
 require_once __DIR__ . '/shared/ddns_lib.php';
 
+scheduled_tasks_prune_retired();
 $ddns_dispatcher = cron_sync_ddns_dispatcher_task();
-cron_sync_favicon_task();
 $tasks = task_sort_for_display(load_scheduled_tasks()['tasks'] ?? []);
 foreach ($tasks as &$_t) {
     $_t['runtime_type'] = task_runtime_from_task($_t);
@@ -576,14 +528,7 @@ $CSRF = csrf_field();
             onclick='openTaskDescModal(<?= htmlspecialchars(json_encode($t, JSON_UNESCAPED_UNICODE|JSON_HEX_APOS|JSON_HEX_TAG), ENT_QUOTES) ?>)'>
             ℹ 说明
           </button>
-          <?php if (cron_is_favicon_sync_id($t['id'] ?? '')): ?>
-            <button type="button" class="btn btn-sm btn-secondary"
-              onclick='openScheduleModal(<?= htmlspecialchars(json_encode($t, JSON_UNESCAPED_UNICODE|JSON_HEX_APOS|JSON_HEX_TAG), ENT_QUOTES) ?>)'>
-              ✏ 编辑周期
-            </button>
-          <?php else: ?>
-            <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
-          <?php endif; ?>
+          <button type="button" class="btn btn-sm btn-secondary" disabled style="opacity:.55;cursor:not-allowed">✏ 系统维护</button>
           <?php if (!empty($t['_running'])): ?>
           <button type="button" class="btn btn-sm btn-danger" data-task-stop-btn data-task-id="<?= htmlspecialchars($t['id'] ?? '') ?>" onclick="stopTaskAjax(this.dataset.taskId, this)">⏹ 停止</button>
           <?php endif; ?>
@@ -699,67 +644,6 @@ $CSRF = csrf_field();
 </div>
 
 <!-- ===================================================
-     MODAL：编辑系统任务周期（仅 schedule + enabled）
-===================================================== -->
-<div id="schedule-modal" style="
-  display:none;position:fixed;inset:0;z-index:800;
-  background:rgba(0,0,0,.65);backdrop-filter:blur(4px);
-  align-items:center;justify-content:center;
-">
-  <div style="
-    background:var(--sf);border:1px solid var(--bd2);
-    border-radius:var(--r2);width:min(520px,96vw);
-    box-shadow:0 24px 64px rgba(0,0,0,.5);
-    display:flex;flex-direction:column;max-height:90vh;
-  ">
-    <!-- header -->
-    <div style="padding:10px 16px 8px;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between">
-      <span id="sch-modal-title" style="font-weight:700;font-size:15px;font-family:var(--mono);color:var(--ac)">编辑执行周期</span>
-      <button onclick="closeScheduleModal()" style="background:none;border:none;color:var(--tm);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px">✕</button>
-    </div>
-    <!-- body -->
-    <div style="padding:14px 16px;overflow-y:auto;flex:1">
-      <form method="POST" id="schedule-form">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="task_save_schedule">
-        <input type="hidden" name="id" id="sch-fm-id" value="">
-
-        <div class="form-group" style="margin-bottom:10px">
-          <label>任务名称</label>
-          <input type="text" id="sch-fm-name" readonly style="font-family:var(--mono);background:rgba(255,255,255,.03);color:var(--tm)">
-        </div>
-
-        <div class="form-group" style="margin-bottom:10px">
-          <label>Cron 表达式 *（五段）</label>
-          <input type="text" name="schedule" id="sch-fm-schedule" required
-            placeholder="*/5 * * * *"
-            style="font-family:var(--mono)">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px">
-            <span class="form-hint" id="sch-fm-next-tip" style="color:var(--ac);font-family:var(--mono);margin:0"></span>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
-              font-size:13px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--tx);white-space:nowrap;flex-shrink:0">
-              <input type="checkbox" name="enabled" value="1" id="sch-fm-enabled"
-                style="width:16px;height:16px;accent-color:var(--ac)">
-              启用此任务
-            </label>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label>任务说明</label>
-          <div id="sch-fm-desc" style="font-size:12px;color:var(--tm);line-height:1.6;padding:8px;border:1px solid var(--bd);border-radius:8px;background:rgba(255,255,255,.02)"></div>
-        </div>
-      </form>
-    </div>
-    <!-- footer -->
-    <div style="padding:10px 16px;border-top:1px solid var(--bd);display:flex;justify-content:flex-end;gap:10px">
-      <button type="button" class="btn btn-secondary" onclick="closeScheduleModal()">关闭</button>
-      <button type="submit" form="schedule-form" class="btn btn-primary">💾 保存</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===================================================
      MODAL：系统任务说明
 ===================================================== -->
 <div id="desc-modal" style="
@@ -848,56 +732,6 @@ function openTaskDescModal(task) {
 function closeTaskDescModal() {
   document.getElementById('desc-modal').style.display = 'none';
 }
-
-function openScheduleModal(task) {
-  var m = document.getElementById('schedule-modal');
-  document.getElementById('sch-fm-id').value = task.id || '';
-  document.getElementById('sch-fm-name').value = task.name || '';
-  document.getElementById('sch-fm-schedule').value = task.schedule || '*/5 * * * *';
-  document.getElementById('sch-fm-enabled').checked = !!task.enabled;
-  document.getElementById('sch-fm-desc').textContent = task.description || '由系统自动维护的任务，仅可修改执行周期与启用状态。';
-  updateScheduleNextTip();
-  m.style.display = 'flex';
-  setTimeout(function(){ document.getElementById('sch-fm-schedule').focus(); }, 80);
-}
-function closeScheduleModal() {
-  document.getElementById('schedule-modal').style.display = 'none';
-}
-
-function updateScheduleNextTip() {
-  var tip = document.getElementById('sch-fm-next-tip');
-  var v = (document.getElementById('sch-fm-schedule').value || '').trim();
-  if (v === '') {
-    tip.textContent = '';
-    return;
-  }
-  var result = validateCronSchedule(v);
-  if (result.ok) {
-    tip.textContent = '✓ Cron 格式合法';
-    tip.style.color = 'var(--ac)';
-  } else {
-    tip.textContent = '⚠ ' + result.msg;
-    tip.style.color = 'var(--yellow)';
-  }
-}
-
-document.addEventListener('DOMContentLoaded', function(){
-  var schInp = document.getElementById('sch-fm-schedule');
-  if (schInp) {
-    schInp.addEventListener('input', updateScheduleNextTip);
-    schInp.addEventListener('blur', function() {
-      var v = (schInp.value || '').trim();
-      if (!v) return;
-      var result = validateCronSchedule(v);
-      if (!result.ok) {
-        showToast('Cron 表达式无效：' + result.msg, 'error');
-        schInp.style.borderColor = 'var(--red)';
-      } else {
-        schInp.style.borderColor = '';
-      }
-    });
-  }
-});
 
 function switchScheduledTab(tab) {
   scheduledTabState.active = tab === 'ddns' ? 'ddns' : 'tasks';

@@ -56,6 +56,33 @@ final class SharedFunctionsTest extends TestCase
         $this->assertArrayNotHasKey('sites', $payload);
     }
 
+    public function testBackupExportAndRestoreDiscardRetiredProxyConfig(): void
+    {
+        file_put_contents(CONFIG_FILE, json_encode([
+            'site_name' => '后台中心',
+            'proxy_params_mode' => 'full',
+            'nginx_last_applied' => 123,
+            'nginx_last_applied_proxy_state' => ['sites' => ['legacy' => []]],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        $payload = backup_collect_payload('export');
+        $this->assertArrayNotHasKey('proxy_params_mode', $payload['config']);
+        $this->assertArrayNotHasKey('nginx_last_applied', $payload['config']);
+        $this->assertArrayNotHasKey('nginx_last_applied_proxy_state', $payload['config']);
+
+        backup_apply_restored_sections([
+            'config' => [
+                'site_name' => '恢复后的后台',
+                'proxy_params_mode' => 'simple',
+                'nginx_last_applied_proxy_state' => ['sites' => ['legacy' => []]],
+            ],
+        ]);
+        $restored = json_decode((string) file_get_contents(CONFIG_FILE), true);
+        $this->assertSame('恢复后的后台', $restored['site_name']);
+        $this->assertArrayNotHasKey('proxy_params_mode', $restored);
+        $this->assertArrayNotHasKey('nginx_last_applied_proxy_state', $restored);
+    }
+
     public function testBackupCollectPayloadAcceptsTaskRuntimeStateArray(): void
     {
         file_put_contents(DATA_DIR . '/scheduled_tasks.json', json_encode([
