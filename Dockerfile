@@ -16,7 +16,7 @@ FROM php:8.2-fpm-alpine
 # fileinfo 扩展依赖 libmagic（file 提供运行时库 + file-dev 开发头文件）
 RUN apk add --no-cache \
     nginx \
-    supervisor \
+    runit \
     shadow \
     tzdata \
     sudo \
@@ -55,10 +55,11 @@ COPY docker/nginx.conf       /etc/nginx/nginx.conf
 COPY nginx-conf/docker-site.conf  /etc/nginx/http.d/nav.conf
 COPY docker/php-fpm.conf     /usr/local/etc/php-fpm.d/nav.conf
 COPY docker/php-custom.ini   /usr/local/etc/php/conf.d/99-nav-custom.ini
-COPY docker/supervisord.conf /etc/supervisord.conf
+COPY docker/runit/           /etc/service/
 COPY docker/entrypoint.sh    /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh && \
+    chmod 755 /etc/service/*/run && \
     # Nginx 主配置需对运行用户可写（后台编辑需要）
     chown root:navwww /etc/nginx/nginx.conf && \
     chmod 664 /etc/nginx/nginx.conf
@@ -93,9 +94,8 @@ RUN mkdir -p \
     /run/nginx && \
     # 删除默认站点配置（会拦截所有请求返回 404）
     rm -f /etc/nginx/http.d/default.conf && \
-    # 配置 sudo 白名单，允许 navwww 执行 nginx -t 和 nginx -s reload
+    # 配置 sudo 白名单，允许 navwww 执行 nginx -t 和 crontab
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t' > /etc/sudoers.d/nav-nginx && \
-    echo 'navwww ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload' >> /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: /usr/bin/crontab' >> /etc/sudoers.d/nav-nginx && \
     echo 'navwww ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/nav-runtime && \
     chmod 440 /etc/sudoers.d/nav-nginx && \
@@ -120,4 +120,4 @@ VOLUME ["/var/www/nav/data"]
 EXPOSE 58080
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+CMD ["/usr/sbin/runsvdir", "-P", "/etc/service"]

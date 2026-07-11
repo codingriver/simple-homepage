@@ -129,9 +129,9 @@ fi
 # ── 确保应用代码可读（开发模式会把宿主机整个项目挂进来，宿主机若是 700/600 权限会导致 PHP 直接 403）──
 # 仅放宽代码目录读取权限；data 目录权限改为显式可写性检查，不再递归 chown/chmod
 if [ -d /var/www/nav ]; then
-    chmod 755 /var/www/nav || true
+    chmod 755 /var/www/nav 2>/dev/null || true
     for d in /var/www/nav/public /var/www/nav/shared /var/www/nav/admin /var/www/nav/cli /var/www/nav/docker /var/www/nav/python /var/www/nav/nginx-conf; do
-        [ -d "$d" ] && chmod -R a+rX "$d" || true
+        [ -d "$d" ] && chmod -R a+rX "$d" 2>/dev/null || true
     done
 fi
 
@@ -316,47 +316,9 @@ fi
 rm -f /etc/nginx/http.d/default.conf
 rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
-# ── 创建 nginx 操作包装脚本（供 PHP 后台调用）──
-printf '#!/bin/sh\nif [ ! -f /run/nginx/nginx.pid ]; then\n  echo "nginx pid not found"\n  exit 1\nfi\ntouch /tmp/nginx-reload-trigger\n' > /usr/local/bin/nginx-reload
-chmod 755 /usr/local/bin/nginx-reload
+# ── 创建 nginx 语法检测包装脚本（供 PHP 后台只读检测）──
 printf '#!/bin/sh\nexec /usr/sbin/nginx -t\n' > /usr/local/bin/nginx-test
 chmod 755 /usr/local/bin/nginx-test
-
-cat >/usr/local/bin/php-fpm-reload <<'RELOAD_EOF'
-#!/bin/sh
-# 尝试 graceful reload PHP-FPM
-
-# 方法1: supervisorctl signal (graceful, supervisor 4.0+)
-if supervisorctl signal USR2 php-fpm >/dev/null 2>&1; then
-    exit 0
-fi
-
-# 方法2: 通过 PID 文件发送 USR2
-pidfile="/run/php-fpm.pid"
-if [ -f "$pidfile" ]; then
-    if kill -USR2 "$(cat "$pidfile")" 2>/dev/null; then
-        exit 0
-    fi
-fi
-
-# 方法3: 通过 /proc 查找 master PID
-master_pid=""
-for p in /proc/[0-9]*; do
-    if [ -f "$p/cmdline" ] && grep -q "php-fpm: master process" "$p/cmdline" 2>/dev/null; then
-        master_pid=$(basename "$p")
-        break
-    fi
-done
-if [ -n "$master_pid" ]; then
-    if kill -USR2 "$master_pid" 2>/dev/null; then
-        exit 0
-    fi
-fi
-
-echo "php-fpm reload failed: unable to find process or send signal" >&2
-exit 1
-RELOAD_EOF
-chmod 755 /usr/local/bin/php-fpm-reload
 cat >/usr/local/bin/nav-task-compat <<'EOF'
 #!/bin/sh
 set -eu

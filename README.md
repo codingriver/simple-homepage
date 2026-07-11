@@ -12,7 +12,7 @@
 - 🔄 DDNS 动态解析（多 IP 来源 + fallback）
 - 📅 域名有效期监控（RDAP 查询 + 本地缓存）
 - ⏰ 计划任务（带日志、定时执行、模板）
-- 🛠️ Nginx 配置在线编辑（语法校验 + 兼容回滚）
+- 🛠️ 运行配置查看（Nginx / PHP-FPM / PHP 只读查看 + 语法检测）
 - 💾 配置备份与恢复 + 自动备份
 - 🔑 API Token 管理（外部调用）
 - 🔗 Webhook 通知（Telegram / 飞书 / 钉钉 / 自定义）
@@ -68,7 +68,7 @@
 - **DDNS 管理**：动态解析任务、自动同步、多 IP 源
 - **域名有效期**：自动收集 DNS Zone / DDNS 根域名，也可手动添加，定时刷新注册到期时间
 - **计划任务**：脚本编辑、定时执行、运行日志、模板
-- **Nginx 在线编辑**：主配置 / HTTP 模块 / PHP-FPM / PHP 自定义参数
+- **运行配置查看**：Nginx 主配置 / HTTP 模块 / PHP-FPM / PHP 自定义参数只读查看
 - **备份与恢复**：手动 / 自动备份、导出导入、保留策略
 - **API Token**：发放、撤销、权限范围
 - **系统设置**：站点名称、Cookie 策略、Webhook、安全项
@@ -237,14 +237,13 @@ http://192.168.1.10:58080
 4. 可勾选执行前安装依赖：Node.js 使用当前任务目录的 `package.json`，Python 使用当前任务目录的 `requirements.txt`
 5. 支持手动 **立即执行**，并实时查看输出
 
-### Nginx 在线编辑
+### 运行配置查看
 
-进入 **Nginx 管理**：
+进入 **运行配置**：
 
-- 可编辑 Nginx 主配置 / HTTP 模块 / PHP-FPM 池 / PHP 自定义 ini
-- 保存前会自动执行语法校验（`nginx -t`）；失败则拒绝写入
-- 成功保存后可一键 Reload
-- 若 Reload 失败，可使用 **兼容模式** 一键回滚到镜像内置默认配置
+- 可查看 Nginx 主配置 / HTTP 模块 / PHP-FPM 池 / PHP 自定义 ini
+- 页面会展示 `nginx -t` 与 `php-fpm -t` 的当前检测结果
+- 后台不支持在线保存或 Reload；修改配置后请重启 Docker 容器生效
 
 ### 备份与恢复
 
@@ -370,7 +369,7 @@ data/
 ├── backups/                # 备份快照
 ├── logs/                   # 各类日志
 ├── tasks/                  # 计划任务脚本和日志
-├── nginx/                  # Nginx 在线编辑的配置文件落地
+├── nginx/                  # Nginx 持久化配置（修改后重启容器生效）
 ├── php-fpm/                # PHP-FPM 池配置落地
 ├── php/                    # PHP 自定义参数落地
 └── trash/                  # 回收站
@@ -605,7 +604,7 @@ ports:
    docker exec simple-homepage nginx -t
    ```
 
-3. 如果是后台在线编辑后导致配置损坏，可登录后台 **Nginx 管理** 启用"兼容模式"一键回滚为镜像默认配置。
+3. 如果是持久化配置损坏，请修改 `data/nginx`、`data/php-fpm` 或 `data/php` 下的配置文件，然后重启 Docker 容器。
 
 4. 极端情况下可以重置：
    ```bash

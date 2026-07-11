@@ -22,15 +22,15 @@ if (!$user || ($user['role'] ?? '') !== 'admin') {
 $action = $_GET['action'] ?? '';
 
 if ($action === 'nginx_sudo') {
-    $capability = nginx_reload_capability();
+    $capability = nginx_test_capability();
     echo json_encode([
         'ok' => true,
-        'reload_ok' => $capability['ok'],
-        'sudo_ok' => $capability['ok'] && $capability['method'] === 'sudo',
+        'reload_ok' => false,
+        'sudo_ok' => false,
         'method' => $capability['method'],
-        'message' => $capability['msg'],
+        'message' => '后台不再支持 Nginx Reload。' . $capability['msg'],
         'nginx_bin' => $capability['nginx_bin'],
-        'sudo_hint' => $capability['hint'],
+        'sudo_hint' => '',
         'test_output' => $capability['test_output'],
     ], JSON_UNESCAPED_UNICODE);
     exit;

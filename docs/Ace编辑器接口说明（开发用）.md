@@ -240,25 +240,22 @@ NavAceEditor.open({
 
 ## 六、使用模式：文本编辑器
 
-适用于配置文件编辑、脚本编辑等需要修改保存的场景。
+适用于配置文件查看、脚本编辑等需要长文本展示或修改保存的场景。
 
-### 典型配置（Nginx 配置编辑）
+### 典型配置（Nginx 配置只读查看）
 
 ```javascript
 NavAceEditor.open({
-  title: '编辑 Nginx 配置',
+  title: '查看 Nginx 配置',
   mode: 'nginx',
   value: document.getElementById('nginx-content').value,
+  readOnly: true,
+  confirmOnClose: false,
   wrapMode: true,
   buttons: {
-    left: [
-      { type: 'dirty' },
-      { text: '检查语法', action: 'syntax', bgColor: '#5a6c7d' }
-    ],
+    left: [],
     right: [
-      { text: '关闭', action: 'close' },
-      { text: '保存', action: 'save', bgColor: '#4a9eff' },
-      { text: '保存并 Reload', action: 'save_reload', bgColor: '#3dba6a' }
+      { text: '关闭', action: 'close' }
     ]
   },
   onAction: function(action, value) {
@@ -266,18 +263,35 @@ NavAceEditor.open({
       NavAceEditor.close();
       return;
     }
-    if (action === 'save_reload') {
-      NavConfirm.open({
-        title: '保存并 Reload',
-        message: '确认保存并重新加载 Nginx？',
-        confirmText: '确认',
-        onConfirm: function() {
-          doSave(value, action);
-        }
-      });
+  }
+});
+```
+
+Nginx / PHP-FPM / PHP 运行配置后台仅支持查看和语法检测，不支持在线保存或 Reload；修改配置后需要重启 Docker 容器。
+
+### 典型配置（脚本编辑）
+
+```javascript
+NavAceEditor.open({
+  title: '编辑脚本',
+  mode: 'sh',
+  value: document.getElementById('script-content').value,
+  wrapMode: true,
+  buttons: {
+    left: [
+      { type: 'dirty' }
+    ],
+    right: [
+      { text: '关闭', action: 'close' },
+      { text: '保存', action: 'save', bgColor: '#4a9eff' }
+    ]
+  },
+  onAction: function(action, value) {
+    if (action === 'close') {
+      NavAceEditor.close();
       return;
     }
-    doSave(value, action);
+    doSave(value);
   }
 });
 

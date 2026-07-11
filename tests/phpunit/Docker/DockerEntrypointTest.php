@@ -13,13 +13,25 @@ final class DockerEntrypointTest extends TestCase
         $this->assertTrue(is_executable($path), 'entrypoint.sh should be executable');
     }
 
-    public function testSupervisordConfReferencesAllProcesses(): void
+    public function testRunitServicesReferenceAllProcesses(): void
     {
-        $content = file_get_contents(realpath(__DIR__ . '/../../../docker/supervisord.conf'));
-        $this->assertStringContainsString('php-fpm', $content);
-        $this->assertStringContainsString('nginx', $content);
-        $this->assertStringContainsString('nginx-reload-watcher', $content);
-        $this->assertStringContainsString('cron', $content);
+        $root = realpath(__DIR__ . '/../../../docker/runit');
+        $this->assertIsString($root);
+
+        $services = [
+            'php-fpm' => '/usr/local/sbin/php-fpm --nodaemonize',
+            'nginx' => '/usr/sbin/nginx -g "daemon off;"',
+            'cron' => '/usr/sbin/crond -f',
+        ];
+
+        foreach ($services as $service => $expectedCommand) {
+            $run = $root . '/' . $service . '/run';
+            $this->assertFileExists($run);
+            $this->assertTrue(is_executable($run), $service . ' run script should be executable');
+            $content = file_get_contents($run);
+            $this->assertStringContainsString($expectedCommand, $content);
+            $this->assertStringNotContainsString('nginx-reload-watcher', $content);
+        }
     }
 
     public function testNginxSiteConfContainsNavPortPlaceholder(): void

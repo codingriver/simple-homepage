@@ -37,7 +37,7 @@ $site_name_admin = $cfg_admin['site_name'] ?? '后台中心';
 $nav_items = [
     ['file' => 'index.php',    'icon' => '📊', 'label' => '控制台'],
     ['sep'],
-    ['file' => 'nginx.php',    'icon' => '🧩', 'label' => 'Nginx 管理'],
+    ['file' => 'nginx.php',    'icon' => '🧩', 'label' => '运行配置'],
     ['file' => 'dns.php',      'icon' => '🌐', 'label' => '域名解析'],
     ['file' => 'ddns.php',     'icon' => '📡', 'label' => 'DDNS 动态解析'],
     ['file' => 'domain_expiry.php', 'icon' => '📅', 'label' => '域名有效期'],

@@ -7,7 +7,7 @@
 
 ## 项目概述
 
-**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 域名有效期 / 计划任务 / Nginx 在线编辑 / 备份 / 用户 / API Token / Webhook 等运维能力。
+**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 域名有效期 / 计划任务 / 运行配置查看 / 备份 / 用户 / API Token / Webhook 等运维能力。
 
 > 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/index.php`。
 
@@ -24,7 +24,7 @@
 | **数据存储** | JSON 文件（`data/` 目录），不依赖 MySQL/Redis |
 | **前端** | 原生 HTML/CSS/JS（无 React/Vue/Angular/jQuery 等现代前端框架） |
 | **Web 服务器** | Nginx + PHP-FPM（Unix socket `/run/nginx/php-fpm.sock`） |
-| **进程管理** | Supervisor（容器内同时管理 Nginx、PHP-FPM、Cron、Nginx-Reload-Watcher） |
+| **进程管理** | runit（容器内同时管理 Nginx、PHP-FPM、Cron） |
 | **容器化** | Docker，基于 `php:8.2-fpm-alpine`（Alpine Linux，musl libc），支持 `linux/amd64` 和 `linux/arm64` |
 | **测试** | Playwright 1.54.2（E2E）、PHPUnit 11（单元）、Lighthouse CI 0.15.1（性能） |
 | **包管理** | Composer（PHP）、npm（仅开发依赖） |
@@ -43,9 +43,9 @@
 | `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data`；运行期可透传 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 等出站代理变量 |
 | `phpunit.xml` | PHPUnit 配置：测试套件 `Shared` / `Admin` / `Public` / `Cli` / `Docker`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
-| `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + Supervisor + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
+| `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + runit + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、系统配置持久化、sudo 白名单设置 |
-| `docker/supervisord.conf` | Supervisor 管理 4 个进程：`php-fpm`（priority 5）、`nginx`（priority 10）、`nginx-reload-watcher`（priority 15，监听 `/tmp/nginx-reload-trigger`）、`cron`（priority 20） |
+| `docker/runit/*/run` | runit 服务脚本，管理 `php-fpm`、`nginx`、`cron` 三个常驻进程 |
 | `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
 | `docker/php-fpm.conf` | PHP-FPM 低内存默认池配置：`pm = ondemand`、`pm.max_children = 4`，空闲时不预启动 worker |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；构建期和运行期均支持代理环境变量透传 |
@@ -78,13 +78,13 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
   domain_expiry.php / domain_expiry_ajax.php # 域名注册有效期监控（RDAP 查询 + 本地缓存）
   scheduled_tasks.php  # 计划任务（含日志）
   runtime_env.php / runtime_env_ajax.php # 运行环境管理（Node.js/npm 检测、apk 安装、musl 多版本安装/切换、实时进度轮询）
-  nginx.php            # Nginx / PHP-FPM / PHP 自定义参数 在线编辑器（语法校验 + 兼容回滚）
+  nginx.php            # Nginx / PHP-FPM / PHP 自定义参数只读查看（修改后需重启 Docker 生效）
   backups.php          # 备份创建 / 恢复 / 下载 / 删除
   logs.php / logs_api.php  # 日志中心
   debug.php            # 调试工具
   api/                 # 后台专用 API（task_status / task_log 等）
   shared/              # 后台共享库
-    functions.php      # 主函数库：配置读写、CSRF、备份恢复、Nginx 在线编辑、审计日志、回收站、Webhook
+    functions.php      # 主函数库：配置读写、CSRF、备份恢复、运行配置查看、审计日志、回收站、Webhook
     header.php         # 后台页面模板头（权限校验、侧边栏、Flash Toast）
     footer.php         # 页面模板尾
     admin.css          # 后台暗色主题
@@ -107,7 +107,7 @@ python/          # Python 辅助脚本
   dns_core.py    # DNS 核心逻辑
 
 docker/          # Docker 构建配置
-  nginx.conf / docker-site.conf / php-fpm.conf / php-custom.ini / supervisord.conf / entrypoint.sh
+  nginx.conf / docker-site.conf / php-fpm.conf / php-custom.ini / entrypoint.sh / runit/
 
 nginx-conf/      # Nginx 站点配置（仅 admin 后台）
   docker-site.conf
@@ -276,7 +276,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - `auth_request` 失败必须写入 `AUTH_DENY` 登录日志并包含 `reason=...`，便于区分 `no_cookie`、`malformed`、`bad_signature`、`expired`、`session_missing`、`blocked_ip`、`blocked_domain` 等原因。
 - `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免后台静态资源并发请求时把有效登录误判为 `session_missing`。
 - 面板可以部署在宿主机 Nginx/Caddy 等外层反向代理之后；必须保留 `X-Forwarded-Proto` 与真实客户端 IP 的识别逻辑。该能力仅用于部署适配，不包含站点代理生成或管理功能。
-- Nginx 在线编辑仅管理主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数；不得重新引入站点代理模板、`nav-proxy*.conf` 或代理目标诊断逻辑。
+- 后台运行配置页仅支持查看 Nginx 主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数，不支持保存、Reload 或恢复配置。修改配置必须编辑挂载文件或 `data/nginx` / `data/php-fpm` / `data/php` 下的持久化配置后重启 Docker 容器生效；不得重新引入站点代理模板、`nav-proxy*.conf` 或代理目标诊断逻辑。
 - 默认容器配置按低内存自托管场景优化：`docker/nginx.conf` 固定 `worker_processes 1`，`docker/php-fpm.conf` 使用 `pm = ondemand` 且 `pm.max_children = 4`。若修改这些默认值，需同步考虑小型 NAS / 软路由 / VPS 的空闲内存占用。
 
 ### 9. 计划任务健壮性
@@ -325,7 +325,6 @@ if (session_status() === PHP_SESSION_NONE) session_start();
         right: [
           { text: '关闭', action: 'close' },
           { text: '保存', action: 'save' },
-          { text: '保存并 Reload', action: 'save_reload' },
           { text: '删除', action: 'delete', visible: canDelete }
         ]
       },
@@ -347,10 +346,10 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - **样式规则**：工具栏按钮统一使用 `.nav-ace-toolbar-btn` 基础样式（padding、字号、圆角、边框等完全一致），**只允许通过 `bgColor` 属性改变背景色，禁止通过 `class` 传入自定义样式类改变按钮外观**。
   - **各页面典型按钮组合示例**：
     - **纯编辑保存**（如自定义 CSS）：`[dirty, 关闭, 保存]`
-    - **编辑 + 语法检查**（如 Nginx 配置）：`[dirty, 检查语法, 关闭, 保存, 保存并 Reload]`
+    - **编辑 + 语法检查**（如脚本或结构化配置导入）：`[dirty, 检查语法, 关闭, 保存]`
     - **文件管理**（如 files.php）：`[dirty, 关闭, 下载, 删除, 保存]`
     - **只读查看**（如 logs.php）：`[关闭]`
-- **参考实现**：`admin/nginx.php` 中的 Nginx 配置编辑器弹窗和 `admin/logs.php` 中的只读日志查看器。
+- **参考实现**：`admin/nginx.php` 中的运行配置只读查看器和 `admin/logs.php` 中的只读日志查看器。
 - **待改造清单**（当前仍使用原生 `<textarea>`，需逐步替换为 Ace Editor 弹窗）：
   - `settings.php`：自定义 CSS、文件系统允许根目录
   - `dns.php`：DNS JSON 批量导入
@@ -523,34 +522,22 @@ NavAceEditor.open({
 
 ##### 七、完整接入示例
 
-**场景 1：Nginx 配置编辑（Form 桥接）**
+**场景 1：运行配置只读查看**
 
 ```javascript
-function openNginxEditor(targetContent) {
+function openConfigViewer(targetContent) {
   NavAceEditor.open({
-    title: '编辑 Nginx 配置',
+    title: '查看运行配置',
     mode: 'nginx',
     value: targetContent,
+    readOnly: true,
+    confirmOnClose: false,
     buttons: {
-      left:  [
-        { type: 'dirty' },
-        { text: '检查语法', class: 'btn-secondary', action: 'syntax' }
-      ],
-      right: [
-        { text: '关闭', class: 'btn-secondary', action: 'close' },
-        { text: '保存', class: 'btn-secondary', action: 'save' },
-        { text: '保存并 Reload', class: 'btn-primary', action: 'save_reload' }
-      ]
+      left:  [],
+      right: [{ text: '关闭', action: 'close' }]
     },
-    onAction: function(action, value) {
-      if (action === 'close') {
-        NavAceEditor.close();
-        return;
-      }
-      // 将内容同步回隐藏的 textarea，然后提交表单
-      document.getElementById('nginx-editor-content').value = value;
-      document.getElementById('nginx-editor-action').value = action;
-      document.getElementById('nginx-editor-form').submit();
+    onAction: function(action) {
+      if (action === 'close') NavAceEditor.close();
     }
   });
 }
@@ -623,7 +610,7 @@ function openLogViewer(logContent, logName) {
 
 | 功能点 | files.php 现状 | nginx.php 现状 | logs.php 现状 | 统一接口后 |
 |--------|---------------|---------------|--------------|-----------|
-| 编辑器初始化 | 独立 20+ 行 | 独立 15+ 行 | 独立 15+ 行 | `NavAceEditor.init()` 一行 |
+| 编辑器初始化 | 独立 20+ 行 | 只读查看 | 独立 15+ 行 | `NavAceEditor.init()` 一行 |
 | 弹窗 open | `openFileEditor()` 内联 | `openEditorModal()` 内联 | 非弹窗 | `NavAceEditor.open({...})` |
 | 弹窗 close | `closeFmEditorModal()` 内联 | `closeEditorModal()` 内联 | — | `NavAceEditor.close()` |
 | 脏标记 | `syncAceDirty()` 内联 | `sync()` 内联 | 不需要 | `{ type: 'dirty' }` 自动 |
@@ -643,7 +630,7 @@ function openLogViewer(logContent, logName) {
 | 文件 | 说明 |
 |------|------|
 | `admin/shared/ace_editor_modal.php` | 包含弹窗 HTML 模板 + `NavAceEditor` JS 实现。各页面通过 `require __DIR__ . '/shared/ace_editor_modal.php'` 引入。 |
-| `admin/shared/admin.css` | 已包含 `.ngx-modal`、`.ngx-editor-*` 等样式，无需新增 CSS。`nginx.php` 中的内联重复 CSS 应删除。 |
+| `admin/shared/admin.css` | 已包含 `.ngx-modal`、`.ngx-editor-*` 等样式，无需新增 CSS。运行配置查看页新增样式应保持轻量。 |
 | `admin/assets/ace/ace.js` | 已有本地资源。 |
 | `admin/assets/ace/ext-searchbox.js` | 已有本地资源（查找/跳转功能依赖）。 |
 
@@ -694,7 +681,7 @@ function openLogViewer(logContent, logName) {
 
 #### 10.2 改造优先级建议
 
-1. **P0（先封装）**：维护 `admin/shared/ace_editor_modal.php` 统一接口，并以 `nginx.php`、`logs.php`、`scheduled_tasks.php` 验证稳定性。
+1. **P0（先封装）**：维护 `admin/shared/ace_editor_modal.php` 统一接口，并以 `nginx.php`（只读）、`logs.php`、`scheduled_tasks.php` 验证稳定性。
 2. **P1（后迁移）**：改造 `settings.php` 和 `dns.php` 中仍符合条件的多行文本输入。
 
 ---

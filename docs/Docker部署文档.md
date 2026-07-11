@@ -3,7 +3,7 @@
 # 导航网站 Docker 部署文档
 
 > 适用：任何支持 Docker 的 Linux / macOS / Windows（WSL2）环境。
-> 镜像内置 Nginx + PHP 8.2-fpm + Supervisor，**宿主机无需安装任何 PHP 或 Nginx**。
+> 镜像内置 Nginx + PHP 8.2-fpm + runit，**宿主机无需安装任何 PHP 或 Nginx**。
 > 镜像标签统一使用 `latest`，示例镜像名为 `codingriver/simple-homepage:latest`。
 > 
 > 本文档面向中高级用户，需要深度定制时参考。新手请直接看项目根目录 [README.md](../README.md)。
@@ -81,7 +81,7 @@ docker compose version    # Docker Compose version v2.x.x
 | **基础系统** | Alpine Linux | 3.19+（随 php:8.2-fpm-alpine）| Docker 官方镜像 | 极致轻量，支持 amd64/arm64 |
 | **运行时** | PHP | 8.2-fpm | `php:8.2-fpm-alpine` | 当前默认版本，musl libc |
 | **Web 服务器** | Nginx | Alpine 仓库稳定版 | `apk add nginx` | 处理静态文件和 PHP 转发 |
-| **进程管理** | Supervisor | Alpine 仓库稳定版 | `apk add supervisor` | 管理 Nginx + PHP-FPM + Cron 生命周期 |
+| **进程管理** | runit | Alpine 仓库稳定版 | `apk add runit` | 管理 Nginx + PHP-FPM + Cron 生命周期，低内存常驻 |
 | **PHP 扩展** | `fileinfo` | 随 PHP 编译 | `docker-php-ext-install` | 背景图 MIME 检测（可选增强）|
 | **PHP 扩展** | `session` | PHP 核心内置 | 内置 | Cookie/Session 管理 |
 | **PHP 扩展** | `json` | PHP 7.1+ 永久内置 | 内置 | 数据文件读写 |
@@ -103,7 +103,7 @@ docker compose version    # Docker Compose version v2.x.x
 | `/etc/nginx/http.d/nav-proxy-domains.conf` | 容器启动时自动创建（空文件）| 子域反代配置（由后台自动管理）|
 | `/usr/local/etc/php-fpm.d/nav.conf` | `docker/php-fpm.conf` | PHP-FPM 进程池配置 |
 | `/usr/local/etc/php/conf.d/99-nav-custom.ini` | `docker/php-custom.ini` | PHP 自定义配置（display_errors 等）|
-| `/etc/supervisord.conf` | `docker/supervisord.conf` | Supervisor 进程管理配置 |
+| `/etc/service/*/run` | `docker/runit/*/run` | runit 服务脚本，管理 `php-fpm`、`nginx`、`cron` |
 | `/entrypoint.sh` | `docker/entrypoint.sh` | 容器启动入口脚本 |
 
 ### 1.3 PHP-FPM 进程池配置（默认值）
@@ -319,34 +319,19 @@ curl -sf http://localhost:58080/login.php && echo "OK"
 
 ---
 
-## 六、Nginx 反代功能（Docker 环境）
+## 六、运行配置（Docker 环境）
 
-### 问题
-Docker 容器内的 Nginx 无法直接 `sudo nginx -s reload` 宿主机 Nginx。
-
-### 方案A：容器内反代（路径模式 + 子域模式，推荐）
-
-反代目标为宿主机内网其他服务，在后台「系统设置 → Nginx 反代管理」中配置：
-
-- 路径模式配置写入容器内 `/etc/nginx/conf.d/nav-proxy.conf`
-- 子域模式配置写入容器内 `/etc/nginx/http.d/nav-proxy-domains.conf`
-- 容器内 Nginx reload 自动生效（无需 sudo，PHP-FPM 以 navwww 用户运行，对反代文件有写权限）
+当前后台仅支持查看 Nginx / PHP-FPM / PHP 配置，不支持在线保存或 reload。
 
 ```bash
-# 验证容器内 Nginx reload 是否正常
+# 验证容器内 Nginx 配置
 docker exec simple-homepage nginx -t
+
+# 修改挂载配置后重启容器生效
+docker compose restart
 ```
 
-### 方案B：挂载宿主机 nginx 配置（高级）
-
-若需要修改宿主机 Nginx 配置：
-
-```yaml
-volumes:
-  - /etc/nginx/conf.d/nav-proxy.conf:/etc/nginx/conf.d/nav-proxy.conf
-```
-
-并在宿主机配置对应 sudoers，容器内通过 `docker exec` 触发宿主机 reload。
+历史版本的容器内反代生成、`nav-proxy*.conf` 和后台 reload 流程已退役。
 
 ---
 
@@ -403,10 +388,7 @@ docker exec -it simple-homepage sh
 docker exec simple-homepage php /var/www/nav/manage_users.php list
 docker exec simple-homepage php /var/www/nav/manage_users.php reset
 
-# 手动 reload Nginx（容器内）
-docker exec simple-homepage nginx -s reload
-
-# 重启服务
+# 修改 Nginx / PHP-FPM / PHP 配置后重启容器生效
 docker compose restart
 
 # 停止并删除容器（数据不受影响）

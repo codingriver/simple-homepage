@@ -891,41 +891,32 @@ function nginx_bin(): string {
 }
 
 /**
- * 检测当前环境是否具备可用的 Nginx reload 执行能力
- * 优先级：sudo 白名单 -> 容器内包装脚本
+ * 检测当前环境是否具备可用的 Nginx 配置检测能力。
  *
- * @return array{ok:bool,method:string,msg:string,hint:string,test_output:string,nginx_bin:string}
+ * @return array{ok:bool,method:string,msg:string,test_output:string,nginx_bin:string}
  */
-function nginx_reload_capability(): array {
+function nginx_test_capability(): array {
     $nginx = nginx_bin();
     $safe_nginx = escapeshellarg($nginx);
-    $hint = 'NGINX_BIN=' . $nginx . "\n"
-        . 'USER_NAME=$(id -un)' . "\n"
-        . 'printf \'%s ALL=(ALL) NOPASSWD: %s -t\n\' "$USER_NAME" "$NGINX_BIN" > /etc/sudoers.d/nav-nginx' . "\n"
-        . 'printf \'%s ALL=(ALL) NOPASSWD: %s -s reload\n\' "$USER_NAME" "$NGINX_BIN" >> /etc/sudoers.d/nav-nginx' . "\n"
-        . 'chmod 440 /etc/sudoers.d/nav-nginx';
 
     $sudo_test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
     if ($sudo_test['ok']) {
         return [
             'ok' => true,
             'method' => 'sudo',
-            'msg' => '已检测到 sudo 白名单，可直接执行 Nginx 语法检测与 Reload。',
-            'hint' => $hint,
+            'msg' => '已检测到 sudo 白名单，可执行 Nginx 语法检测。',
             'test_output' => $sudo_test['output'],
             'nginx_bin' => $nginx,
         ];
     }
 
-    $has_wrapper = is_executable('/usr/local/bin/nginx-reload') && is_executable('/usr/local/bin/nginx-test');
-    if ($has_wrapper) {
+    if (is_executable('/usr/local/bin/nginx-test')) {
         $wrapper_test = admin_run_command('/usr/local/bin/nginx-test');
         if ($wrapper_test['ok']) {
             return [
                 'ok' => true,
                 'method' => 'wrapper',
-                'msg' => '已检测到容器内 Reload 包装器，可直接执行 Nginx 语法检测与 Reload。',
-                'hint' => '',
+                'msg' => '已检测到容器内检测包装器，可执行 Nginx 语法检测。',
                 'test_output' => $wrapper_test['output'],
                 'nginx_bin' => $nginx,
             ];
@@ -933,9 +924,19 @@ function nginx_reload_capability(): array {
         return [
             'ok' => false,
             'method' => 'wrapper',
-            'msg' => '已检测到容器内 Reload 包装器，但当前 Nginx 配置语法检测未通过。',
-            'hint' => '',
+            'msg' => '已检测到容器内检测包装器，但当前 Nginx 配置语法检测未通过。',
             'test_output' => $wrapper_test['output'],
+            'nginx_bin' => $nginx,
+        ];
+    }
+
+    $direct_test = admin_run_command($safe_nginx . ' -t');
+    if ($direct_test['ok']) {
+        return [
+            'ok' => true,
+            'method' => 'direct',
+            'msg' => '当前用户可执行 Nginx 语法检测。',
+            'test_output' => $direct_test['output'],
             'nginx_bin' => $nginx,
         ];
     }
@@ -943,9 +944,8 @@ function nginx_reload_capability(): array {
     return [
         'ok' => false,
         'method' => 'none',
-        'msg' => '未检测到可用的 Nginx reload 执行权限。',
-        'hint' => $hint,
-        'test_output' => $sudo_test['output'],
+        'msg' => '未检测到可用的 Nginx 语法检测执行方式。',
+        'test_output' => trim($sudo_test['output'] . "\n" . $direct_test['output']),
         'nginx_bin' => $nginx,
     ];
 }
@@ -971,7 +971,7 @@ function nginx_http_conf_path(): string {
 }
 
 /**
- * 可编辑目标定义
+ * 配置查看目标定义
  * @return array<string,array{label:string,path:string}>
  */
 function nginx_editable_targets(): array {
@@ -1064,92 +1064,18 @@ function nginx_read_target(string $target): array {
 }
 
 /**
- * 写入指定编辑目标内容
- * @return array{ok:bool,msg:string,path:string}
- */
-function nginx_write_target(string $target, string $content): array {
-    $targets = nginx_editable_targets();
-    if (!isset($targets[$target])) {
-        return ['ok' => false, 'msg' => '未知配置目标', 'path' => ''];
-    }
-
-    // 防止异常超大提交导致内存/磁盘压力
-    if (strlen($content) > 2 * 1024 * 1024) {
-        return ['ok' => false, 'msg' => '配置内容过大（超过 2MB）', 'path' => $targets[$target]['path'] ?? ''];
-    }
-
-    $path = $targets[$target]['path'];
-
-    if (!is_file($path)) {
-        return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'path' => $path];
-    }
-
-    if ($target === 'http') {
-        $raw = @file_get_contents($path);
-        if ($raw === false) {
-            return ['ok' => false, 'msg' => '读取配置文件失败：' . $path, 'path' => $path];
-        }
-        $bounds = nginx_http_block_bounds($raw);
-        if (!$bounds) {
-            return ['ok' => false, 'msg' => '未找到 http { ... } 模块', 'path' => $path];
-        }
-        $newRaw = substr($raw, 0, $bounds['inner_start'])
-            . "\n" . rtrim($content) . "\n"
-            . substr($raw, $bounds['close']);
-        $ok = @file_put_contents($path, $newRaw, LOCK_EX);
-        return $ok === false
-            ? ['ok' => false, 'msg' => '写入失败，请检查文件权限：' . $path, 'path' => $path]
-            : ['ok' => true, 'msg' => '已保存：' . $path, 'path' => $path];
-    }
-
-    $ok = @file_put_contents($path, $content, LOCK_EX);
-    return $ok === false
-        ? ['ok' => false, 'msg' => '写入失败，请检查文件权限：' . $path, 'path' => $path]
-        : ['ok' => true, 'msg' => '已保存：' . $path, 'path' => $path];
-}
-
-/**
  * 仅执行 nginx -t 语法检测
  * @return array{ok:bool,msg:string,test_output:string}
  */
 function nginx_test_config(): array {
-    $capability = nginx_reload_capability();
-    $nginx = $capability['nginx_bin'];
-    $safe_nginx = escapeshellarg($nginx);
-
-    $test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
-    if ($test['ok']) {
-        return [
-            'ok' => true,
-            'msg' => 'Nginx 配置语法检测通过',
-            'test_output' => $test['output'],
-        ];
-    }
-
-    $use_wrapper = ($capability['method'] === 'wrapper')
-        || (is_executable('/usr/local/bin/nginx-test'));
-    if ($use_wrapper) {
-        $wrapperTest = admin_run_command('/usr/local/bin/nginx-test');
-        return [
-            'ok' => $wrapperTest['ok'],
-            'msg' => $wrapperTest['ok'] ? 'Nginx 配置语法检测通过' : 'Nginx 配置语法检测失败',
-            'test_output' => $wrapperTest['output'],
-        ];
-    }
-
+    $capability = nginx_test_capability();
     return [
-        'ok' => false,
-        'msg' => '未检测到可用的 Nginx 语法检测执行方式',
-        'test_output' => $test['output'],
+        'ok' => $capability['ok'],
+        'msg' => $capability['ok'] ? 'Nginx 配置语法检测通过' : $capability['msg'],
+        'test_output' => $capability['test_output'],
     ];
 }
 
-/**
- * 将当前编辑内容写入原文件做预览检测，检测完恢复原文件
- * 用于"检查语法"按钮实时检测当前编辑框内容，不实际保存
- *
- * @return array{ok:bool,msg:string,test_output:string}
- */
 function php_fpm_test_config(): array {
     $test = admin_run_command('/usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/nav.conf');
     if ($test['ok']) {
@@ -1166,145 +1092,6 @@ function php_fpm_test_config(): array {
     ];
 }
 
-function php_fpm_reload(): array {
-    if (!is_executable('/usr/local/bin/php-fpm-reload')) {
-        return [
-            'ok' => false,
-            'msg' => 'PHP-FPM reload 脚本不可用',
-            'test_output' => '',
-        ];
-    }
-    $reload = admin_run_command('/usr/local/bin/php-fpm-reload');
-    if ($reload['ok']) {
-        return [
-            'ok' => true,
-            'msg' => 'PHP-FPM 已 graceful reload',
-            'test_output' => $reload['output'],
-        ];
-    }
-    return [
-        'ok' => false,
-        'msg' => 'PHP-FPM reload 失败：' . $reload['output'],
-        'test_output' => $reload['output'],
-    ];
-}
-
-function nginx_test_config_preview(string $target, string $content): array {
-    $targets = nginx_editable_targets();
-    if (!isset($targets[$target])) {
-        return ['ok' => false, 'msg' => '未知配置目标', 'test_output' => ''];
-    }
-    $path = $targets[$target]['path'];
-    if (!is_file($path)) {
-        return ['ok' => false, 'msg' => '配置文件不存在：' . $path, 'test_output' => ''];
-    }
-
-    $backup = @file_get_contents($path);
-    if ($backup === false) {
-        return ['ok' => false, 'msg' => '读取原文件失败：' . $path, 'test_output' => ''];
-    }
-
-    // 写入预览内容（复用 nginx_write_target 的 http 块替换逻辑）
-    if ($target === 'http') {
-        $bounds = nginx_http_block_bounds($backup);
-        if (!$bounds) {
-            return ['ok' => false, 'msg' => '未找到 http { ... } 模块', 'test_output' => ''];
-        }
-        $preview = substr($backup, 0, $bounds['inner_start'])
-            . "\n" . rtrim($content) . "\n"
-            . substr($backup, $bounds['close']);
-        $written = @file_put_contents($path, $preview, LOCK_EX);
-    } else {
-        $written = @file_put_contents($path, $content, LOCK_EX);
-    }
-
-    if ($written === false) {
-        @file_put_contents($path, $backup, LOCK_EX);
-        return ['ok' => false, 'msg' => '写入预览文件失败，请检查文件权限：' . $path, 'test_output' => ''];
-    }
-
-    // 对临时写入的完整运行配置执行语法检测
-    $test = nginx_test_config();
-
-    // 恢复原文件（无论检测成功与否）
-    @file_put_contents($path, $backup, LOCK_EX);
-
-    return $test;
-}
-
-/**
- * 执行 nginx -t 语法检测 + nginx -s reload
- * 优先使用 sudo 白名单；容器环境可退回到包装脚本
- *
- * sudo 白名单配置（在服务器上执行一次，限定具体参数防提权）：
- *   NGINX_BIN=$(which nginx || echo /usr/sbin/nginx)
- *   USER_NAME=$(id -un)
- *   printf '%s ALL=(ALL) NOPASSWD: %s -t\n' "$USER_NAME" "$NGINX_BIN" > /etc/sudoers.d/nav-nginx
- *   printf '%s ALL=(ALL) NOPASSWD: %s -s reload\n' "$USER_NAME" "$NGINX_BIN" >> /etc/sudoers.d/nav-nginx
- *   chmod 440 /etc/sudoers.d/nav-nginx
- *
- * @return array ['ok' => bool, 'msg' => string, 'test_output' => string]
- */
-function nginx_reload(): array {
-    $capability = nginx_reload_capability();
-    $nginx = $capability['nginx_bin'];
-    $safe_nginx = escapeshellarg($nginx);
-
-    // 优先使用 sudo 直接执行真实的 nginx -t / nginx -s reload
-    $test = admin_run_command('sudo -n ' . $safe_nginx . ' -t');
-    $test_msg = $test['output'];
-    if ($test['ok']) {
-        $reload = admin_run_command('sudo -n ' . $safe_nginx . ' -s reload');
-        if (!$reload['ok']) {
-            return [
-                'ok'          => false,
-                'msg'         => 'nginx reload 执行失败',
-                'test_output' => $reload['output'],
-            ];
-        }
-        return [
-            'ok'          => true,
-            'msg'         => 'Nginx 已成功 reload',
-            'test_output' => $test_msg,
-        ];
-    }
-
-    // 降级：使用包装脚本（容器内无 sudo 时的替代方案）
-    $use_wrapper = ($capability['method'] === 'wrapper')
-        || (is_executable('/usr/local/bin/nginx-reload') && is_executable('/usr/local/bin/nginx-test'));
-    if ($use_wrapper) {
-        $wrapperTest = admin_run_command('/usr/local/bin/nginx-test');
-        $wrapperMsg = $wrapperTest['output'];
-        if (!$wrapperTest['ok']) {
-            return [
-                'ok'          => false,
-                'msg'         => 'Nginx 配置语法错误，已中止 reload，请检查配置',
-                'test_output' => $wrapperMsg !== '' ? $wrapperMsg : $test_msg,
-            ];
-        }
-
-        $reload = admin_run_command('/usr/local/bin/nginx-reload');
-        if (!$reload['ok']) {
-            return [
-                'ok'          => false,
-                'msg'         => 'nginx reload 执行失败',
-                'test_output' => $reload['output'],
-            ];
-        }
-
-        return [
-            'ok'          => true,
-            'msg'         => 'Nginx 已成功 reload',
-            'test_output' => $wrapperMsg,
-        ];
-    }
-
-    return [
-        'ok'          => false,
-        'msg'         => 'Nginx 配置检测失败，且未找到可用的 reload 执行方式',
-        'test_output' => $test_msg,
-    ];
-}
 function auth_reload_config(): void {
     // auth_get_config 使用 static $cfg，无法直接清除
     // 通过写入一个特殊 flag，让下次调用重新读文件

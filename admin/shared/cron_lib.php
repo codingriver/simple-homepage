@@ -1585,8 +1585,6 @@ function cron_regenerate(): array {
     cron_sync_domain_expiry_task();
     $lines   = [];
     $lines[] = '# simple-homepage generated — do not edit by hand';
-    $lines[] = 'SHELL=/bin/bash';
-    $lines[] = 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
     $lineToTask = []; // lineNumber (1-based) => ['id'=>..., 'name'=>...]
 
