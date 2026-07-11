@@ -32,7 +32,7 @@ docker compose version    # Docker Compose version v2.x.x
 
 | 资源 | 最低 | 推荐 | 说明 |
 |---|---|---|---|
-| CPU | 1 核 | 2 核 | PHP-FPM 进程池默认 4 个工作进程 |
+| CPU | 1 核 | 2 核 | PHP-FPM 进程池最多 10 个 ondemand 工作进程 |
 | 内存 | 64MB | 128MB+ | Alpine 单容器方案，极致轻量 |
 | 磁盘 | 300MB | 500MB+ | 镜像约 150MB + 数据目录 |
 | 端口 | 任意空闲端口 | 58080（默认）| 可通过 `NAV_PORT` 修改 |
@@ -113,13 +113,15 @@ docker compose version    # Docker Compose version v2.x.x
 | 运行用户 | `navwww`（默认 uid 1000，自动按 data owner 对齐）| 非 root，安全隔离 |
 | Socket | `/run/php-fpm.sock` | Nginx 与 PHP-FPM 通信 |
 | 进程模式 | `dynamic` | 动态伸缩 |
-| 最大子进程 | 20 | 并发上限 |
-| 初始进程数 | 4 | 启动时创建 |
+| 最大子进程 | 10 | 并发上限 |
+| 初始进程数 | 0 | `ondemand` 模式，空闲时不预启动 worker |
 | `upload_max_filesize` | 32MB | 背景图上传限制 |
 | `post_max_size` | 32MB | POST 数据上限 |
 | `memory_limit` | 128MB | 单个 PHP 进程内存上限 |
 | `max_execution_time` | 30s | 单次请求超时 |
 | `session.save_path` | `/tmp` | Session 存储路径 |
+
+Nginx 访问日志默认关闭以降低日志 IO；如需排查访问问题，可在后台「系统设置」开启 Nginx 访问日志，保存后重启 Docker 容器生效。
 
 ### 1.4 Nginx 内置 Proxy 参数说明
 

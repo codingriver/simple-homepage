@@ -15,6 +15,7 @@ test('settings persist after refresh and re-login', async ({ page }) => {
 
   await page.locator('input[name="site_name"]').fill(siteName);
   await page.locator('input[name="token_expire_hours"]').fill('9');
+  await page.locator('select[name="nginx_access_log_enabled"]').selectOption('0');
   await page.locator('select[name="theme"]').selectOption('auto');
   await page.getByRole('button', { name: /保存设置/ }).click();
   await expect(page.locator('body')).toContainText('设置已保存');
@@ -22,6 +23,7 @@ test('settings persist after refresh and re-login', async ({ page }) => {
   await page.reload();
   await expect(page.locator('input[name="site_name"]')).toHaveValue(siteName);
   await expect(page.locator('input[name="token_expire_hours"]')).toHaveValue('9');
+  await expect(page.locator('select[name="nginx_access_log_enabled"]')).toHaveValue('0');
   await expect(page.locator('select[name="theme"]')).toHaveValue('auto');
 
   await logout(page);
@@ -29,6 +31,7 @@ test('settings persist after refresh and re-login', async ({ page }) => {
   await page.goto('/admin/settings.php');
   await expect(page.locator('input[name="site_name"]')).toHaveValue(siteName);
   await expect(page.locator('input[name="token_expire_hours"]')).toHaveValue('9');
+  await expect(page.locator('select[name="nginx_access_log_enabled"]')).toHaveValue('0');
   await expect(page.locator('select[name="theme"]')).toHaveValue('auto');
 
   await page.goto('/index.php');

@@ -46,8 +46,8 @@
 | `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + runit + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
 | `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、系统配置持久化、sudo 白名单设置 |
 | `docker/runit/*/run` | runit 服务脚本，管理 `php-fpm`、`nginx`、`cron` 三个常驻进程 |
-| `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存 |
-| `docker/php-fpm.conf` | PHP-FPM 低内存默认池配置：`pm = ondemand`、`pm.max_children = 4`，空闲时不预启动 worker |
+| `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存；访问日志默认关闭 |
+| `docker/php-fpm.conf` | PHP-FPM 低内存默认池配置：`pm = ondemand`、`pm.max_children = 10`，空闲时不预启动 worker |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；构建期和运行期均支持代理环境变量透传 |
 | `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新、启用 `NAV_DEV_MODE`、临时挂载 `docker.sock` |
 | `local/docker-compose.test.yml` | 测试环境叠加配置：定义 `playwright-full`、`playwright-mobile`、`lighthouse` 服务 |
@@ -277,7 +277,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免后台静态资源并发请求时把有效登录误判为 `session_missing`。
 - 面板可以部署在宿主机 Nginx/Caddy 等外层反向代理之后；必须保留 `X-Forwarded-Proto` 与真实客户端 IP 的识别逻辑。该能力仅用于部署适配，不包含站点代理生成或管理功能。
 - 后台运行配置页仅支持查看 Nginx 主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数，不支持保存、Reload 或恢复配置。修改配置必须编辑挂载文件或 `data/nginx` / `data/php-fpm` / `data/php` 下的持久化配置后重启 Docker 容器生效；不得重新引入站点代理模板、`nav-proxy*.conf` 或代理目标诊断逻辑。
-- 默认容器配置按低内存自托管场景优化：`docker/nginx.conf` 固定 `worker_processes 1`，`docker/php-fpm.conf` 使用 `pm = ondemand` 且 `pm.max_children = 4`。若修改这些默认值，需同步考虑小型 NAS / 软路由 / VPS 的空闲内存占用。
+- 默认容器配置按低内存自托管场景优化：`docker/nginx.conf` 固定 `worker_processes 1`，访问日志默认关闭；`docker/php-fpm.conf` 使用 `pm = ondemand` 且 `pm.max_children = 10`。系统设置中的「Nginx 访问日志」仅持久化开关，保存后需重启 Docker 生效，不执行 Reload。若修改这些默认值，需同步考虑小型 NAS / 软路由 / VPS 的空闲内存占用。
 
 ### 9. 计划任务健壮性
 

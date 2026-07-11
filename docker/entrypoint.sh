@@ -204,6 +204,17 @@ ln -sf /var/www/nav/data/nginx/http.d/nav.conf /etc/nginx/http.d/nav.conf
 chown root:navwww /var/www/nav/data/nginx/http.d/nav.conf
 chmod 664 /var/www/nav/data/nginx/http.d/nav.conf
 
+nginx_access_log_enabled="$(php -r '$f="/var/www/nav/data/config.json"; $j=is_file($f) ? (json_decode((string)file_get_contents($f), true) ?: []) : []; echo ((string)($j["nginx_access_log_enabled"] ?? "0") === "1") ? "1" : "0";' 2>/dev/null || echo 0)"
+if [ "$nginx_access_log_enabled" = "1" ]; then
+    sed -i -E 's#^    access_log (off|/var/log/nginx/access\.log main);#    access_log /var/log/nginx/access.log main;#' /var/www/nav/data/nginx/nginx.conf
+    sed -i -E 's#^    access_log (off|/var/log/nginx/nav\.access\.log);#    access_log /var/log/nginx/nav.access.log;#' /var/www/nav/data/nginx/http.d/nav.conf
+    echo "[entrypoint] Nginx 访问日志: 开启"
+else
+    sed -i -E 's#^    access_log (off|/var/log/nginx/access\.log main);#    access_log off;#' /var/www/nav/data/nginx/nginx.conf
+    sed -i -E 's#^    access_log (off|/var/log/nginx/nav\.access\.log);#    access_log off;#' /var/www/nav/data/nginx/http.d/nav.conf
+    echo "[entrypoint] Nginx 访问日志: 关闭"
+fi
+
 # PHP 自定义配置
 if [ ! -f /var/www/nav/data/php/custom.ini ]; then
     cp /var/www/nav/docker/php-custom.ini /var/www/nav/data/php/custom.ini
@@ -229,6 +240,8 @@ fi
 ln -sf /var/www/nav/data/php-fpm/nav.conf /usr/local/etc/php-fpm.d/nav.conf
 chown root:navwww /var/www/nav/data/php-fpm/nav.conf
 chmod 664 /var/www/nav/data/php-fpm/nav.conf
+
+sed -i -E 's#^pm\.max_children[[:space:]]*=.*#pm.max_children         = 10#' /var/www/nav/data/php-fpm/nav.conf
 # ── 系统配置启动前校验与兼容模式切换 ──
 # 分别测试 Nginx 和 PHP-FPM（含 PHP ini）配置
 nginx_ok=0

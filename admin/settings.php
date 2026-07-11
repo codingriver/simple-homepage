@@ -40,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cfg['cookie_secure']      = in_array($_POST['cookie_secure'] ?? 'off', ['auto','on','off'])
                                          ? $_POST['cookie_secure'] : 'off';
             $cfg['cookie_domain']      = trim($_POST['cookie_domain'] ?? '');
+            $cfg['nginx_access_log_enabled'] = ($_POST['nginx_access_log_enabled'] ?? '0') === '1' ? '1' : '0';
             $taskTimeoutRaw = trim($_POST['task_execution_timeout'] ?? '');
             $cfg['task_execution_timeout'] = ($taskTimeoutRaw === '') ? 7200 : max(0, (int)$taskTimeoutRaw);
             $cfg['theme'] = in_array($_POST['theme'] ?? 'dark', ['dark','light','auto']) ? ($_POST['theme'] ?? 'dark') : 'dark';
@@ -120,6 +121,14 @@ $cfg = auth_get_config();
       <div class="form-group">
         <label>Cookie Domain（跨子域 SSO）</label>
         <input type="text" name="cookie_domain" value="<?= htmlspecialchars($cfg['cookie_domain']??'') ?>" placeholder="留空=自动（推荐 IP 访问时留空）">
+      </div>
+      <div class="form-group">
+        <label>Nginx 访问日志</label>
+        <select name="nginx_access_log_enabled" style="width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--tx);font-size:14px;outline:none">
+          <option value="0" <?= ($cfg['nginx_access_log_enabled']??'0')==='0'?'selected':'' ?>>关闭（默认，降低日志 IO）</option>
+          <option value="1" <?= ($cfg['nginx_access_log_enabled']??'0')==='1'?'selected':'' ?>>开启（调试访问问题）</option>
+        </select>
+        <div class="form-hint" style="margin-top:6px">保存后需重启 Docker 容器生效；后台不执行 Nginx Reload。</div>
       </div>
       <div class="form-group">
         <label>主题模式</label>

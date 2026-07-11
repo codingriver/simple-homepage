@@ -18,8 +18,10 @@ final class ThemeConfigTest extends TestCase
         $cfg = auth_get_config();
         $this->assertArrayHasKey('theme', $cfg);
         $this->assertArrayHasKey('custom_css', $cfg);
+        $this->assertArrayHasKey('nginx_access_log_enabled', $cfg);
         $this->assertSame('dark', $cfg['theme']);
         $this->assertSame('', $cfg['custom_css']);
+        $this->assertSame('0', $cfg['nginx_access_log_enabled']);
     }
 
     public function testSaveAndLoadThemeAndCustomCss(): void
@@ -27,12 +29,14 @@ final class ThemeConfigTest extends TestCase
         $cfg = load_config();
         $cfg['theme'] = 'light';
         $cfg['custom_css'] = 'body { background: red; }';
+        $cfg['nginx_access_log_enabled'] = '1';
         save_config($cfg);
 
         auth_reset_config_cache();
         $loaded = load_config();
         $this->assertSame('light', $loaded['theme']);
         $this->assertSame('body { background: red; }', $loaded['custom_css']);
+        $this->assertSame('1', $loaded['nginx_access_log_enabled']);
     }
 
     public function testRetiredProxyConfigIsRemovedOnLoadAndSave(): void

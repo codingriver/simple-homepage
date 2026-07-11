@@ -75,6 +75,7 @@ function auth_default_config(): array {
         'cookie_secure'       => 'off',
         'cookie_domain'       => '',
         'display_errors'      => '0',
+        'nginx_access_log_enabled' => '0',
         'theme'               => 'dark',
         'custom_css'          => '',
         'webhook_enabled'     => '0',
