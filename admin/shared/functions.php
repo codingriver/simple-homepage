@@ -265,6 +265,37 @@ function backup_collect_payload(string $trigger = 'manual'): array {
 }
 
 /**
+ * 校验备份载荷。兼容既有无版本号的 JSON，只要求至少包含一个已知数组段。
+ *
+ * @return array{ok:bool,msg:string,data?:array<string,mixed>,sections?:array<int,string>}
+ */
+function backup_validate_payload(array $data): array {
+    $known = ['config', 'scheduled_tasks', 'dns_config', 'ddns_tasks', 'domain_expiry'];
+    $sections = [];
+    foreach ($known as $section) {
+        if (!array_key_exists($section, $data)) {
+            continue;
+        }
+        if (!is_array($data[$section])) {
+            return ['ok' => false, 'msg' => '备份段 ' . $section . ' 的结构无效'];
+        }
+        $sections[] = $section;
+    }
+    if ($sections === []) {
+        return ['ok' => false, 'msg' => '未识别到有效备份内容'];
+    }
+    return ['ok' => true, 'msg' => '备份文件有效', 'data' => $data, 'sections' => $sections];
+}
+
+/** 写入备份恢复涉及的 JSON 文件，失败时抛出异常供恢复流程回滚。 */
+function backup_write_json_file(string $path, array $data): void {
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($json) || file_put_contents($path, $json, LOCK_EX) === false) {
+        throw new RuntimeException('无法写入数据文件：' . basename($path));
+    }
+}
+
+/**
  * 将备份/导入 JSON 中的各段写入数据文件。仅处理传入的键；未提供的键不覆盖现有文件。
  * 写入计划任务或 DNS 配置后会刷新 crontab / 清除 DNS Zone 缓存。
  *
@@ -277,9 +308,7 @@ function backup_apply_restored_sections(array $data): void {
 
     if (isset($data['config']) && is_array($data['config'])) {
         $restored_config = auth_remove_retired_config($data['config']);
-        file_put_contents(CONFIG_FILE,
-            json_encode($restored_config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-            LOCK_EX);
+        backup_write_json_file(CONFIG_FILE, $restored_config);
     }
 
     $st_file   = DATA_DIR . '/scheduled_tasks.json';
@@ -289,29 +318,21 @@ function backup_apply_restored_sections(array $data): void {
     if (isset($data['scheduled_tasks']) && is_array($data['scheduled_tasks'])) {
         require_once __DIR__ . '/cron_lib.php';
         $scheduled_tasks = scheduled_tasks_filter_retired($data['scheduled_tasks'])['data'];
-        file_put_contents($st_file,
-            json_encode($scheduled_tasks, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            LOCK_EX);
+        backup_write_json_file($st_file, $scheduled_tasks);
         $wrote_st = true;
         task_sync_scripts_from_scheduled_tasks($scheduled_tasks);
         scheduled_tasks_cleanup_retired_artifacts();
     }
     if (isset($data['dns_config']) && is_array($data['dns_config'])) {
-        file_put_contents($dns_file,
-            json_encode($data['dns_config'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            LOCK_EX);
+        backup_write_json_file($dns_file, $data['dns_config']);
         $wrote_dns = true;
     }
     if (isset($data['ddns_tasks']) && is_array($data['ddns_tasks'])) {
-        file_put_contents($ddns_file,
-            json_encode($data['ddns_tasks'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            LOCK_EX);
+        backup_write_json_file($ddns_file, $data['ddns_tasks']);
         $wrote_ddns = true;
     }
     if (isset($data['domain_expiry']) && is_array($data['domain_expiry'])) {
-        file_put_contents($domain_expiry_file,
-            json_encode($data['domain_expiry'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            LOCK_EX);
+        backup_write_json_file($domain_expiry_file, $data['domain_expiry']);
     }
     if ($wrote_st) {
         require_once __DIR__ . '/cron_lib.php';
@@ -409,14 +430,32 @@ function backup_restore(string $filename): bool {
     $path = BACKUPS_DIR . '/' . $filename;
     if (!file_exists($path)) return false;
 
-    $data = json_decode(file_get_contents($path), true);
-    if (!$data) return false;
+    try {
+        $data = json_decode((string)file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+    } catch (Throwable $e) {
+        return false;
+    }
+    if (!is_array($data) || !backup_validate_payload($data)['ok']) return false;
 
     // 恢复前先备份当前状态
-    backup_create('auto_before_restore');
+    $safetyPath = backup_create('auto_before_restore');
+    if ($safetyPath === '') return false;
 
-    backup_apply_restored_sections($data);
-    return true;
+    try {
+        backup_apply_restored_sections($data);
+        return true;
+    } catch (Throwable $e) {
+        $safety = json_decode((string)@file_get_contents($safetyPath), true);
+        if (is_array($safety) && backup_validate_payload($safety)['ok']) {
+            try {
+                backup_apply_restored_sections($safety);
+            } catch (Throwable $rollbackError) {
+                error_log('RiverOps backup rollback failed: ' . $rollbackError->getMessage());
+            }
+        }
+        error_log('RiverOps backup restore failed: ' . $e->getMessage());
+        return false;
+    }
 }
 
 /**

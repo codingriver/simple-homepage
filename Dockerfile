@@ -30,6 +30,12 @@ RUN apk add --no-cache \
     ca-certificates \
     icu-libs
 
+# WebDAV 备份使用 PHP cURL 发送 PROPFIND/PUT/MOVE/GET/DELETE，
+# 使用 DOM 安全解析 DAV multistatus XML。
+RUN apk add --no-cache --virtual .riverops-php-build-deps curl-dev libxml2-dev \
+    && docker-php-ext-install -j"$(nproc)" curl dom \
+    && apk del .riverops-php-build-deps
+
 # ── 设置时区 ──
 ARG TZ=Asia/Shanghai
 RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && \
@@ -86,6 +92,8 @@ RUN echo "{\"git_commit\":\"${GIT_COMMIT}\",\"git_ref\":\"${GIT_REF}\",\"build_d
 # ── 创建必要目录结构 ──
 RUN mkdir -p \
     /var/www/riverops/data/backups \
+    /var/www/riverops/data/backups/jobs \
+    /var/www/riverops/data/backups/tmp \
     /var/www/riverops/data/logs \
     /var/www/riverops/data/nginx \
     /var/spool/cron/crontabs \
@@ -106,10 +114,13 @@ RUN mkdir -p \
              /var/lib/nginx/tmp/scgi \
              /var/lib/nginx/tmp/uwsgi && \
     chown -R riverops:riverops /var/lib/nginx && \
+    chown -R riverops:riverops /var/www/riverops/data && \
     chmod -R 755 /var/lib/nginx/tmp && \
     # 设置权限
     chmod 750 /var/www/riverops/data && \
     chmod 755 /var/www/riverops/data/backups \
+              /var/www/riverops/data/backups/jobs \
+              /var/www/riverops/data/backups/tmp \
               /var/www/riverops/data/logs && \
     chown -R riverops:riverops /var/log/nginx /var/log/php-fpm /run/nginx
 

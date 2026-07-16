@@ -1,19 +1,19 @@
 <?php return array(
     'root' => array(
-        'name' => 'codingriver/simple-homepage',
-        'pretty_version' => 'dev-main',
-        'version' => 'dev-main',
-        'reference' => '203e7d5e805671ffa8b7f1055198e7bc406104ba',
+        'name' => 'codingriver/riverops',
+        'pretty_version' => '1.0.0+no-version-set',
+        'version' => '1.0.0.0',
+        'reference' => null,
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
         'dev' => true,
     ),
     'versions' => array(
-        'codingriver/simple-homepage' => array(
-            'pretty_version' => 'dev-main',
-            'version' => 'dev-main',
-            'reference' => '203e7d5e805671ffa8b7f1055198e7bc406104ba',
+        'codingriver/riverops' => array(
+            'pretty_version' => '1.0.0+no-version-set',
+            'version' => '1.0.0.0',
+            'reference' => null,
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

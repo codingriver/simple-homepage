@@ -59,6 +59,13 @@ CODE
         $this->assertStringContainsString('任务不存在', $result['output']);
     }
 
+    public function testBackupWebdavJobWithoutIdShowsUsage(): void
+    {
+        $result = $this->runCli('cli/backup_webdav_job.php');
+        $this->assertSame(1, $result['exitCode']);
+        $this->assertStringContainsString('usage: backup_webdav_job.php', strtolower($result['output']));
+    }
+
     public function testManageUsersList(): void
     {
         auth_save_user('testuser', 'password123', 'admin');

@@ -18,6 +18,24 @@ export async function resetVolatileAppData(): Promise<void> {
     'scheduled_tasks.json': '[]',
     'notifications.json': '[]',
     'sessions.json': '{}',
+    'backup_webdav.json': JSON.stringify({
+      version: 1,
+      instance_id: 'e2e000000001',
+      enabled: false,
+      name: 'WebDAV',
+      base_url: '',
+      remote_dir: '/RiverOps',
+      ssrf_protection: false,
+      tls_enabled: false,
+      tls_verify: true,
+      auth_enabled: false,
+      auth_mode: 'basic',
+      username: '',
+      password: '',
+      connect_timeout: 10,
+      request_timeout: 300,
+      remote_retention: 10,
+    }, null, 2),
 
     'ip_locks.json': '{}',
   };
@@ -129,6 +147,11 @@ export async function resetVolatileAppData(): Promise<void> {
     }
   } catch {
     // ignore
+  }
+  try {
+    runDockerShell('rm -f /var/www/riverops/data/backups/jobs/*.json /var/www/riverops/data/backups/jobs/*.log /var/www/riverops/data/backups/tmp/* /var/www/riverops/data/backups/.webdav_job_start.lock 2>/dev/null; mkdir -p /var/www/riverops/data/backups/jobs /var/www/riverops/data/backups/tmp');
+  } catch {
+    // ignore: unit-level cleanup remains covered by PHP tests
   }
 
   // 4. 清空 tasks 目录中的动态生成文件（保留内置二进制和数据文件）

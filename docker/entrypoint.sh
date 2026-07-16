@@ -137,12 +137,14 @@ fi
 
 # ── 确保数据目录存在（持久化挂载后可能为空）──
 mkdir -p /var/spool/cron/crontabs
-if ! riverops_run "mkdir -p /var/www/riverops/data/backups /var/www/riverops/data/logs /var/www/riverops/data/nginx /var/www/riverops/data/nginx/http.d /var/www/riverops/data/php /var/www/riverops/data/php-fpm"; then
+if ! riverops_run "mkdir -p /var/www/riverops/data/backups /var/www/riverops/data/backups/jobs /var/www/riverops/data/backups/tmp /var/www/riverops/data/logs /var/www/riverops/data/nginx /var/www/riverops/data/nginx/http.d /var/www/riverops/data/php /var/www/riverops/data/php-fpm"; then
     echo "[entrypoint][ERROR] 无法在 /var/www/riverops/data 下创建运行目录，请检查宿主机挂载目录权限，或设置 PUID/PGID 对齐。"
     exit 1
 fi
 riverops_require_writable_dir /var/www/riverops/data
 riverops_require_writable_dir /var/www/riverops/data/backups
+riverops_require_writable_dir /var/www/riverops/data/backups/jobs
+riverops_require_writable_dir /var/www/riverops/data/backups/tmp
 riverops_require_writable_dir /var/www/riverops/data/logs
 riverops_require_writable_dir /var/www/riverops/data/nginx
 riverops_require_writable_dir /var/www/riverops/data/php

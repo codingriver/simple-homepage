@@ -36,7 +36,7 @@
 
 | 文件 | 用途 |
 |------|------|
-| `composer.json` | PHP 依赖管理；PHP >= 8.2；PHPUnit ^11.0 为开发依赖；`shared/` 和 `admin/shared/` 加入 classmap autoload |
+| `composer.json` | PHP 依赖管理；PHP >= 8.2；WebDAV 备份要求 `ext-curl` / `ext-dom`；PHPUnit ^11.0 为开发依赖；`shared/` 和 `admin/shared/` 加入 classmap autoload |
 | `package.json` | npm 脚本定义 E2E/性能测试命令；开发依赖仅 `@playwright/test`、`@lhci/cli`、`typescript` |
 | `playwright.config.ts` | Playwright 配置：`testDir: './tests/e2e/full'`，`workers: 1`，`fullyParallel: false`，Projects: `chromium`（桌面端）和 `mobile-chrome`（Pixel 7），CI 时 `retries: 1` |
 | `tsconfig.json` | TypeScript 配置：`target: ES2022`，`module: commonjs`，`strict: true`，供 Playwright 测试和配置脚本使用 |
@@ -79,7 +79,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
   scheduled_tasks.php  # 计划任务（含日志）
   runtime_env.php / runtime_env_ajax.php # 运行环境管理（Node.js/npm 检测、apk 安装、musl 多版本安装/切换、实时进度轮询）
   nginx.php            # Nginx / PHP-FPM / PHP 自定义参数只读查看（修改后需重启 Docker 生效）
-  backups.php          # 备份创建 / 恢复 / 下载 / 删除
+  backups.php / backups_ajax.php # 本地备份及 WebDAV 手动上传、下载、恢复、删除与任务轮询
   logs.php / logs_api.php  # 日志中心
   debug.php            # 调试工具
   api/                 # 后台专用 API（task_status / task_log 等）
@@ -88,6 +88,7 @@ admin/           # 后台管理页面和 AJAX API（核心模块）
     header.php         # 后台页面模板头（权限校验、侧边栏、Flash Toast）
     footer.php         # 页面模板尾
     admin.css          # 后台暗色主题
+    backup_webdav_lib.php # WebDAV 配置、DAV 客户端、后台任务、远端保留策略
     dns_lib.php / dns_api_lib.php / ddns_lib.php / domain_expiry_lib.php / cron_lib.php / runtime_env_lib.php / alidns.php 等  # 各业务领域函数库
   assets/              # Ace Editor（本地）、SortableJS（CDN）
 
@@ -101,6 +102,7 @@ cli/             # CLI 脚本
   ddns_sync.php            # DDNS 同步
   domain_expiry_sync.php   # 域名有效期同步（刷新 RDAP 缓存）
   alidns_sync.php          # 阿里云 DNS 同步
+  backup_webdav_job.php    # 管理员手动触发的 WebDAV 备份/恢复后台任务
   manage_users.php         # 用户管理 CLI（list/info/add/passwd/del/reset）
 
 python/          # Python 辅助脚本
@@ -118,6 +120,8 @@ data/            # 持久化数据目录（必须挂载到宿主机）
   domain_expiry.json / domain_expiry_rdap_bootstrap.json
   ip_locks.json / sessions.json / auth_secret.key
   backups/ / logs/ / tasks/ / nginx/ / php-fpm/ / php/ / trash/
+  backup_webdav.json              # WebDAV 连接配置（独立于 config.json）
+  backups/jobs/ / backups/tmp/    # WebDAV 后台任务状态、日志和临时下载文件
 
   `users.json` 用户记录字段：
   - `password_hash`（string）：bcrypt 哈希
@@ -686,6 +690,19 @@ function openLogViewer(logContent, logName) {
 
 ---
 
+### 11. WebDAV 手动备份与恢复
+
+- WebDAV 仅作为可信远端文件存储，备份文件沿用本地未加密 JSON；允许其中包含 DNS/DDNS、Webhook 和计划任务脚本中的敏感配置。
+- 默认关闭 SSRF 防护、TLS、认证和自动备份；不创建计划任务，所有上传、下载、恢复和删除都必须由管理员在 `backups.php` 手动触发。
+- WebDAV 配置独立保存在 `data/backup_webdav.json`，避免与 `auth_remove_retired_config()` 中旧 WebDAV 服务字段冲突；密码不得返回前端或写入任务/审计日志。
+- 远端文件使用 `riverops_{instance_id}_backup_*.json`，上传先写 `.part_*` 再用 MOVE 完成；MOVE 不支持时可回退为最终 PUT。
+- 每次上传成功后，只清理当前 `instance_id` 的备份并固定保留最新 10 份；上传失败时禁止先清理旧备份。
+- 慢速 WebDAV 操作由 `cli/backup_webdav_job.php` 脱离 PHP-FPM 执行，状态/日志写入 `data/backups/jobs/`；页面重新进入后必须恢复仍在运行的任务，PID 消失时收敛为失败。
+- 远端恢复必须先流式下载到 `data/backups/tmp/`，限制为 32MB，解析并校验 JSON 后保存为本地备份，再复用 `backup_restore()` 创建本地保护快照并恢复。
+- SSRF 防护开启时仅允许解析到公网地址；关闭时不限制私网、回环或链路本地地址，但始终只允许 HTTP/HTTPS URL，并保持文件名、路径、XML 外部实体和 CSRF 边界校验。
+
+---
+
 ## 测试策略
 
 ### Playwright E2E
@@ -701,7 +718,7 @@ function openLogViewer(logContent, logName) {
 - **数据隔离**:
   - `tests/helpers/fixtures.ts` 扩展 Playwright base test，在每个测试前自动调用 `resetVolatileAppData()`。
   - `auth-cookie-session-regression.spec.ts` 覆盖登录完成页、旧 Cookie、max session 多选下线、`kick_oldest` 兜底、`auth_request` 失败日志、服务端 session 被撤销后重新登录、刷新与新标签页。
-  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，清空日志和备份、重置各类任务/会话等 JSON。
+  - `resetVolatileAppData()` 保留 `config.json`、`users.json`、`.installed`，清空日志和备份、重置各类任务/会话及 `backup_webdav.json`，并清理 WebDAV jobs/tmp。
   - 创建型数据需使用唯一值（`Date.now()` 时间戳），禁止测试间残留数据依赖。
   - 修改全局配置/文件后需在 `try/finally` 中回滚。
 - **定位策略**: 优先使用 `getByRole` / `getByLabel`，其次稳定 `id/name`，禁止把 `waitForTimeout` 当作主要同步手段。
@@ -715,7 +732,7 @@ function openLogViewer(logContent, logName) {
 - **包含源码**: `shared/`、`admin/shared/`
 - **Bootstrap**: `tests/phpunit/bootstrap.php`（创建临时 `DATA_DIR`，测试结束后自动清理）
 - **隔离方式**: 每个测试类的 `setUp()` 中手动 `unlink()` 相关 JSON 文件，确保零残留。
-- **当前覆盖**: 以 `tests/phpunit/` 下实际测试类为准，涵盖认证、会话、HTTP 客户端、计划任务、DNS/DDNS、域名有效期、运行环境、备份恢复、Nginx 配置、API Token 和审计日志等。
+- **当前覆盖**: 以 `tests/phpunit/` 下实际测试类为准，涵盖认证、会话、HTTP 客户端、计划任务、DNS/DDNS、域名有效期、运行环境、本地与 WebDAV 备份恢复、Nginx 配置、API Token 和审计日志等；WebDAV 单测使用本地临时 DAV 服务覆盖 MKCOL/PUT/MOVE/PROPFIND/GET/DELETE 与 10 份保留策略。
 
 ### Lighthouse 性能测试
 

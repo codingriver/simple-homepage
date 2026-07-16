@@ -48,4 +48,27 @@ final class DockerEntrypointTest extends TestCase
             $this->assertGreaterThan(0, filesize($t), basename($t) . ' should not be empty');
         }
     }
+
+    public function testDockerfileInstallsWebdavPhpExtensions(): void
+    {
+        $content = file_get_contents(realpath(__DIR__ . '/../../../Dockerfile'));
+        $this->assertStringContainsString('curl-dev', $content);
+        $this->assertStringContainsString('libxml2-dev', $content);
+        $this->assertStringContainsString('docker-php-ext-install -j"$(nproc)" curl dom', $content);
+    }
+
+    public function testEntrypointInitializesWebdavJobDirectories(): void
+    {
+        $content = file_get_contents(realpath(__DIR__ . '/../../../docker/entrypoint.sh'));
+        $this->assertStringContainsString('/data/backups/jobs', $content);
+        $this->assertStringContainsString('/data/backups/tmp', $content);
+        $this->assertStringContainsString('riverops_require_writable_dir /var/www/riverops/data/backups/jobs', $content);
+        $this->assertStringContainsString('riverops_require_writable_dir /var/www/riverops/data/backups/tmp', $content);
+    }
+
+    public function testDockerImageSeedsDataDirectoryForRiveropsUser(): void
+    {
+        $content = file_get_contents(realpath(__DIR__ . '/../../../Dockerfile'));
+        $this->assertStringContainsString('chown -R riverops:riverops /var/www/riverops/data', $content);
+    }
 }
