@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             @set_time_limit(0);
             backup_create('auto_settings');
             $cfg['site_name']          = $site_name_input;
-            $cfg['nav_domain']         = trim($_POST['nav_domain']        ?? '');
+            $cfg['panel_domain']         = trim($_POST['panel_domain']        ?? '');
             $cfg['token_expire_hours'] = max(1, (int)($_POST['token_expire_hours'] ?? 8));
             $cfg['remember_me_days']   = max(1, (int)($_POST['remember_me_days']   ?? 60));
             $cfg['login_fail_limit']   = max(1, (int)($_POST['login_fail_limit']   ?? 5));
@@ -95,10 +95,10 @@ $cfg = auth_get_config();
     <input type="hidden" name="action" value="save_settings">
     <div class="form-grid">
       <div class="form-group"><label>站点名称</label>
-        <input type="text" name="site_name" value="<?= htmlspecialchars($cfg['site_name']??'后台中心') ?>" required maxlength="60" placeholder="后台中心">
+        <input type="text" name="site_name" value="<?= htmlspecialchars($cfg['site_name']??'RiverOps') ?>" required maxlength="60" placeholder="RiverOps">
         <div class="form-hint" style="margin-top:6px">显示在浏览器标签页、登录页与后台侧边栏，最多 60 个字符。</div></div>
       <div class="form-group"><label>后台访问域名（可选）</label>
-        <input type="text" name="nav_domain" value="<?= htmlspecialchars($cfg['nav_domain']??'') ?>" placeholder="admin.yourdomain.com"></div>
+        <input type="text" name="panel_domain" value="<?= htmlspecialchars($cfg['panel_domain']??'') ?>" placeholder="admin.yourdomain.com"></div>
       <div class="form-group"><label>Token有效期（小时）</label>
         <input type="number" name="token_expire_hours" value="<?= (int)($cfg['token_expire_hours']??8) ?>" min="1"></div>
       <div class="form-group"><label>记住我有效期（天）</label>

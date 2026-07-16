@@ -92,7 +92,7 @@ var CSRF_TOKEN = <?= json_encode($CSRF, JSON_UNESCAPED_SLASHES) ?>;
 var NODE_STATE = <?= json_encode($node, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS) ?>;
 var CURRENT_JOB_ID = '';
 var JOB_POLL_TIMER = 0;
-var JOB_STORAGE_KEY = 'nav-runtime-env-job-id';
+var JOB_STORAGE_KEY = 'riverops-runtime-env-job-id';
 
 function runtimeEscape(value) {
   return String(value == null ? '' : value)
@@ -192,7 +192,7 @@ function loadRemoteVersions() {
 }
 
 function installApk() {
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: 'apk 安装 Node.js/npm',
     message: '将执行 apk add --no-cache nodejs npm。安装过程可能需要下载依赖，是否继续？',
     confirmText: '开始安装',
@@ -220,7 +220,7 @@ function switchVersion(version) {
 }
 
 function uninstallVersion(version) {
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '卸载 Node.js',
     message: '确定卸载 Node.js v' + version + '？该版本目录会被删除。',
     confirmText: '卸载',

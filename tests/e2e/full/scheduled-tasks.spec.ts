@@ -13,14 +13,14 @@ async function disableNativeTaskFormValidation(page: Parameters<typeof loginAsDe
 }
 
 async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  const navigationPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
   await page.locator('#task-modal button[form="task-form"]').click({ force: true });
-  await navPromise;
+  await navigationPromise;
 }
 
 async function aceEditorValue(page: Parameters<typeof loginAsDevAdmin>[0]) {
   return page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    const editor = (window as Window & { RiverOpsAceEditor?: { getValue(): string } }).RiverOpsAceEditor;
     return editor?.getValue() || '';
   });
 }
@@ -117,7 +117,7 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
     },
     { id: taskId, name: editedName }
   );
-  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
+  await expect(page.locator('#riverops-ace-editor-modal')).toBeVisible();
   await waitForTaskLogLines(page, taskId);
   await expect
     .poll(async () => {
@@ -135,8 +135,8 @@ test('scheduled tasks support create edit toggle run log clear and delete', asyn
     if (typeof fn !== 'function') throw new Error('clearCurrentLog not found');
     fn();
   });
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click({ force: true });
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click({ force: true });
   await expect
     .poll(async () => {
       try {

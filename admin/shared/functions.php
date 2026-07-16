@@ -631,7 +631,7 @@ function get_stats(): array {
  *
  * @return array{git_commit:string,git_ref:string,build_date:string,source:string}|null
  */
-function nav_read_build_info(): ?array {
+function riverops_read_build_info(): ?array {
     $path = dirname(__DIR__, 2) . '/.build-info.json';
     if (!is_readable($path)) {
         return null;
@@ -656,7 +656,7 @@ function nav_read_build_info(): ?array {
  * 读取 PHP display_errors 运行时 ini 文件状态
  */
 function debug_get_display_errors(): bool {
-    $ini_file = '/usr/local/etc/php/conf.d/99-nav-custom.ini';
+    $ini_file = '/usr/local/etc/php/conf.d/99-riverops-custom.ini';
     if (!file_exists($ini_file)) return false;
     $content = file_get_contents($ini_file);
     return (bool) preg_match('/^\s*display_errors\s*=\s*On/mi', $content);
@@ -679,8 +679,8 @@ function debug_set_display_errors(bool $on): array {
  */
 function debug_read_log(string $type, int $lines = 100): string {
     $map = [
-        'nginx_access'   => '/var/log/nginx/nav.access.log',
-        'nginx_error'    => '/var/log/nginx/nav.error.log',
+        'nginx_access'   => '/var/log/nginx/riverops.access.log',
+        'nginx_error'    => '/var/log/nginx/riverops.error.log',
         'nginx_main'     => '/var/log/nginx/error.log',
         'php_fpm'        => '/var/log/php-fpm/error.log',
         'request_timing' => DATA_DIR . '/logs/request_timing.log',
@@ -728,7 +728,7 @@ function debug_read_log(string $type, int $lines = 100): string {
 }
 
 // ══════════════════════════════════════════════════════════════
-// ── 站点健康检测
+// ── API Token
 // ══════════════════════════════════════════════════════════════
 
 define('API_TOKENS_FILE', DATA_DIR . '/api_tokens.json');
@@ -744,7 +744,7 @@ function api_tokens_save(array $tokens): void {
 }
 
 function api_token_generate(string $name): string {
-    $token = 'np_' . bin2hex(random_bytes(32));
+    $token = 'rop_' . bin2hex(random_bytes(32));
     $tokens = api_tokens_load();
     $tokens[$token] = [
         'name' => $name,
@@ -785,7 +785,7 @@ function webhook_send(string $event, string $username, string $ip, string $note 
     $type = $cfg['webhook_type'] ?? 'custom';
     if (!$url) return;
 
-    $site_name = $cfg['site_name'] ?? '后台中心';
+    $site_name = $cfg['site_name'] ?? 'RiverOps';
     $time_str  = date('Y-m-d H:i:s');
     $emoji_map = [
         'SUCCESS'      => '✅',
@@ -839,8 +839,8 @@ function webhook_test(): array {
     $type = $cfg['webhook_type'] ?? 'custom';
     if (!$url) return ['ok' => false, 'msg' => '未配置 Webhook URL'];
 
-    $site_name = $cfg['site_name'] ?? '后台中心';
-    $text = "🔔 [{$site_name}] Webhook 测试消息\n这是一条来自后台管理面板的测试通知，发送时间：" . date('Y-m-d H:i:s');
+    $site_name = $cfg['site_name'] ?? 'RiverOps';
+    $text = "🔔 [{$site_name}] Webhook 测试消息\n这是一条来自 RiverOps 运维控制台的测试通知，发送时间：" . date('Y-m-d H:i:s');
 
     switch ($type) {
         case 'telegram':
@@ -985,14 +985,14 @@ function nginx_editable_targets(): array {
             'path' => nginx_http_conf_path(),
         ],
     ];
-    $phpFpm = '/usr/local/etc/php-fpm.d/nav.conf';
+    $phpFpm = '/usr/local/etc/php-fpm.d/riverops.conf';
     if (is_file($phpFpm)) {
         $targets['php_fpm'] = [
-            'label' => 'PHP-FPM 池配置 (nav.conf)',
+            'label' => 'PHP-FPM 池配置 (riverops.conf)',
             'path' => $phpFpm,
         ];
     }
-    $phpIni = '/usr/local/etc/php/conf.d/99-nav-custom.ini';
+    $phpIni = '/usr/local/etc/php/conf.d/99-riverops-custom.ini';
     if (is_file($phpIni)) {
         $targets['php_custom'] = [
             'label' => 'PHP 自定义参数 (custom.ini)',
@@ -1077,7 +1077,7 @@ function nginx_test_config(): array {
 }
 
 function php_fpm_test_config(): array {
-    $test = admin_run_command('/usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/nav.conf');
+    $test = admin_run_command('/usr/local/sbin/php-fpm -t --fpm-config /usr/local/etc/php-fpm.d/riverops.conf');
     if ($test['ok']) {
         return [
             'ok' => true,

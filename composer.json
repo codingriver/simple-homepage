@@ -1,6 +1,6 @@
 {
-  "name": "codingriver/simple-homepage",
-  "description": "Simple Homepage Self-hosted Admin Panel",
+  "name": "codingriver/riverops",
+  "description": "RiverOps Lightweight Self-hosted Operations Console",
   "type": "project",
   "require": {
     "php": ">=8.2"

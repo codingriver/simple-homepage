@@ -172,7 +172,7 @@ test('public dns api allows external access with valid api token', async ({ page
 
   // 提取新生成的 token（从复制按钮的 data-token 获取完整 token）
   const token = await page.locator('button[data-token]').first().getAttribute('data-token');
-  expect(token).toMatch(/^np_[a-f0-9]{64}$/);
+  expect(token).toMatch(/^rop_[a-f0-9]{64}$/);
   if (token === null) throw new Error('生成的 API Token 为空');
 
   const ts = Date.now();

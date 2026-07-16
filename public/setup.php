@@ -24,18 +24,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password   = $_POST['password']        ?? '';
     $password2  = $_POST['password2']       ?? '';
     $site_name  = trim($_POST['site_name']  ?? '');
-    if ($site_name === '') $site_name = '后台中心';
-    $nav_domain = trim($_POST['nav_domain'] ?? '');
+    if ($site_name === '') $site_name = 'RiverOps';
+    $panel_domain = trim($_POST['panel_domain'] ?? '');
 
     $errors = auth_validate_setup_credentials($username, $password, $password2, $site_name);
 
     if (empty($errors)) {
-        auth_apply_initial_install($username, $password, $site_name, $nav_domain);
+        auth_apply_initial_install($username, $password, $site_name, $panel_domain);
         $step = 'done';
-        $nav_domain_preview = $nav_domain ?: 'nav.yourdomain.com';
+        $panel_domain_preview = $panel_domain ?: 'riverops.example.com';
     }
 }
-$nd = htmlspecialchars($_POST['nav_domain'] ?? 'nav.yourdomain.com') ?: 'nav.yourdomain.com';
+$nd = htmlspecialchars($_POST['panel_domain'] ?? 'riverops.example.com') ?: 'riverops.example.com';
 $nginx_cfg = <<<NGINX
 server {
     listen 80;
@@ -47,7 +47,7 @@ server {
     server_name {$nd};
     ssl_certificate     /etc/letsencrypt/live/{$nd}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/{$nd}/privkey.pem;
-    root /var/www/nav/public;
+    root /var/www/riverops/public;
     index index.php login.php;
     location ~* \.(json|sh|md|log)\$ { deny all; }
     location = /auth/verify.php {
@@ -59,10 +59,10 @@ server {
         include fastcgi_params;
     }
     location ^~ /admin/ {
-        alias /var/www/nav/admin/;
+        alias /var/www/riverops/admin/;
         location ~ \.php\$ {
             fastcgi_pass unix:/run/php/php8.2-fpm.sock;
-            fastcgi_param SCRIPT_FILENAME /var/www/nav/admin\$fastcgi_script_name;
+            fastcgi_param SCRIPT_FILENAME /var/www/riverops/admin\$fastcgi_script_name;
             include fastcgi_params;
         }
     }
@@ -78,7 +78,7 @@ NGINX;
 <!DOCTYPE html>
 <html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?></title>
+<title>安装向导 — <?= htmlspecialchars($_POST['site_name'] ?? 'RiverOps') ?></title>
 <script src="/gesture-guard.js" defer></script>
 <style>
 :root{--bg:#0f1117;--sf:#1a1d27;--bd:#2a2d3a;--ac:#6c63ff;--ach:#7c73ff;
@@ -131,7 +131,7 @@ text-decoration:none;margin-top:8px}
 <body><div class="wrap">
 <?php if ($step === 'form'): ?>
 <div class="card">
-  <div class="logo"><div class="icon">🧭</div><h1><?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?></h1><div class="sub">首次安装向导</div></div>
+  <div class="logo"><div class="icon">🧭</div><h1><?= htmlspecialchars($_POST['site_name'] ?? 'RiverOps') ?></h1><div class="sub">首次安装向导</div></div>
   <div class="steps"><div class="s on"></div><div class="s"></div></div>
   <?php if (!empty($errors)): ?>
   <ul class="errs"><?php foreach ($errors as $e): ?><li><?= htmlspecialchars($e) ?></li><?php endforeach; ?></ul>
@@ -150,10 +150,10 @@ text-decoration:none;margin-top:8px}
     <hr class="sep">
     <div class="fg"><label>站点名称<em>*</em></label>
       <input type="text" name="site_name" required
-             value="<?= htmlspecialchars($_POST['site_name'] ?? '后台中心') ?>"></div>
+             value="<?= htmlspecialchars($_POST['site_name'] ?? 'RiverOps') ?>"></div>
     <div class="fg"><label>后台域名</label>
-      <input type="text" name="nav_domain" placeholder="nav.yourdomain.com"
-             value="<?= htmlspecialchars($_POST['nav_domain'] ?? '') ?>">
+      <input type="text" name="panel_domain" placeholder="riverops.example.com"
+             value="<?= htmlspecialchars($_POST['panel_domain'] ?? '') ?>">
       <div class="ht">用于生成 Nginx 配置，可稍后在后台修改</div></div>
     <button type="submit" class="btn">开始使用 →</button>
   </form>

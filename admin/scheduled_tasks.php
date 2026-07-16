@@ -694,10 +694,10 @@ $CSRF = csrf_field();
 
 <script>
 var TASK_ROWS = <?= json_encode($tasks, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
-var CSRF_TOKEN = <?= json_encode($GLOBALS['_nav_csrf_token'] ?? '') ?>;
+var CSRF_TOKEN = <?= json_encode($GLOBALS['_riverops_csrf_token'] ?? '') ?>;
 var DEFAULT_TASK_COMMAND = <?= json_encode($default_task_command, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
 var DEFAULT_TASK_COMMANDS = <?= json_encode($default_task_commands, JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_APOS) ?>;
-var TASKS_ROOT = '/var/www/nav/data/tasks';
+var TASKS_ROOT = '/var/www/riverops/data/tasks';
 var taskStatusPollTimer = 0;
 var taskStatusPollInFlight = false;
 var taskStatusPollingStopped = false;
@@ -805,7 +805,7 @@ function runTaskAjax(id, btn) {
 
 function stopTaskAjax(id, btn) {
   if (!id) return;
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '停止任务',
     message: '确定停止任务？',
     confirmText: '确认',
@@ -908,7 +908,7 @@ function openTaskCommandEditor() {
   var title = '编辑计划任务脚本';
   if (taskName) title += ' · ' + taskName;
   if (scriptFile) title += ' · ' + scriptFile;
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: title,
     mode: taskRuntimeMode(runtime),
     value: content,
@@ -922,7 +922,7 @@ function openTaskCommandEditor() {
     },
     onAction: function(action, value) {
       if (action === 'close') {
-        NavAceEditor.close();
+        RiverOpsAceEditor.close();
         return;
       }
       if (action === 'save') {
@@ -931,7 +931,7 @@ function openTaskCommandEditor() {
           showToast('请先保存任务后再编辑脚本', 'error');
           return;
         }
-        NavAceEditor.setButtonDisabled('save', true);
+        RiverOpsAceEditor.setButtonDisabled('save', true);
         fetch('scheduled_tasks.php', {
           method: 'POST',
           headers: {
@@ -948,20 +948,20 @@ function openTaskCommandEditor() {
         })
         .then(function(r){ return r.json(); })
         .then(function(data){
-          NavAceEditor.setButtonDisabled('save', false);
+          RiverOpsAceEditor.setButtonDisabled('save', false);
           if (data.ok) {
             document.getElementById('fm-command').value = value;
             if (window._currentEditingTask) {
               window._currentEditingTask.command = value;
             }
-            NavAceEditor.markClean();
+            RiverOpsAceEditor.markClean();
             showToast(data.msg || '脚本已保存到文件', 'success');
           } else {
             showToast(data.msg || '保存失败', 'error');
           }
         })
         .catch(function(){
-          NavAceEditor.setButtonDisabled('save', false);
+          RiverOpsAceEditor.setButtonDisabled('save', false);
           showToast('请求失败，请检查网络', 'error');
         });
       }
@@ -1220,7 +1220,7 @@ function openLogModal(id, name, logFile) {
   logState = { id: id, name: name, page: 1, pages: 1, requestSeq: 0, limit: logState.limit || 100 };
   var title = '运行日志 · ' + name;
   if (logFile) title += ' · ' + logFile;
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: title,
     mode: 'text',
     value: '加载中…',
@@ -1260,7 +1260,7 @@ function openLogModal(id, name, logFile) {
     },
     onAction: function(action) {
       if (action === 'close') {
-        NavAceEditor.close();
+        RiverOpsAceEditor.close();
         return;
       }
       if (action === 'clear') {
@@ -1274,7 +1274,7 @@ function openLogModal(id, name, logFile) {
 
   // 首次加载并跳到最后一页
   var doInitialLoad = function() {
-    var pag = NavAceEditor._getPagination && NavAceEditor._getPagination();
+    var pag = RiverOpsAceEditor._getPagination && RiverOpsAceEditor._getPagination();
     if (!pag || typeof pag.fetch !== 'function') return;
     pag.fetch(1, logState.limit || 100)
       .then(function(d) {
@@ -1287,23 +1287,23 @@ function openLogModal(id, name, logFile) {
         return d;
       })
       .then(function(d) {
-        NavAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
+        RiverOpsAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
         var text = typeof d.lines === 'string' ? d.lines : (d.lines || []).join('\n');
-        NavAceEditor.setValue(text || '（空）');
+        RiverOpsAceEditor.setValue(text || '（空）');
         if (text) {
           var totalLines = text.split('\n').length;
-          NavAceEditor.gotoLine(totalLines, 0, false);
+          RiverOpsAceEditor.gotoLine(totalLines, 0, false);
         }
       })
       .catch(function(err) {
-        NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
+        RiverOpsAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
       });
   };
-  // 延迟执行，确保 NavAceEditor 弹窗已渲染完成
+  // 延迟执行，确保 RiverOpsAceEditor 弹窗已渲染完成
   setTimeout(doInitialLoad, 50);
 }
 function closeLogModal() {
-  NavAceEditor.close();
+  RiverOpsAceEditor.close();
 }
 /* 弹窗背景点击关闭防护（阻止 mousedown 在内容区、mouseup 在背景层的误触） */
 (function(){
@@ -1320,7 +1320,7 @@ function closeLogModal() {
 
 function clearCurrentLog() {
   if (!logState.id) return;
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '清空日志',
     message: '确定清空当前任务日志？此操作不可恢复。',
     confirmText: '清空',
@@ -1328,7 +1328,7 @@ function clearCurrentLog() {
     danger: true,
     onConfirm: function() {
       stopTaskStatusPolling();
-      NavAceEditor.setButtonDisabled('clear', true);
+      RiverOpsAceEditor.setButtonDisabled('clear', true);
       fetch('scheduled_tasks.php', {
         method: 'POST',
         headers: {
@@ -1343,7 +1343,7 @@ function clearCurrentLog() {
       })
       .then(function(r){ return r.json(); })
       .then(function(data){
-        NavAceEditor.setButtonDisabled('clear', false);
+        RiverOpsAceEditor.setButtonDisabled('clear', false);
         if (data.ok) {
           showToast(data.msg || '日志已清空', 'success');
           logLoadPage(1, false);
@@ -1352,7 +1352,7 @@ function clearCurrentLog() {
         }
       })
       .catch(function(){
-        NavAceEditor.setButtonDisabled('clear', false);
+        RiverOpsAceEditor.setButtonDisabled('clear', false);
         showToast('请求失败，请检查网络', 'error');
       });
     }
@@ -1377,7 +1377,7 @@ function logLoadPage(p, jumpToLast, options) {
   logState.page = p;
   var shouldStickBottom = !!options.forceScrollBottom;
   if (!options.silent) {
-    NavAceEditor.setValue('加载中…');
+    RiverOpsAceEditor.setValue('加载中…');
   }
 
   var url = 'api/task_log.php?id=' + encodeURIComponent(logState.id) + '&page=' + p + '&limit=' + (logState.limit || 100);
@@ -1387,7 +1387,7 @@ function logLoadPage(p, jumpToLast, options) {
     .then(function(d) {
       if (requestSeq !== logState.requestSeq) return;
       if (d.error) {
-        if (!options.silent) NavAceEditor.setValue('请求失败：' + d.error);
+        if (!options.silent) RiverOpsAceEditor.setValue('请求失败：' + d.error);
         return;
       }
       logState.pages = d.total_pages || 1;
@@ -1400,35 +1400,35 @@ function logLoadPage(p, jumpToLast, options) {
       }
 
       var per = d.limit || logState.limit || 100;
-      NavAceEditor.setPagination(d.page, d.total_pages, per, d.total_lines);
+      RiverOpsAceEditor.setPagination(d.page, d.total_pages, per, d.total_lines);
 
       if (!d.lines || d.lines.length === 0) {
-        if (!options.silent) NavAceEditor.setValue('暂无日志记录');
+        if (!options.silent) RiverOpsAceEditor.setValue('暂无日志记录');
         return;
       }
       var text = d.lines.join('\n');
       if (!options.silent) {
-        NavAceEditor.setValue(text);
+        RiverOpsAceEditor.setValue(text);
       } else {
-        var current = NavAceEditor.getValue();
+        var current = RiverOpsAceEditor.getValue();
         if (current !== text) {
-          NavAceEditor.setValue(text);
+          RiverOpsAceEditor.setValue(text);
         }
       }
       if (shouldStickBottom && d.page >= d.pages) {
         var totalLines = text.split('\n').length;
-        NavAceEditor.gotoLine(totalLines, 0, false);
+        RiverOpsAceEditor.gotoLine(totalLines, 0, false);
       }
     })
     .catch(function(e){
       if (requestSeq !== logState.requestSeq) return;
-      if (!options.silent) NavAceEditor.setValue('请求失败：' + e.message);
+      if (!options.silent) RiverOpsAceEditor.setValue('请求失败：' + e.message);
     });
 }
 </script>
 
 <script src="assets/ace/ace.js"></script>
 <script src="assets/ace/ext-searchbox.js"></script>
-<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
+<?php require_once __DIR__ . '/shared/riverops_ace_editor.php'; ?>
 
 <?php require_once __DIR__ . '/shared/footer.php'; ?>

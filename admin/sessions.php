@@ -77,7 +77,7 @@ $filterUsername = trim($_GET['username'] ?? '');
     wrap.querySelectorAll('.revoke-form').forEach(function(form){
       form.addEventListener('submit', function(e){
         e.preventDefault();
-        NavConfirm.open({
+        RiverOpsConfirm.open({
           title: '强制下线',
           message: '确认强制下线该会话？',
           confirmText: '确认',

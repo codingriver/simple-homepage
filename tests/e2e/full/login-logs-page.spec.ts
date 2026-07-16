@@ -5,7 +5,7 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile } from '../../helpers/cli';
 
 const authLogPath = path.resolve(__dirname, '../../../data/logs/auth.log');
-const containerAuthLogPath = '/var/www/nav/data/logs/auth.log';
+const containerAuthLogPath = '/var/www/riverops/data/logs/auth.log';
 
 test('login logs endpoint returns json records and logs center renders auth log with filter', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {

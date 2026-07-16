@@ -1,5 +1,5 @@
 # ============================================================
-# 后台管理面板 Docker Compose 配置（本地构建专用）
+# RiverOps Docker Compose 配置（本地构建专用）
 # 此文件位于 local/ 目录，Dockerfile 在上级目录
 # 使用方式：
 #   cp local/.env.example local/.env   # 复制并编辑配置
@@ -11,7 +11,7 @@
 # ============================================================
 
 services:
-  nav:
+  riverops:
     build:
       context: ..              # Dockerfile 在上级项目根目录
       dockerfile: Dockerfile
@@ -21,7 +21,7 @@ services:
         - GIT_COMMIT=${GIT_COMMIT:-unknown}
         - GIT_REF=${GIT_REF:-unknown}
         - BUILD_DATE=${BUILD_DATE:-unknown}
-        - GIT_REPO_URL=${GIT_REPO_URL:-https://github.com/codingriver/simple-homepage}
+        - GIT_REPO_URL=${GIT_REPO_URL:-https://github.com/codingriver/riverops}
         # 构建期代理：仅透传当前环境中“已定义”的标准代理变量
         - HTTP_PROXY
         - HTTPS_PROXY
@@ -31,15 +31,15 @@ services:
         - no_proxy
         - ALL_PROXY
         - all_proxy
-    image: codingriver/simple-homepage:latest
-    container_name: ${CONTAINER_NAME:-simple-homepage}
+    image: codingriver/riverops:latest
+    container_name: ${CONTAINER_NAME:-riverops}
     restart: unless-stopped
 
     ports:
-      - "${NAV_PORT:-58080}:58080"
+      - "${RIVEROPS_PORT:-58080}:58080"
 
     environment:
-      - NAV_PORT=58080     # 容器内部默认端口 58080（host 模式更不易冲突）
+      - RIVEROPS_PORT=58080     # 容器内部默认端口 58080（host 模式更不易冲突）
       - TZ=${TZ:-Asia/Shanghai}
       - PUID=${PUID:-}     # 可选：显式覆盖；留空时启动后自动按 data 目录 owner 对齐
       - PGID=${PGID:-}
@@ -54,10 +54,10 @@ services:
 
     volumes:
       # ── 持久化数据目录（必须挂载，否则重建容器数据丢失）──
-      - ${DATA_DIR:-../data}:/var/www/nav/data
+      - ${DATA_DIR:-../data}:/var/www/riverops/data
 
       # ── 挂载 Nginx 站点配置 ──
-      - ../nginx-conf:/var/www/nav/nginx-conf:ro
+      - ../nginx-conf:/var/www/riverops/nginx-conf:ro
 
       # ── 可选：挂载日志到宿主机 ──
       # - ../logs/nginx:/var/log/nginx
@@ -68,8 +68,8 @@ services:
       disable: true
 
     labels:
-      - "com.simple-homepage.version=latest"
-      - "com.simple-homepage.description=Simple Homepage self-hosted admin panel"
+      - "com.riverops.version=latest"
+      - "com.riverops.description=RiverOps lightweight self-hosted operations console"
 
 # ============================================================
 # 常用命令

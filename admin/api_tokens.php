@@ -123,7 +123,7 @@ function copyToken(btn) {
 function deleteToken(btn) {
     var token = btn.getAttribute('data-token') || '';
     var name = btn.getAttribute('data-name') || '';
-    NavConfirm.open({
+    RiverOpsConfirm.open({
         title: '删除 API Token',
         message: '确认删除 Token「' + name + '」？此操作不可恢复。',
         confirmText: '删除',

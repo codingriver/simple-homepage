@@ -60,8 +60,8 @@ test('settings clear scheduled tasks and clear ddns tasks remove all user tasks'
 
   // clear scheduled tasks
   await page.locator('form').filter({ has: page.locator('input[name="action"][value="clear_scheduled_tasks"]') }).getByRole('button').click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect(page.locator('body')).toContainText('已清空');
 
   const scheduledAfter = JSON.parse(await fs.readFile(scheduledTasksFile, 'utf8').catch(() => '{}'));
@@ -72,8 +72,8 @@ test('settings clear scheduled tasks and clear ddns tasks remove all user tasks'
   // clear ddns tasks
   await page.goto('/admin/settings.php#advanced');
   await page.locator('form').filter({ has: page.locator('input[name="action"][value="clear_ddns_tasks"]') }).getByRole('button').click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect(page.locator('body')).toContainText('已清空');
 
   const ddnsAfter = JSON.parse(await fs.readFile(ddnsTasksFile, 'utf8').catch(() => '{}'));

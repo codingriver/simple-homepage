@@ -3,8 +3,8 @@
 
 # 运行时数据（通过 Volume 挂载，不打入镜像）
 data/
-# 旧版目录名（迁移到 data/ 前本地可能仍存在）
-nav-data/
+# 可选的本地数据目录
+riverops-data/
 
 # 环境配置（敏感信息）
 .env
@@ -41,6 +41,7 @@ logs/
 *.swo
 .DS_Store
 .cache/
+.phpunit.cache/
 
 # Python 缓存
 python/__pycache__/

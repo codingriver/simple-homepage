@@ -1,9 +1,9 @@
-# Simple Homepage（后台管理面板）
+# RiverOps（轻量自托管运维控制台）
 
-一个轻量、自托管的多功能 **后台管理面板**，集中管理 DNS / DDNS / 域名有效期 / 计划任务 / Nginx / 备份 / 用户 / API Token。
+RiverOps 是一个轻量、自托管的 **运维控制台**，集中管理 DNS / DDNS / 域名有效期 / 计划任务 / 运行环境 / 备份 / 用户 / API Token。
 适合个人、家庭网络、NAS、软路由、小型 VPS 使用。
 
-> ⚠️ 项目历史上曾包含"导航首页"前台，目前已精简为**纯后台管理**。前台仅保留登录页，根路径 `/` 会自动跳转至 `/admin/index.php`。
+公共入口仅保留安装与登录流程，根路径 `/` 自动跳转至 `/admin/index.php`。
 
 主要能力：
 
@@ -20,8 +20,8 @@
 
 项目地址：
 
-- GitHub: <https://github.com/codingriver/simple-homepage>
-- Docker Hub: <https://hub.docker.com/r/codingriver/simple-homepage>
+- GitHub: <https://github.com/codingriver/riverops>
+- Docker Hub: <https://hub.docker.com/r/codingriver/riverops>
 
 镜像支持多架构：
 
@@ -117,8 +117,8 @@ docker compose version
 ### 1. 创建部署目录
 
 ```bash
-mkdir -p ~/simple-homepage
-cd ~/simple-homepage
+mkdir -p ~/riverops
+cd ~/riverops
 mkdir -p data
 ```
 
@@ -132,16 +132,16 @@ mkdir -p data
 
 ```yaml
 # ============================================================
-# Simple Homepage 官方一键部署（推荐新手）
+# RiverOps 官方一键部署（推荐新手）
 # 启动: docker compose up -d
 # 停止: docker compose down
 # 日志: docker compose logs -f
 # ============================================================
 
 services:
-  simple-homepage:
-    image: codingriver/simple-homepage:latest
-    container_name: simple-homepage
+  riverops:
+    image: codingriver/riverops:latest
+    container_name: riverops
     restart: unless-stopped
 
     ports:
@@ -149,7 +149,7 @@ services:
 
     environment:
       # 容器内默认端口（与端口映射保持一致）
-      NAV_PORT: "58080"
+      RIVEROPS_PORT: "58080"
       TZ: "Asia/Shanghai"
       # 可选：显式覆盖运行用户 UID/GID；留空时容器启动后自动按 data 目录 owner 对齐
       PUID: "${PUID:-}"
@@ -157,9 +157,7 @@ services:
 
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里
-      - ./data:/var/www/nav/data
-      # - /var/run/docker.sock:/var/run/docker.sock
-
+      - ./data:/var/www/riverops/data
     healthcheck:
       disable: true
 ```
@@ -177,7 +175,7 @@ docker compose up -d
 docker ps
 ```
 
-如果你看到容器名 `simple-homepage` 在运行，就说明启动成功了。
+如果你看到容器名 `riverops` 在运行，就说明启动成功了。
 
 ### 4. 打开网页
 
@@ -265,13 +263,13 @@ http://192.168.1.10:58080
 
 ```yaml
 environment:
-  NAV_PORT: "58080"
+  RIVEROPS_PORT: "58080"
   TZ: "Asia/Shanghai"
   PUID: "${PUID:-}"
   PGID: "${PGID:-}"
   ADMIN: "admin"
   PASSWORD: "ChangeMe123!"
-  NAME: "后台管理"
+  NAME: "RiverOps"
   DOMAIN: "panel.example.com"
 ```
 
@@ -292,7 +290,7 @@ docker compose up -d
 后续更新很简单：
 
 ```bash
-cd ~/simple-homepage
+cd ~/riverops
 docker compose pull
 docker compose up -d
 ```
@@ -321,16 +319,16 @@ docker compose restart
 docker compose down
 
 # 进入容器
-docker exec -it simple-homepage sh
+docker exec -it riverops sh
 
 # 查看用户列表
-docker exec simple-homepage php /var/www/nav/manage_users.php list
+docker exec riverops php /var/www/riverops/manage_users.php list
 
 # 修改密码
-docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+docker exec riverops php /var/www/riverops/manage_users.php passwd admin 新密码
 
 # 重置安装状态（清空配置，重新进入安装向导）
-docker exec simple-homepage php /var/www/nav/manage_users.php reset
+docker exec riverops php /var/www/riverops/manage_users.php reset
 ```
 
 ---
@@ -346,7 +344,7 @@ docker exec simple-homepage php /var/www/nav/manage_users.php reset
 容器里的对应路径是：
 
 ```text
-/var/www/nav/data
+/var/www/riverops/data
 ```
 
 常见文件说明：
@@ -404,7 +402,7 @@ ports:
 ports:
   - "8080:8080"
 environment:
-  NAV_PORT: "8080"
+  RIVEROPS_PORT: "8080"
 ```
 
 改完重新执行：
@@ -426,16 +424,16 @@ docker compose up -d
 ```nginx
 server {
     listen 80;
-    server_name nav.yourdomain.com;
+    server_name riverops.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name nav.yourdomain.com;
+    server_name riverops.example.com;
 
-    ssl_certificate     /etc/letsencrypt/live/nav.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/nav.yourdomain.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/riverops.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/riverops.example.com/privkey.pem;
 
     location / {
         proxy_pass         http://127.0.0.1:58080;
@@ -452,7 +450,7 @@ server {
 ### Caddy
 
 ```
-nav.yourdomain.com {
+riverops.example.com {
     reverse_proxy 127.0.0.1:58080
 }
 ```
@@ -471,7 +469,7 @@ nav.yourdomain.com {
 
 1. 确认容器在运行：
    ```bash
-   docker ps | grep simple-homepage
+   docker ps | grep riverops
    ```
 
 2. 查看日志：
@@ -490,20 +488,20 @@ nav.yourdomain.com {
 
 5. 本地测试容器内服务是否正常：
    ```bash
-   docker exec simple-homepage curl -s http://localhost:58080/login.php
+   docker exec riverops curl -s http://localhost:58080/login.php
    ```
 
 ---
 
 ### Q2: 重建容器后数据没了
 
-**原因：** 通常是因为没有挂载 `./data:/var/www/nav/data`，或者挂载路径写错了。
+**原因：** 通常是因为没有挂载 `./data:/var/www/riverops/data`，或者挂载路径写错了。
 
 **修复：** 检查 `docker-compose.yml` 中的 `volumes` 部分，确保有：
 
 ```yaml
 volumes:
-  - ./data:/var/www/nav/data
+  - ./data:/var/www/riverops/data
 ```
 
 如果数据已经丢失且没有备份，无法恢复。**请务必定期备份 `data` 目录。**
@@ -561,17 +559,17 @@ sudo chown -R $(id -u):$(id -g) ./data
 
 **方法 1：** 通过命令行修改密码（不需要知道原密码）：
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+docker exec riverops php /var/www/riverops/manage_users.php passwd admin 新密码
 ```
 
 **方法 2：** 如果不知道用户名，先查看用户列表：
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php list
+docker exec riverops php /var/www/riverops/manage_users.php list
 ```
 
 **方法 3：** 如果完全无法恢复，可以重置整个系统（会清空所有配置，但备份文件保留）：
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php reset
+docker exec riverops php /var/www/riverops/manage_users.php reset
 ```
 执行后刷新浏览器，会重新进入安装向导。
 
@@ -601,14 +599,14 @@ ports:
 
 2. 可能是 Nginx 配置格式问题。进入容器检查：
    ```bash
-   docker exec simple-homepage nginx -t
+   docker exec riverops nginx -t
    ```
 
 3. 如果是持久化配置损坏，请修改 `data/nginx`、`data/php-fpm` 或 `data/php` 下的配置文件，然后重启 Docker 容器。
 
 4. 极端情况下可以重置：
    ```bash
-   docker exec simple-homepage php /var/www/nav/manage_users.php reset
+   docker exec riverops php /var/www/riverops/manage_users.php reset
    ```
 
 ---
@@ -632,17 +630,17 @@ ports:
 **备份：**
 
 ```bash
-cd ~/simple-homepage
-tar -czf nav-backup-$(date +%Y%m%d).tar.gz ./data
+cd ~/riverops
+tar -czf riverops-backup-$(date +%Y%m%d).tar.gz ./data
 ```
 
 **迁移到新机器：**
 
 1. 在新机器上按小白部署流程创建目录和 `docker-compose.yml`
-2. 复制备份包到新机器的 `~/simple-homepage/` 目录
+2. 复制备份包到新机器的 `~/riverops/` 目录
 3. 解压：
    ```bash
-   tar -xzf nav-backup-20260101.tar.gz
+   tar -xzf riverops-backup-20260101.tar.gz
    ```
 4. 启动容器：
    ```bash
@@ -661,11 +659,11 @@ tar -czf nav-backup-$(date +%Y%m%d).tar.gz ./data
 2. 查看任务日志：`data/tasks/任务名.log`
 3. 确认容器内 crond 在运行：
    ```bash
-   docker exec simple-homepage ps aux | grep cron
+   docker exec riverops ps aux | grep cron
    ```
 4. 检查任务命令是否正确，可以在容器内手动测试：
    ```bash
-   docker exec simple-homepage sh /var/www/nav/data/tasks/你的任务.sh
+   docker exec riverops sh /var/www/riverops/data/tasks/你的任务.sh
    ```
 
 ---

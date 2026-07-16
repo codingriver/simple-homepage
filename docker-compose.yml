@@ -6,9 +6,9 @@
 # ============================================================
 
 services:
-  simple-homepage:
-    image: codingriver/simple-homepage:latest
-    container_name: simple-homepage
+  riverops:
+    image: codingriver/riverops:latest
+    container_name: riverops
     restart: unless-stopped
 
     ports:
@@ -16,7 +16,7 @@ services:
 
     environment:
       # 容器内默认端口（与端口映射保持一致）
-      NAV_PORT: "58080"
+      RIVEROPS_PORT: "58080"
       TZ: "Asia/Shanghai"
       # 可选：显式覆盖运行用户 UID/GID；留空时容器启动后自动按 data 目录 owner 对齐
       PUID: "${PUID:-}"
@@ -33,10 +33,8 @@ services:
 
     volumes:
       # 必须挂载：用户、配置、日志、备份都在这里
-      - ./data:/var/www/nav/data
+      - ./data:/var/www/riverops/data
       # 挂载 Nginx 站点配置，便于本地调整容器默认站点
-      - ./nginx-conf:/var/www/nav/nginx-conf:ro
-      # - /var/run/docker.sock:/var/run/docker.sock
-
+      - ./nginx-conf:/var/www/riverops/nginx-conf:ro
     healthcheck:
       disable: true

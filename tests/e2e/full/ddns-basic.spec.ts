@@ -107,8 +107,8 @@ test('admin can create edit toggle and delete a ddns task from the page', async 
     if (typeof fn !== 'function') throw new Error('deleteTask not found');
     void fn(id, name);
   }, { id: taskId, name: editedName });
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect(page.locator(`tr:has-text("${editedName}")`)).toHaveCount(0);
 
   await tracker.assertNoClientErrors();

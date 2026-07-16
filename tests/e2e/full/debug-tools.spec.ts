@@ -18,13 +18,13 @@ test('debug tools page supports display errors toggle and clear cookie', async (
   await expect(page.locator('#build-meta')).toBeVisible();
   const toggleForm = page.locator('form:has(input[name="action"][value="toggle_display_errors"])');
   await toggleForm.getByRole('button').click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect(page.locator('body')).toContainText(/display_errors 已开启|display_errors 已关闭/);
 
   await page.getByRole('button', { name: /清除当前 Cookie/ }).click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect(page).toHaveURL(/login\.php/);
   await expect(page.locator('input[name="username"]')).toBeVisible();
 

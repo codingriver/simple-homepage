@@ -5,7 +5,7 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const authLogPath = path.resolve(__dirname, '../../../data/logs/auth.log');
-const containerAuthLogPath = '/var/www/nav/data/logs/auth.log';
+const containerAuthLogPath = '/var/www/riverops/data/logs/auth.log';
 
 test('login logs and logs center support frontend filtering and level selection', async ({ page }) => {
   test.setTimeout(120000);

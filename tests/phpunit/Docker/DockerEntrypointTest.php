@@ -34,10 +34,10 @@ final class DockerEntrypointTest extends TestCase
         }
     }
 
-    public function testNginxSiteConfContainsNavPortPlaceholder(): void
+    public function testNginxSiteConfContainsRiverOpsPortPlaceholder(): void
     {
         $content = file_get_contents(realpath(__DIR__ . '/../../../nginx-conf/docker-site.conf'));
-        $this->assertStringContainsString('NAV_PORT', $content);
+        $this->assertStringContainsString('RIVEROPS_PORT', $content);
     }
 
     public function testNginxTemplatesAreNotEmpty(): void

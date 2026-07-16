@@ -12,8 +12,8 @@ final class RequestTimingTest extends TestCase
     public function testDisabledByDefaultInCli(): void
     {
         @unlink(DATA_DIR . '/logs/request_timing.log');
-        putenv('NAV_REQUEST_TIMING');
-        putenv('NAV_REQUEST_TIMING_CLI');
+        putenv('RIVEROPS_REQUEST_TIMING');
+        putenv('RIVEROPS_REQUEST_TIMING_CLI');
 
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/test';
@@ -30,7 +30,7 @@ final class RequestTimingTest extends TestCase
     public function testWritesRecvAndDoneWhenEnabled(): void
     {
         @unlink(DATA_DIR . '/logs/request_timing.log');
-        putenv('NAV_REQUEST_TIMING_CLI=1');
+        putenv('RIVEROPS_REQUEST_TIMING_CLI=1');
 
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/timing-test';
@@ -48,11 +48,11 @@ final class RequestTimingTest extends TestCase
     /**
      * @runInSeparateProcess
      */
-    public function testDisabledByNavRequestTimingZero(): void
+    public function testDisabledByRiverOpsRequestTimingZero(): void
     {
         @unlink(DATA_DIR . '/logs/request_timing.log');
-        putenv('NAV_REQUEST_TIMING=0');
-        putenv('NAV_REQUEST_TIMING_CLI=1');
+        putenv('RIVEROPS_REQUEST_TIMING=0');
+        putenv('RIVEROPS_REQUEST_TIMING_CLI=1');
 
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/disabled';

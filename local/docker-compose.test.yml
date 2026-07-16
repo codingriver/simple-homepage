@@ -7,13 +7,13 @@ services:
       - playwright-node-modules:/work/node_modules
       - playwright-cache:/root/.cache/ms-playwright
     environment:
-      BASE_URL: http://nav:58080
+      BASE_URL: http://riverops:58080
       CI: "1"
       npm_config_registry: https://registry.npmmirror.com
     command: >-
       sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e"
     depends_on:
-      - nav
+      - riverops
 
   playwright-mobile:
     image: docker.1ms.run/cypress/browsers:latest
@@ -23,13 +23,13 @@ services:
       - playwright-node-modules:/work/node_modules
       - playwright-cache:/root/.cache/ms-playwright
     environment:
-      BASE_URL: http://nav:58080
+      BASE_URL: http://riverops:58080
       CI: "1"
       npm_config_registry: https://registry.npmmirror.com
     command: >-
       sh -lc "if [ ! -d node_modules/@playwright/test ]; then npm install --no-audit --no-fund --force; fi && npx playwright install chromium && npm run test:e2e:mobile"
     depends_on:
-      - nav
+      - riverops
 
   lighthouse:
     image: docker.1ms.run/cypress/browsers:latest
@@ -42,9 +42,9 @@ services:
       npm_config_registry: https://registry.npmmirror.com
     command: >-
       sh -lc "if [ ! -d node_modules/@lhci/cli ]; then npm install --no-audit --no-fund --force; fi && npm run test:perf"
-    network_mode: service:nav
+    network_mode: service:riverops
     depends_on:
-      - nav
+      - riverops
 
 volumes:
   playwright-node-modules:

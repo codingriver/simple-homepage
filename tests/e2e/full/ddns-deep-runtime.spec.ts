@@ -72,15 +72,15 @@ test('ddns execution updates latest value and supports multi-page log navigation
     },
     { id: taskId, name: taskName }
   );
-  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
-  await expect(page.locator('#nav-ace-pag-prev')).toBeVisible();
-  await expect(page.locator('#nav-ace-pag-next')).toBeVisible();
+  await expect(page.locator('#riverops-ace-editor-modal')).toBeVisible();
+  await expect(page.locator('#riverops-ace-pag-prev')).toBeVisible();
+  await expect(page.locator('#riverops-ace-pag-next')).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    const editor = (window as Window & { RiverOpsAceEditor?: { getValue(): string } }).RiverOpsAceEditor;
     return editor?.getValue() || '';
   })).toMatch(/（空）|任务开始执行|来源解析|DNS 更新|跳过|失败|\[/);
   await expect.poll(() => page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    const editor = (window as Window & { RiverOpsAceEditor?: { getValue(): string } }).RiverOpsAceEditor;
     return editor?.getValue() || '';
   })).toMatch(/（空）|https:\/\/api\.ipify\.org|https:\/\/api64\.ipify\.org|https:\/\/api\.4ce\.cn|https:\/\/vps789\.com|http:\/\/127\.0\.0\.1\/api\/dns\.php/);
 

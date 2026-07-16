@@ -359,9 +359,9 @@ function runtime_env_run_stream_command(
     runtime_env_job_append_log($jobId, '$ ' . $command);
 
     $env = [
-        'HOME' => '/home/navwww',
-        'USER' => 'navwww',
-        'LOGNAME' => 'navwww',
+        'HOME' => '/home/riverops',
+        'USER' => 'riverops',
+        'LOGNAME' => 'riverops',
         'PATH' => runtime_env_node_bin_dir() . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'SHELL' => '/bin/sh',
         'LANG' => 'en_US.UTF-8',
@@ -682,9 +682,9 @@ function runtime_env_exec(string $command, ?string $cwd = null, array $env = [])
     $cwd = ($cwd !== null && is_dir($cwd)) ? $cwd : RUNTIME_ENV_ROOT;
     runtime_env_ensure_dirs();
     $baseEnv = [
-        'HOME' => '/home/navwww',
-        'USER' => 'navwww',
-        'LOGNAME' => 'navwww',
+        'HOME' => '/home/riverops',
+        'USER' => 'riverops',
+        'LOGNAME' => 'riverops',
         'PATH' => runtime_env_node_bin_dir() . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'SHELL' => '/bin/sh',
         'LANG' => 'en_US.UTF-8',

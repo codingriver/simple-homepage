@@ -19,7 +19,7 @@ test('build metadata compare hint reacts to mocked GitHub API results', async ({
 
   await loginAsDevAdmin(page);
   await page.goto('/admin/debug.php');
-  const raw = await page.locator('#nav-build-info-json').count();
+  const raw = await page.locator('#riverops-build-info-json').count();
   if (raw === 0) {
     await expect(page.locator('#build-meta')).toBeVisible();
     await tracker.assertNoClientErrors();

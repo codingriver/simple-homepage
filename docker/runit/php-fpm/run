@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/nav.conf
+exec /usr/local/sbin/php-fpm --nodaemonize --fpm-config /usr/local/etc/php-fpm.d/riverops.conf

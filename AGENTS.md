@@ -7,12 +7,12 @@
 
 ## 项目概述
 
-**Simple Homepage**（后台管理面板）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **后台管理面板**，提供 DNS / DDNS / 域名有效期 / 计划任务 / 运行配置查看 / 备份 / 用户 / API Token / Webhook 等运维能力。
+**RiverOps**（轻量自托管运维控制台）是一个面向个人、家庭网络、NAS、软路由、小型 VPS 的自托管 **运维控制台**，提供 DNS / DDNS / 域名有效期 / 计划任务 / 运行配置查看 / 备份 / 用户 / API Token / Webhook 等运维能力。
 
-> 历史版本曾包含"导航首页"前台（站点 / 分组 / 反向代理生成 / favicon / 健康检查 / SSH / WebDAV 等模块），现已全部移除。当前仅保留登录页，根路径 `/` 自动跳转至 `/admin/index.php`。
+公共入口仅保留安装与登录流程，根路径 `/` 自动跳转至 `/admin/index.php`。
 
-- **GitHub**: https://github.com/codingriver/simple-homepage
-- **Docker Hub**: https://hub.docker.com/r/codingriver/simple-homepage
+- **GitHub**: https://github.com/codingriver/riverops
+- **Docker Hub**: https://hub.docker.com/r/codingriver/riverops
 
 ---
 
@@ -40,16 +40,16 @@
 | `package.json` | npm 脚本定义 E2E/性能测试命令；开发依赖仅 `@playwright/test`、`@lhci/cli`、`typescript` |
 | `playwright.config.ts` | Playwright 配置：`testDir: './tests/e2e/full'`，`workers: 1`，`fullyParallel: false`，Projects: `chromium`（桌面端）和 `mobile-chrome`（Pixel 7），CI 时 `retries: 1` |
 | `tsconfig.json` | TypeScript 配置：`target: ES2022`，`module: commonjs`，`strict: true`，供 Playwright 测试和配置脚本使用 |
-| `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/simple-homepage:latest`，端口 `58080`，挂载 `./data`；运行期可透传 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 等出站代理变量 |
+| `docker-compose.yml` | 生产环境一键部署 Compose：官方镜像 `codingriver/riverops:latest`，端口 `58080`，挂载 `./data`；运行期可透传 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 等出站代理变量 |
 | `phpunit.xml` | PHPUnit 配置：测试套件 `Shared` / `Admin` / `Public` / `Cli` / `Docker`，bootstrap 为 `tests/phpunit/bootstrap.php`，源码覆盖包含 `shared/` 和 `admin/shared/` |
 | `lighthouserc.json` | Lighthouse CI 配置：检测 `login.php` 和 `index.php`，Performance >= 0.6（warn），Accessibility >= 0.85（warn），Best-practices >= 0.85（warn） |
-| `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + runit + dcron；创建 `navwww` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
-| `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、NAV_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、系统配置持久化、sudo 白名单设置 |
+| `Dockerfile` | 基于 `php:8.2-fpm-alpine` + Nginx + runit + dcron；创建 `riverops` 用户（UID/GID 默认 1000，运行时按 data 目录 owner 对齐）；暴露 58080；Entrypoint 为 `/entrypoint.sh` |
+| `docker/entrypoint.sh` | 容器启动入口：时区设置、PUID/PGID 动态对齐、RIVEROPS_PORT 注入 Nginx 配置、数据目录初始化、开发模式标记、无人值守安装（`.initial_admin.json`）、系统配置持久化、sudo 白名单设置 |
 | `docker/runit/*/run` | runit 服务脚本，管理 `php-fpm`、`nginx`、`cron` 三个常驻进程 |
 | `docker/nginx.conf` / `nginx-conf/docker-site.conf` | Nginx 主配置和站点配置；站点配置含 `auth_request` 鉴权、PHP-FPM 反向代理、静态资源缓存；访问日志默认关闭 |
 | `docker/php-fpm.conf` | PHP-FPM 低内存默认池配置：`pm = ondemand`、`pm.max_children = 10`，空闲时不预启动 worker |
 | `local/docker-compose.yml` | 本地构建专用 Compose；挂载 `data` 目录；默认端口 58080；构建期和运行期均支持代理环境变量透传 |
-| `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新、启用 `NAV_DEV_MODE`、临时挂载 `docker.sock` |
+| `local/docker-compose.dev.yml` | 开发环境叠加配置：挂载源码实现热更新并启用 `RIVEROPS_DEV_MODE` |
 | `local/docker-compose.test.yml` | 测试环境叠加配置：定义 `playwright-full`、`playwright-mobile`、`lighthouse` 服务 |
 | `.github/workflows/docker-publish.yml` | CI 工作流：push 到 `main`/`master` 或 `v*` 标签时触发；多架构构建（`linux/amd64`, `linux/arm64`）并推送到 Docker Hub；同步 README 到 Docker Hub 描述 |
 | `.github/workflows/manual-push.yml` | 手动推送工作流：支持跳过 `arm64`、支持额外指定版本标签 |
@@ -157,12 +157,12 @@ local/           # 本地开发环境
 
 ```bash
 # 1. 准备数据目录
-mkdir -p ~/simple-homepage/data
+mkdir -p ~/riverops/data
 
 # 2. 使用项目根目录的 docker-compose.yml 启动
 docker compose up -d
 
-# 默认端口 58080；数据挂载在 ./data:/var/www/nav/data
+# 默认端口 58080；数据挂载在 ./data:/var/www/riverops/data
 ```
 
 ### 本地开发（源码热更新 + 内置测试账号）
@@ -171,7 +171,7 @@ docker compose up -d
 cp local/.env.example local/.env
 # 按需编辑 local/.env
 
-# 启动开发环境（自动挂载源码、启用 NAV_DEV_MODE、临时挂载 docker.sock）
+# 启动开发环境（自动挂载源码并启用 RIVEROPS_DEV_MODE）
 bash local/docker-build.sh dev
 
 # 其他常用命令
@@ -182,7 +182,6 @@ bash local/docker-build.sh dev rebuild  # 强制重建开发镜像
 ```
 
 开发模式默认启用内置测试管理员：`qatest / qatest2026`。
-开发环境默认 `HOST_AGENT_INSTALL_MODE=simulate`，不会修改真实宿主机。
 
 ### 测试命令
 
@@ -265,18 +264,19 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 - 密码：`password_hash($p, PASSWORD_BCRYPT, ['cost' => 10])` / `password_verify()`
 - Token 比较：`hash_equals($expected, $actual)`
+- API Token 使用 `rop_` 前缀加 64 位十六进制随机值；旧前缀 Token 不再接受。
 - 登录达到 `max_sessions` 上限时，超限页应使用复选框允许多选旧设备，默认选择足够数量的最久未活跃设备；POST 可携带 `kick_oldest=1` 作为兜底，服务端必须只允许踢当前登录用户自己的 session，踢下线后再生成新的登录 Token。
 
 ### 8. Nginx + PHP-FPM 死锁规避
 
 - 在 `admin/` 等使用 `auth_request` 的 location 中，PHP 子 location 必须加 `auth_request off;`，由 PHP 自行鉴权。
-- Homepage 自身的 PHP Session Cookie 使用专用名称 `nav_php_session`，避免与外层部署环境中其他 PHP 应用的 `PHPSESSID` 冲突。
-- 登录 Cookie `nav_session` 在配置了 `cookie_domain` 时，需要同时写入站群 Domain Cookie 和当前 Host 的 host-only Cookie；服务端读取 Cookie 时必须兼容同名 Cookie 多值，逐个验证 token，避免旧 Domain Cookie 遮住新的本域登录态。`public/auth/verify.php` 作为 Nginx `auth_request` 入口也必须走同一套多 Cookie 验证逻辑，不能直接读 `$_COOKIE[SESSION_COOKIE_NAME]`。
-- 登录成功后先跳同源 `/login.php?complete=1&redirect=...`，由 200 HTML 完成页二次写入 `nav_session` 后再跳目标地址，避免部分浏览器在 302 后立刻进入后台鉴权时还未稳定带回新 Cookie。
+- RiverOps 自身的 PHP Session Cookie 使用专用名称 `riverops_php_session`，避免与外层部署环境中其他 PHP 应用的 `PHPSESSID` 冲突。
+- 登录 Cookie `riverops_session` 在配置了 `cookie_domain` 时，需要同时写入站群 Domain Cookie 和当前 Host 的 host-only Cookie；服务端读取 Cookie 时必须兼容同名 Cookie 多值，逐个验证 token，避免旧 Domain Cookie 遮住新的本域登录态。`public/auth/verify.php` 作为 Nginx `auth_request` 入口也必须走同一套多 Cookie 验证逻辑，不能直接读 `$_COOKIE[SESSION_COOKIE_NAME]`。
+- 登录成功后先跳同源 `/login.php?complete=1&redirect=...`，由 200 HTML 完成页二次写入 `riverops_session` 后再跳目标地址，避免部分浏览器在 302 后立刻进入后台鉴权时还未稳定带回新 Cookie。
 - `auth_request` 失败必须写入 `AUTH_DENY` 登录日志并包含 `reason=...`，便于区分 `no_cookie`、`malformed`、`bad_signature`、`expired`、`session_missing`、`blocked_ip`、`blocked_domain` 等原因。
 - `data/sessions.json` 是 `auth_request` 高频读写文件，所有读取必须使用共享锁，所有注册、撤销、清理、touch 必须在独占锁内完成，禁止无锁 `file_get_contents(SESSIONS_FILE)` / 快照写回；`last_active` 应限频更新，避免后台静态资源并发请求时把有效登录误判为 `session_missing`。
 - 面板可以部署在宿主机 Nginx/Caddy 等外层反向代理之后；必须保留 `X-Forwarded-Proto` 与真实客户端 IP 的识别逻辑。该能力仅用于部署适配，不包含站点代理生成或管理功能。
-- 后台运行配置页仅支持查看 Nginx 主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数，不支持保存、Reload 或恢复配置。修改配置必须编辑挂载文件或 `data/nginx` / `data/php-fpm` / `data/php` 下的持久化配置后重启 Docker 容器生效；不得重新引入站点代理模板、`nav-proxy*.conf` 或代理目标诊断逻辑。
+- 后台运行配置页仅支持查看 Nginx 主配置、HTTP 模块、PHP-FPM 池配置和 PHP 自定义参数，不支持保存、Reload 或恢复配置。修改配置必须编辑挂载文件或 `data/nginx` / `data/php-fpm` / `data/php` 下的持久化配置后重启 Docker 容器生效；不得引入站点代理生成、代理目标诊断或后台 Reload 逻辑。
 - 默认容器配置按低内存自托管场景优化：`docker/nginx.conf` 固定 `worker_processes 1`，访问日志默认关闭；`docker/php-fpm.conf` 使用 `pm = ondemand` 且 `pm.max_children = 10`。系统设置中的「Nginx 访问日志」仅持久化开关，保存后需重启 Docker 生效，不执行 Reload。若修改这些默认值，需同步考虑小型 NAS / 软路由 / VPS 的空闲内存占用。
 
 ### 9. 计划任务健壮性
@@ -290,13 +290,13 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 - `runtime_env_lib.php` 管理 `data/runtime/node/versions/` 与 `data/runtime/node/current`，计划任务执行时会将当前 Node.js 版本的 `bin` 目录注入 `PATH`。
 - Node.js 安装由 `cli/runtime_env_job.php` 后台执行，job 状态写入 `data/runtime/jobs/*.json`，日志写入 `data/runtime/jobs/*.log`；前端必须轮询 `runtime_env_ajax.php?action=job_status` 展示阶段、百分比、下载大小、安装日志和失败建议。
 - 运行环境页面重新进入时必须通过 `runtime_env_ajax.php?action=current_job` 恢复仍在执行的安装任务，并继续轮询；后台任务需与 PHP-FPM 请求会话脱离，任务 PID 消失时必须将残留的 `queued` / `running` 状态收敛为失败，禁止永久显示“下载中”。同一时间只允许一个运行环境安装任务。
-- Docker 容器按产品要求允许 `navwww` 免密 sudo 执行所有命令，用于后台安装运行环境；相关错误必须在页面展示命令、退出码、stdout/stderr 和建议。
+- Docker 容器按产品要求允许 `riverops` 免密 sudo 执行所有命令，用于后台安装运行环境；相关错误必须在页面展示命令、退出码、stdout/stderr 和建议。
 - 已退役的系统任务 ID 必须登记在 `RETIRED_SYSTEM_TASK_IDS`。计划任务页面加载、crontab 重建、备份导出和恢复时必须过滤这些任务，并清理对应脚本、日志和锁文件。当前退役 ID：`sys_favicon_sync`。
 
 ### 10. Ace Editor 作为项目默认文本编辑器
 
 - **Ace Editor 是项目默认的多行文本编辑器**。所有涉及多行文本输入/编辑的场景，**内容预期超过 5 行时**，必须使用 Ace Editor 弹窗打开；5 行及以内的短文本可直接使用原生 `<textarea>`，无需强制接入 Ace Editor。
-- **统一入口：所有后台页面调用文本编辑器时，必须使用 `admin/shared/ace_editor_modal.php` 提供的 `NavAceEditor` 接口**。禁止各页面自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML。页面只需在加载 `ace.js` 和 `ext-searchbox.js` 后引入 `admin/shared/ace_editor_modal.php`，然后调用 `NavAceEditor.open({...})` 即可。
+- **统一入口：所有后台页面调用文本编辑器时，必须使用 `admin/shared/riverops_ace_editor.php` 提供的 `RiverOpsAceEditor` 接口**。禁止各页面自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML。页面只需在加载 `ace.js` 和 `ext-searchbox.js` 后引入 `admin/shared/riverops_ace_editor.php`，然后调用 `RiverOpsAceEditor.open({...})` 即可。
 - **判断标准**：按字段的业务语义判断（如 Nginx 配置、计划任务脚本、JSON/YAML 导入等必然超过 5 行）；若无法确定，默认走 Ace Editor 弹窗。
 - **统一资源引用**：`<script src="assets/ace/ace.js"></script>`，`admin/assets/ace/` 目录已包含 ace.js、ext-searchbox.js、mode-nginx.js、theme-tomorrow_night.js 等核心文件。
 - **统一基础配置**：
@@ -315,7 +315,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - 支持配置多个按钮，通过统一接口配置，禁止各页面硬编码按钮 HTML。
   - 按钮配置格式：
     ```javascript
-    NavAceEditor.open({
+    RiverOpsAceEditor.open({
       // ... 其他配置
       buttons: {
         left: [
@@ -330,7 +330,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
       },
       onAction: function(action, value) {
         if (action === 'save') { /* 处理保存 */ }
-        if (action === 'close') { NavAceEditor.close(); }
+        if (action === 'close') { RiverOpsAceEditor.close(); }
       }
     });
     ```
@@ -343,7 +343,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
     6. **`onAction`**：统一回调接口，所有按钮点击（含快捷键触发的保存）都通过此回调分发，页面在此处理业务逻辑（AJAX 提交、表单提交、关闭弹窗等）。
     7. **`class`（向后兼容）**：保留 `btn-primary` / `btn-secondary` / `btn-danger` 等语义类，新写页面不建议继续使用。
     8. **`bgColor`**（推荐）：自定义按钮背景色，**新增按钮只允许通过 `bgColor` 自定义颜色，不允许自定义其他样式**。例如 `{ text: '自定义', action: 'custom', bgColor: '#4a9eff' }`。
-  - **样式规则**：工具栏按钮统一使用 `.nav-ace-toolbar-btn` 基础样式（padding、字号、圆角、边框等完全一致），**只允许通过 `bgColor` 属性改变背景色，禁止通过 `class` 传入自定义样式类改变按钮外观**。
+  - **样式规则**：工具栏按钮统一使用 `.riverops-ace-toolbar-btn` 基础样式（padding、字号、圆角、边框等完全一致），**只允许通过 `bgColor` 属性改变背景色，禁止通过 `class` 传入自定义样式类改变按钮外观**。
   - **各页面典型按钮组合示例**：
     - **纯编辑保存**（如自定义 CSS）：`[dirty, 关闭, 保存]`
     - **编辑 + 语法检查**（如脚本或结构化配置导入）：`[dirty, 检查语法, 关闭, 保存]`
@@ -354,17 +354,17 @@ if (session_status() === PHP_SESSION_NONE) session_start();
   - `settings.php`：自定义 CSS、文件系统允许根目录
   - `dns.php`：DNS JSON 批量导入
 
-#### 10.1 NavAceEditor 统一封装接口完整规范
+#### 10.1 RiverOpsAceEditor 统一封装接口完整规范
 
-**设计原则**：各页面接入 Ace Editor 时，**禁止自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML**。全部通过 `NavAceEditor` 全局对象调用统一接口完成。
+**设计原则**：各页面接入 Ace Editor 时，**禁止自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML**。全部通过 `RiverOpsAceEditor` 全局对象调用统一接口完成。
 
 ---
 
-##### 一、全局对象 `NavAceEditor`
+##### 一、全局对象 `RiverOpsAceEditor`
 
 ```javascript
 // 全局单例，所有页面共用同一套 Ace Editor 实例和弹窗 DOM
-var NavAceEditor = {
+var RiverOpsAceEditor = {
   editor: null,      // ace.edit() 返回的编辑器实例
   modal: null,       // 弹窗 DOM 元素
   config: {},        // 当前打开时的配置快照
@@ -379,28 +379,28 @@ var NavAceEditor = {
 
 | 方法 | 返回值 | 说明 |
 |------|--------|------|
-| `NavAceEditor.init(options?)` | `void` | **懒加载初始化**。首次调用时创建 Ace Editor 实例并渲染弹窗 DOM；重复调用无操作。通常在页面加载后静默调用，或在首次 `open()` 时自动触发。 |
-| `NavAceEditor.open(options)` | `void` | **打开弹窗**。根据 `options` 配置渲染标题、内容、按钮、工具栏，然后显示弹窗并聚焦编辑器。 |
-| `NavAceEditor.close()` | `void` | **关闭弹窗**。隐藏弹窗、退出沉浸模式、触发 `onClose` 回调。若内容已修改且未保存，弹出 `beforeunload` 风格确认框（可通过 `confirmOnClose: false` 关闭）。 |
-| `NavAceEditor.getValue()` | `string` | 获取当前编辑器内容。 |
-| `NavAceEditor.setValue(text, mode?)` | `void` | 设置编辑器内容，可选同时切换语言模式。自动重置脏标记为「未修改」。 |
-| `NavAceEditor.isDirty()` | `boolean` | 判断当前内容是否与打开时的初始内容不同。 |
-| `NavAceEditor.markClean()` | `void` | 将当前内容设为新的「基准内容」，脏标记重置为「未修改」。通常在保存成功后调用。 |
-| `NavAceEditor.setMode(mode)` | `void` | 动态切换语言模式（如 `nginx`、`json`、`sh`、`php`、`yaml`、`css` 等）。 |
-| `NavAceEditor.setTheme(theme)` | `void` | 动态切换主题，并持久化到 `localStorage`。 |
-| `NavAceEditor.setFontSize(px)` | `void` | 动态切换字号（如 `13`、`14`、`16`），并持久化到 `localStorage`。 |
-| `NavAceEditor.setWrapMode(on)` | `void` | 动态开关自动换行，并持久化到 `localStorage`。 |
-| `NavAceEditor.focus()` | `void` | 将焦点移入编辑器。 |
-| `NavAceEditor.resize()` | `void` | 触发编辑器重新计算尺寸（弹窗动画、窗口大小变化后自动调用，页面通常无需手动调用）。 |
-| `NavAceEditor.setButtonDisabled(action, disabled)` | `void` | 动态启用/禁用指定 `action` 的按钮（如保存提交中禁用「保存」按钮防止重复提交）。 |
-| `NavAceEditor.setButtonVisible(action, visible)` | `void` | 动态显示/隐藏指定 `action` 的按钮。 |
+| `RiverOpsAceEditor.init(options?)` | `void` | **懒加载初始化**。首次调用时创建 Ace Editor 实例并渲染弹窗 DOM；重复调用无操作。通常在页面加载后静默调用，或在首次 `open()` 时自动触发。 |
+| `RiverOpsAceEditor.open(options)` | `void` | **打开弹窗**。根据 `options` 配置渲染标题、内容、按钮、工具栏，然后显示弹窗并聚焦编辑器。 |
+| `RiverOpsAceEditor.close()` | `void` | **关闭弹窗**。隐藏弹窗、退出沉浸模式、触发 `onClose` 回调。若内容已修改且未保存，弹出 `beforeunload` 风格确认框（可通过 `confirmOnClose: false` 关闭）。 |
+| `RiverOpsAceEditor.getValue()` | `string` | 获取当前编辑器内容。 |
+| `RiverOpsAceEditor.setValue(text, mode?)` | `void` | 设置编辑器内容，可选同时切换语言模式。自动重置脏标记为「未修改」。 |
+| `RiverOpsAceEditor.isDirty()` | `boolean` | 判断当前内容是否与打开时的初始内容不同。 |
+| `RiverOpsAceEditor.markClean()` | `void` | 将当前内容设为新的「基准内容」，脏标记重置为「未修改」。通常在保存成功后调用。 |
+| `RiverOpsAceEditor.setMode(mode)` | `void` | 动态切换语言模式（如 `nginx`、`json`、`sh`、`php`、`yaml`、`css` 等）。 |
+| `RiverOpsAceEditor.setTheme(theme)` | `void` | 动态切换主题，并持久化到 `localStorage`。 |
+| `RiverOpsAceEditor.setFontSize(px)` | `void` | 动态切换字号（如 `13`、`14`、`16`），并持久化到 `localStorage`。 |
+| `RiverOpsAceEditor.setWrapMode(on)` | `void` | 动态开关自动换行，并持久化到 `localStorage`。 |
+| `RiverOpsAceEditor.focus()` | `void` | 将焦点移入编辑器。 |
+| `RiverOpsAceEditor.resize()` | `void` | 触发编辑器重新计算尺寸（弹窗动画、窗口大小变化后自动调用，页面通常无需手动调用）。 |
+| `RiverOpsAceEditor.setButtonDisabled(action, disabled)` | `void` | 动态启用/禁用指定 `action` 的按钮（如保存提交中禁用「保存」按钮防止重复提交）。 |
+| `RiverOpsAceEditor.setButtonVisible(action, visible)` | `void` | 动态显示/隐藏指定 `action` 的按钮。 |
 
 ---
 
-##### 三、`NavAceEditor.open(options)` 完整配置项
+##### 三、`RiverOpsAceEditor.open(options)` 完整配置项
 
 ```javascript
-NavAceEditor.open({
+RiverOpsAceEditor.open({
   // ━━ 弹窗基础 ━━
   title: '文本编辑器',           // 弹窗标题，显示在顶部标题栏
   value: '',                    // 编辑器初始内容（字符串）
@@ -457,7 +457,7 @@ NavAceEditor.open({
 |------|------|------|--------|------|
 | `type` | `string` | 否 | — | 特殊类型。目前仅 `'dirty'`：自动监听内容变化，显示「未修改 / 有未保存修改」。设置 `type` 后忽略 `text`/`action`/`class` 等字段。 |
 | `text` | `string` | 是* | — | 按钮显示文本（`*type='dirty' 时不需要`）。 |
-| `action` | `string` | 是* | — | 按钮动作标识符（`*type='dirty' 时不需要`）。点击后调用 `onAction(action, NavAceEditor.getValue())`。保留关键字：`save`（自动绑定 Ctrl-S）、`close`（自动绑定 Esc 和弹窗关闭）。 |
+| `action` | `string` | 是* | — | 按钮动作标识符（`*type='dirty' 时不需要`）。点击后调用 `onAction(action, RiverOpsAceEditor.getValue())`。保留关键字：`save`（自动绑定 Ctrl-S）、`close`（自动绑定 Esc 和弹窗关闭）。 |
 | `bgColor` | `string` | 否 | — | **新增按钮推荐方式**。自定义按钮背景色（如 `#4a9eff`、`rgba(61,255,160,.2)`）。设置后按钮使用统一基础样式，仅背景色生效。 |
 | `class` | `string` | 否 | `btn-secondary` | **向后兼容**。语义样式类：`btn-primary` / `btn-secondary` / `btn-danger` / `btn-success` / `btn-warning`。新写页面请优先使用 `bgColor`，避免传入自定义样式类。 |
 | `visible` | `boolean \| function` | 否 | `true` | 控制按钮是否渲染。`false` 时不渲染该按钮；支持传入函数动态判断，如 `visible: () => canDelete`。 |
@@ -476,7 +476,7 @@ NavAceEditor.open({
 | **沉浸模式快捷键** | 无（通过工具栏 checkbox 切换） | 勾选「沉浸模式」后隐藏标题栏和工具栏，编辑器占满弹窗。显示「退出沉浸模式」按钮。 |
 | **脏标记自动更新** | 编辑器内容变化时 | 若配置了 `{ type: 'dirty' }`，自动对比当前值与 `initialValue`，显示「未修改」或「有未保存修改」。 |
 | **关闭前确认** | 点击关闭 / 按 Esc / 点击蒙层 | 若 `confirmOnClose: true` 且 `isDirty()` 为 true，弹出浏览器确认框防止误关。 |
-| **localStorage 持久化** | 用户切换主题/字号/换行 | 自动将用户偏好写入 `localStorage`，下次打开弹窗时恢复。key 为 `nav-ace-theme`、`nav-ace-fontsize`、`nav-ace-wrap`。 |
+| **localStorage 持久化** | 用户切换主题/字号/换行 | 自动将用户偏好写入 `localStorage`，下次打开弹窗时恢复。key 为 `riverops-ace-theme`、`riverops-ace-fontsize`、`riverops-ace-wrap`。 |
 | **弹窗打开时自动聚焦** | `open()` 被调用后 | 弹窗显示完成后自动将光标移入编辑器。 |
 | **窗口大小变化自适应** | 浏览器 resize | 自动调用 `editor.resize()`，无需页面处理。 |
 
@@ -486,7 +486,7 @@ NavAceEditor.open({
 
 ```
 页面加载
-  → NavAceEditor.init()         // 可选：页面可提前初始化，也可由首次 open() 自动触发
+  → RiverOpsAceEditor.init()         // 可选：页面可提前初始化，也可由首次 open() 自动触发
        → 创建 Ace 实例（若不存在）
        → 渲染弹窗 DOM（若不存在）
        → 绑定工具栏事件、快捷键、窗口 resize 监听
@@ -494,7 +494,7 @@ NavAceEditor.open({
        → 触发 onInit(editor)
 
 用户点击「打开编辑器」
-  → NavAceEditor.open(options)
+  → RiverOpsAceEditor.open(options)
        → 根据 options 渲染标题、按钮、工具栏状态
        → 设置编辑器内容、语言模式
        → 记录 initialValue（脏标记基准）
@@ -512,7 +512,7 @@ NavAceEditor.open({
        → 页面在回调中处理业务（AJAX / Form 提交 / 关闭弹窗等）
 
 用户关闭弹窗
-  → NavAceEditor.close()
+  → RiverOpsAceEditor.close()
        → 若有未保存修改且 confirmOnClose: true，弹出确认
        → 隐藏弹窗、退出沉浸模式
        → 触发 onClose()
@@ -526,7 +526,7 @@ NavAceEditor.open({
 
 ```javascript
 function openConfigViewer(targetContent) {
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: '查看运行配置',
     mode: 'nginx',
     value: targetContent,
@@ -537,7 +537,7 @@ function openConfigViewer(targetContent) {
       right: [{ text: '关闭', action: 'close' }]
     },
     onAction: function(action) {
-      if (action === 'close') NavAceEditor.close();
+      if (action === 'close') RiverOpsAceEditor.close();
     }
   });
 }
@@ -547,7 +547,7 @@ function openConfigViewer(targetContent) {
 
 ```javascript
 function openTaskEditor(initialScript) {
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: '编辑计划任务脚本',
     mode: 'sh',
     value: initialScript,
@@ -560,15 +560,15 @@ function openTaskEditor(initialScript) {
     },
     onAction: function(action, value) {
       if (action === 'save') {
-        NavAceEditor.setButtonDisabled('save', true);   // 禁用保存按钮防止重复提交
+        RiverOpsAceEditor.setButtonDisabled('save', true);   // 禁用保存按钮防止重复提交
         fetch('/admin/scheduled_tasks_ajax.php', {
           method: 'POST',
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
           body: new URLSearchParams({ action: 'update_command', command: value, _csrf: window._csrf })
         }).then(r => r.json()).then(data => {
-          NavAceEditor.setButtonDisabled('save', false); // 恢复保存按钮
+          RiverOpsAceEditor.setButtonDisabled('save', false); // 恢复保存按钮
           if (data.ok) {
-            NavAceEditor.markClean();
+            RiverOpsAceEditor.markClean();
             showToast('脚本已保存', 'success');
           } else {
             showToast(data.msg || '保存失败', 'error');
@@ -576,7 +576,7 @@ function openTaskEditor(initialScript) {
         });
       }
       if (action === 'close') {
-        NavAceEditor.close();
+        RiverOpsAceEditor.close();
       }
     }
   });
@@ -587,7 +587,7 @@ function openTaskEditor(initialScript) {
 
 ```javascript
 function openLogViewer(logContent, logName) {
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: '日志查看 · ' + logName,
     mode: 'text',
     value: logContent,
@@ -598,7 +598,7 @@ function openLogViewer(logContent, logName) {
       right: [{ text: '关闭', class: 'btn-secondary', action: 'close' }]
     },
     onAction: function(action) {
-      if (action === 'close') NavAceEditor.close();
+      if (action === 'close') RiverOpsAceEditor.close();
     }
   });
 }
@@ -610,9 +610,9 @@ function openLogViewer(logContent, logName) {
 
 | 功能点 | files.php 现状 | nginx.php 现状 | logs.php 现状 | 统一接口后 |
 |--------|---------------|---------------|--------------|-----------|
-| 编辑器初始化 | 独立 20+ 行 | 只读查看 | 独立 15+ 行 | `NavAceEditor.init()` 一行 |
-| 弹窗 open | `openFileEditor()` 内联 | `openEditorModal()` 内联 | 非弹窗 | `NavAceEditor.open({...})` |
-| 弹窗 close | `closeFmEditorModal()` 内联 | `closeEditorModal()` 内联 | — | `NavAceEditor.close()` |
+| 编辑器初始化 | 独立 20+ 行 | 只读查看 | 独立 15+ 行 | `RiverOpsAceEditor.init()` 一行 |
+| 弹窗 open | `openFileEditor()` 内联 | `openEditorModal()` 内联 | 非弹窗 | `RiverOpsAceEditor.open({...})` |
+| 弹窗 close | `closeFmEditorModal()` 内联 | `closeEditorModal()` 内联 | — | `RiverOpsAceEditor.close()` |
 | 脏标记 | `syncAceDirty()` 内联 | `sync()` 内联 | 不需要 | `{ type: 'dirty' }` 自动 |
 | 主题切换 | 独立事件监听 + localStorage | 独立事件监听 + localStorage | 无 | 工具栏自动处理 |
 | 字号切换 | 独立事件监听 + localStorage | 独立事件监听 + localStorage | 无 | 工具栏自动处理 |
@@ -629,16 +629,16 @@ function openLogViewer(logContent, logName) {
 
 | 文件 | 说明 |
 |------|------|
-| `admin/shared/ace_editor_modal.php` | 包含弹窗 HTML 模板 + `NavAceEditor` JS 实现。各页面通过 `require __DIR__ . '/shared/ace_editor_modal.php'` 引入。 |
+| `admin/shared/riverops_ace_editor.php` | 包含弹窗 HTML 模板 + `RiverOpsAceEditor` JS 实现。各页面通过 `require __DIR__ . '/shared/riverops_ace_editor.php'` 引入。 |
 | `admin/shared/admin.css` | 已包含 `.ngx-modal`、`.ngx-editor-*` 等样式，无需新增 CSS。运行配置查看页新增样式应保持轻量。 |
 | `admin/assets/ace/ace.js` | 已有本地资源。 |
 | `admin/assets/ace/ext-searchbox.js` | 已有本地资源（查找/跳转功能依赖）。 |
 
 ---
 
-##### 十、使用 NavAceEditor 作为日志查看器的规范
+##### 十、使用 RiverOpsAceEditor 作为日志查看器的规范
 
-当把 `NavAceEditor` 用作**只读日志查看器**（如 `scheduled_tasks.php` 的运行日志、`logs.php` 的 Ace 弹窗模式）时，**禁止各页面自行编写分页逻辑或底部 HTML**，必须使用组件内置的 `pagination` 配置，确保所有页面的分页界面、交互行为完全一致：
+当把 `RiverOpsAceEditor` 用作**只读日志查看器**（如 `scheduled_tasks.php` 的运行日志、`logs.php` 的 Ace 弹窗模式）时，**禁止各页面自行编写分页逻辑或底部 HTML**，必须使用组件内置的 `pagination` 配置，确保所有页面的分页界面、交互行为完全一致：
 
 1. **分页栏由组件自动渲染，页面只提供数据**
    - 配置 `pagination` 对象，组件自动在弹窗底部渲染分页栏（信息区、limit 选择器、翻页按钮、页码输入框、跳转按钮、刷新按钮）。
@@ -681,7 +681,7 @@ function openLogViewer(logContent, logName) {
 
 #### 10.2 改造优先级建议
 
-1. **P0（先封装）**：维护 `admin/shared/ace_editor_modal.php` 统一接口，并以 `nginx.php`（只读）、`logs.php`、`scheduled_tasks.php` 验证稳定性。
+1. **P0（先封装）**：维护 `admin/shared/riverops_ace_editor.php` 统一接口，并以 `nginx.php`（只读）、`logs.php`、`scheduled_tasks.php` 验证稳定性。
 2. **P1（后迁移）**：改造 `settings.php` 和 `dns.php` 中仍符合条件的多行文本输入。
 
 ---
@@ -731,7 +731,7 @@ function openLogViewer(logContent, logName) {
 
 - **GitHub Actions 工作流**: `.github/workflows/docker-publish.yml`
   - 触发条件：`push` 到 `main`/`master` 分支，或推送 `v*` 标签，或手动触发 `workflow_dispatch`。
-  - 构建多架构镜像（`linux/amd64`, `linux/arm64`）并推送到 Docker Hub `codingriver/simple-homepage`。
+  - 构建多架构镜像（`linux/amd64`, `linux/arm64`）并推送到 Docker Hub `codingriver/riverops`。
   - 自动更新 Docker Hub 描述（从 `README.md` 同步）。
 - **手动推送工作流**: `.github/workflows/manual-push.yml`
   - 支持选择是否跳过 `arm64` 以加速构建。
@@ -739,7 +739,7 @@ function openLogViewer(logContent, logName) {
 
 ### 数据目录（必须挂载）
 
-容器内路径：`/var/www/nav/data`
+容器内路径：`/var/www/riverops/data`
 
 常见文件：
 - `config.json` — 系统配置
@@ -761,14 +761,13 @@ function openLogViewer(logContent, logName) {
 
 | 变量 | 说明 |
 |------|------|
-| `NAV_PORT` | 容器内监听端口，默认 `58080` |
+| `RIVEROPS_PORT` | 容器内监听端口，默认 `58080` |
 | `TZ` | 时区，默认 `Asia/Shanghai` |
 | `PUID` / `PGID` | 可选，显式指定运行用户 UID/GID；留空时自动按 `data` 目录 owner 对齐 |
 | `ADMIN` / `PASSWORD` / `NAME` / `DOMAIN` | 无人值守首次安装参数 |
-| `NAV_DEV_MODE` | 开发模式，启用内置测试管理员 `qatest / qatest2026` |
-| `HOST_AGENT_INSTALL_MODE` | `host`（真实宿主机）或 `simulate`（模拟，推荐开发/测试） |
+| `RIVEROPS_DEV_MODE` | 开发模式，启用内置测试管理员 `qatest / qatest2026` |
 | `AUTH_SECRET_KEY` | 可选，显式指定认证密钥 |
-| `NAV_REQUEST_TIMING` | 设为 `0` 关闭请求耗时日志 |
+| `RIVEROPS_REQUEST_TIMING` | 设为 `0` 关闭请求耗时日志 |
 
 ---
 
@@ -776,25 +775,10 @@ function openLogViewer(logContent, logName) {
 
 1. **认证机制**: 使用 JWT-like Token（HMAC-SHA256），Cookie `HttpOnly` + `SameSite=Lax`，支持会话级撤销（`data/sessions.json`）。
 2. **IP 锁定**: 登录失败超过限制后自动锁定 IP（默认 5 次失败锁定 15 分钟）。
-3. **docker.sock 挂载**: 仅在需要 Docker 管理功能时临时挂载，完成后建议移除。
 5. **密钥管理**: `AUTH_SECRET_KEY` 优先从环境变量读取，否则自动生成并保存到 `data/auth_secret.key`（权限 600）。
 6. **SSRF 防护**: 所有根据用户输入发起外部 HTTP 请求的代码必须经过目标地址安全校验（禁止内网、回环地址）。
 7. **Cookie 安全降级**: 代码内置自动降级逻辑——用 IP 访问时自动设置 `secure=false, domain=空`，保证内网 IP 访问始终可登录。
 8. **无人值守安装安全**: 使用 `ADMIN`/`PASSWORD` 环境变量完成首次安装后，应用会自动删除 `data/.initial_admin.json`。生产环境不应长期保留明文密码。
-
----
-
----
-
-## 已知问题与设计缺陷（必读）
-
-以下问题已在 `docs/项目问题分析与设计缺陷.md` 中记录，修改相关代码时需特别注意：
-
-- **P1**: `public/index.php` 体积过大（880+ 行），承担职责过多；`admin/shared/functions.php` 中的 `admin_run_command()` 缺少超时控制。
-- **P1**: Webhook HTTP 请求逻辑存在重复代码，未统一收敛到 `shared/http_client.php`。
-- **P2**: 缺少统一异常处理层；配置读取缺少统一抽象；权限粒度较粗；测试层对 `shared/auth.php`、`shared/request_timing.php` 缺少底层单元测试。
-
----
 
 ## 参考文档
 
@@ -802,7 +786,6 @@ function openLogViewer(logContent, logName) {
 |------|------|------|
 | PHP 开发注意事项 | `docs/PHP开发注意事项.md` | HTTP Header 顺序、Session、CSRF、XSS、SSRF、文件安全、Nginx 死锁、JSON 存储、密码安全、PRG 模式等 |
 | 测试用例编写规范 | `docs/测试用例编写规范.md` | 界面测试维度清单（A~R）、Playwright 约束、选择器稳定性、断言层次、数据隔离、spec 拆分标准 |
-| 项目问题分析与设计缺陷 | `docs/项目问题分析与设计缺陷.md` | 已知 P0/P1/P2 级问题与风险点 |
 | 技术架构与实现原理 | `docs/技术架构与实现原理.md` | 系统架构、数据流、模块关系 |
 | Docker 部署文档 | `docs/Docker部署文档.md` | 生产部署步骤与参数说明 |
 | Full-E2E 测试教程 | `docs/Full-E2E测试教程-本地环境.md` / `docs/Full-E2E测试教程-Docker环境.md` | E2E 测试环境搭建指南 |

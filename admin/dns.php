@@ -564,7 +564,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['ajax'] ?? '') === 'd
 
 require_once __DIR__ . '/shared/header.php';
 
-$dnsApiPort = getenv('NAV_PORT');
+$dnsApiPort = getenv('RIVEROPS_PORT');
 if ($dnsApiPort === false || $dnsApiPort === '' || !ctype_digit($dnsApiPort)) {
     $dnsApiPort = '58080';
 }
@@ -1120,14 +1120,14 @@ body.dns-hydrate-loading .dns-account-bar button{pointer-events:none;opacity:.55
       <!-- 一、外网访问认证 -->
       <h4 style="color:var(--tx);font-size:14px;margin:16px 0 8px">一、外网访问认证（API Token）</h4>
       <p style="color:var(--tx2);font-size:12px;line-height:1.75;margin:0 0 10px">
-        外网（非本机）调用 DNS API 时必须提供有效的 API Token。Token 在 <a href="api_tokens.php" target="_blank" style="color:var(--ac)">API Token 管理</a> 页面生成，格式为 <code>np_</code> 前缀 + 64 位十六进制字符。
+        外网（非本机）调用 DNS API 时必须提供有效的 API Token。Token 在 <a href="api_tokens.php" target="_blank" style="color:var(--ac)">API Token 管理</a> 页面生成，格式为 <code>rop_</code> 前缀 + 64 位十六进制字符。
       </p>
       <ul style="color:var(--tx2);font-size:12px;line-height:1.85;margin:0 0 14px;padding-left:18px">
         <li><strong>方式一：HTTP Authorization Header（推荐）</strong>
-          <code style="font-size:11px">Authorization: Bearer np_xxxxxxxx...</code>
+          <code style="font-size:11px">Authorization: Bearer rop_xxxxxxxx...</code>
         </li>
         <li><strong>方式二：URL Query Parameter</strong>
-          <code style="font-size:11px">?token=np_xxxxxxxx...</code>
+          <code style="font-size:11px">?token=rop_xxxxxxxx...</code>
         </li>
         <li>Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。</li>
         <li>Token 验证失败返回 HTTP 401：<code>{"code":-1,"msg":"无效的 API Token"}</code></li>
@@ -1210,21 +1210,21 @@ curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;doma
 
         <div style="color:var(--tm);margin-bottom:8px">▼ query — Header 传 Token（推荐）</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "<?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A" \
-  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
+  -H "Authorization: Bearer rop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
 
         <div style="color:var(--tm);margin-bottom:8px">▼ query — URL 传 Token</div>
-        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "<?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A&amp;token=np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
+        <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS "<?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php?action=query&amp;domain=www.example.com&amp;type=A&amp;token=rop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"</pre>
 
         <div style="color:var(--tm);margin-bottom:8px">▼ update — POST JSON + Header Token</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS <?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -H "Authorization: Bearer rop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{"action":"update","domain":"www.example.com","value":"1.2.3.4","type":"A","ttl":120}'</pre>
 
         <div style="color:var(--tm);margin-bottom:8px">▼ batch_update — POST JSON + Header Token（推荐）</div>
         <pre style="margin:0 0 16px;white-space:pre-wrap;word-break:break-all">curl -sS <?= htmlspecialchars($dnsApiScheme) ?>://<?= htmlspecialchars($dnsApiHost) ?>/api/dns.php \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -H "Authorization: Bearer rop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{"action":"batch_update","value":"1.2.3.4","domains":["example.com","www.example.com","*.example.com"]}'</pre>
       </div>
 
@@ -1234,7 +1234,7 @@ curl -sS "http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php?action=update&amp;doma
         在后台「计划任务」中新建任务，填写 Cron 与下方脚本；标准输出会写入任务运行日志。本机脚本无需 Token。
       </p>
       <div style="font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--tx2);background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;overflow-x:auto">
-        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">LOG=/var/www/nav/data/logs/ddns_manual.log
+        <pre style="margin:0;white-space:pre-wrap;word-break:break-all">LOG=/var/www/riverops/data/logs/ddns_manual.log
 log(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
 API="http://127.0.0.1:<?= $dnsApiPort ?>/api/dns.php"
@@ -1896,7 +1896,7 @@ if (batchDeleteForm) {
       showToast('请先选择要删除的记录', 'error');
       return;
     }
-    NavConfirm.open({
+    RiverOpsConfirm.open({
       title: '批量删除记录',
       message: '确认删除选中的 ' + recordIds.length + ' 条记录吗？',
       confirmText: '删除',

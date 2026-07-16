@@ -19,7 +19,7 @@ csrf_token();
 $flash = flash_get();
 
 // 缓存 CSRF，关闭 Session 后表单里的 csrf_field() 仍可用（避免已输出 HTML 再 session_start）
-$GLOBALS['_nav_csrf_token'] = $_SESSION['csrf_token'] ?? csrf_token();
+$GLOBALS['_riverops_csrf_token'] = $_SESSION['csrf_token'] ?? csrf_token();
 
 // 释放 Session 锁，避免同浏览器多标签刷新时互相阻塞
 if (session_status() === PHP_SESSION_ACTIVE) {
@@ -31,10 +31,10 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
 // 与 auth_get_config 共用静态缓存，避免重复读 config.json
 $cfg_admin = auth_get_config();
-$site_name_admin = $cfg_admin['site_name'] ?? '后台中心';
+$site_name_admin = $cfg_admin['site_name'] ?? 'RiverOps';
 
 // 导航菜单项定义
-$nav_items = [
+$sidebar_items = [
     ['file' => 'index.php',    'icon' => '📊', 'label' => '控制台'],
     ['sep'],
     ['file' => 'nginx.php',    'icon' => '🧩', 'label' => '运行配置'],
@@ -56,7 +56,7 @@ $nav_items = [
     ['file' => 'logs.php',     'icon' => '📄', 'label' => '日志中心'],
     ['file' => 'debug.php',    'icon' => '🛠', 'label' => '调试工具'],
 ];
-$nav_items = array_values(array_filter($nav_items, static function(array $item): bool {
+$sidebar_items = array_values(array_filter($sidebar_items, static function(array $item): bool {
     if (!isset($item['file'])) {
         return true;
     }
@@ -92,7 +92,7 @@ function showToast(msg, type) {
     setTimeout(function(){ t.style.opacity='0';t.style.transition='opacity .3s'; setTimeout(function(){t.remove();},300); }, 3500);
 }
 
-function navStatusEscape(value) {
+function riverOpsStatusEscape(value) {
     return String(value || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -101,7 +101,7 @@ function navStatusEscape(value) {
         .replace(/'/g, '&#39;');
 }
 
-function navCreateAsyncStatus(options) {
+function riverOpsCreateAsyncStatus(options) {
     options = options || {};
     var seq = 0;
     var tasks = {};
@@ -116,8 +116,8 @@ function navCreateAsyncStatus(options) {
         if (!refs.wrap) return;
         refs.wrap.style.display = '';
         refs.wrap.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">'
-            + '<div><div style="font-weight:700">' + navStatusEscape(title || '处理中') + '</div>'
-            + '<div style="font-size:12px;color:var(--tm);margin-top:4px">' + navStatusEscape(detail || '正在执行…') + '</div></div>'
+            + '<div><div style="font-weight:700">' + riverOpsStatusEscape(title || '处理中') + '</div>'
+            + '<div style="font-size:12px;color:var(--tm);margin-top:4px">' + riverOpsStatusEscape(detail || '正在执行…') + '</div></div>'
             + '<div style="font-family:var(--mono);font-size:12px;color:' + (tone === 'error' ? 'var(--red)' : 'var(--tm)') + '">' + Math.max(0, Math.min(100, Math.round(percent || 0))) + '%</div></div>'
             + '<div style="margin-top:10px;height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden"><div style="height:100%;width:' + Math.max(0, Math.min(100, percent || 0)) + '%;background:linear-gradient(90deg,' + (tone === 'error' ? 'var(--red),#ff8a96' : 'var(--ac),#64ffd9') + ');transition:width .25s ease"></div></div>';
     }
@@ -204,30 +204,30 @@ function navCreateAsyncStatus(options) {
 </script>
 
 <!-- 全站统一确认弹窗 -->
-<div id="nav-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;align-items:center;justify-content:center;">
+<div id="riverops-confirm-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;align-items:center;justify-content:center;">
   <div style="background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:24px 28px;min-width:320px;max-width:480px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.4);">
-    <div id="nav-confirm-title" style="font-weight:700;font-size:15px;margin-bottom:10px;color:var(--tx);"></div>
-    <div id="nav-confirm-message" style="font-size:13px;color:var(--tx2);line-height:1.6;margin-bottom:20px;white-space:pre-line"></div>
+    <div id="riverops-confirm-title" style="font-weight:700;font-size:15px;margin-bottom:10px;color:var(--tx);"></div>
+    <div id="riverops-confirm-message" style="font-size:13px;color:var(--tx2);line-height:1.6;margin-bottom:20px;white-space:pre-line"></div>
     <div style="display:flex;justify-content:flex-end;gap:10px;">
-      <button type="button" id="nav-confirm-cancel" class="btn btn-secondary" style="font-size:13px;padding:6px 14px;">取消</button>
-      <button type="button" id="nav-confirm-ok" class="btn btn-primary" style="font-size:13px;padding:6px 14px;">确认</button>
+      <button type="button" id="riverops-confirm-cancel" class="btn btn-secondary" style="font-size:13px;padding:6px 14px;">取消</button>
+      <button type="button" id="riverops-confirm-ok" class="btn btn-primary" style="font-size:13px;padding:6px 14px;">确认</button>
     </div>
   </div>
 </div>
 <script>
-var NavConfirm = (function(){
+var RiverOpsConfirm = (function(){
     var modal = null, titleEl = null, msgEl = null, okBtn = null, cancelBtn = null;
     var onConfirmCb = null, onCancelCb = null;
     var mouseDownTarget = null;
 
     function init() {
         if (modal) return;
-        modal = document.getElementById('nav-confirm-modal');
+        modal = document.getElementById('riverops-confirm-modal');
         if (!modal) return;
-        titleEl = document.getElementById('nav-confirm-title');
-        msgEl = document.getElementById('nav-confirm-message');
-        okBtn = document.getElementById('nav-confirm-ok');
-        cancelBtn = document.getElementById('nav-confirm-cancel');
+        titleEl = document.getElementById('riverops-confirm-title');
+        msgEl = document.getElementById('riverops-confirm-message');
+        okBtn = document.getElementById('riverops-confirm-ok');
+        cancelBtn = document.getElementById('riverops-confirm-cancel');
 
         okBtn.addEventListener('click', function(){
             var cb = onConfirmCb;
@@ -292,7 +292,7 @@ function submitConfirmForm(btn, options) {
     if (!form) return;
     var title = options.title || form.getAttribute('data-confirm-title') || '确认操作';
     var message = options.message || form.getAttribute('data-confirm-message') || '';
-    NavConfirm.open({
+    RiverOpsConfirm.open({
         title: title,
         message: message,
         confirmText: options.confirmText || '确认',
@@ -309,13 +309,13 @@ function submitConfirmForm(btn, options) {
     <div class="dot"></div>🧭 <?= htmlspecialchars($site_name_admin) ?>
   </a>
   <nav class="sidebar-nav">
-    <?php foreach ($nav_items as $item): ?>
+    <?php foreach ($sidebar_items as $item): ?>
       <?php if (isset($item['sep']) || (($item[0] ?? null) === 'sep')): ?>
-        <hr class="nav-sep">
+        <hr class="sidebar-separator">
       <?php else: ?>
         <a href="<?= htmlspecialchars($item['file'] ?? '') ?>"
-           class="nav-item<?= $current_page === ($item['file'] ?? '') ? ' active' : '' ?>">
-          <span class="nav-icon"><?= $item['icon'] ?? '' ?></span>
+           class="sidebar-item<?= $current_page === ($item['file'] ?? '') ? ' active' : '' ?>">
+          <span class="sidebar-icon"><?= $item['icon'] ?? '' ?></span>
           <?= htmlspecialchars($item['label'] ?? '') ?>
         </a>
       <?php endif; ?>

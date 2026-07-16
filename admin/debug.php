@@ -15,7 +15,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['ok' => false, 'msg' => '未登录']); exit;
         }
 
-        $url = 'https://api.github.com/repos/codingriver/simple-homepage/commits/main';
+        $url = 'https://api.github.com/repos/codingriver/riverops/commits/main';
         $body = '';
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
@@ -25,7 +25,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
                 CURLOPT_MAXREDIRS => 3,
                 CURLOPT_TIMEOUT => 5,
                 CURLOPT_CONNECTTIMEOUT => 3,
-                CURLOPT_USERAGENT => 'SimpleHomepage-Debug/1.0',
+                CURLOPT_USERAGENT => 'RiverOps-Debug/1.0',
                 CURLOPT_HTTPHEADER => [
                     'Accept: application/vnd.github+json',
                 ],
@@ -43,7 +43,7 @@ if (isset($_GET['ajax']) || $_SERVER['REQUEST_METHOD'] === 'POST') {
                     'method' => 'GET',
                     'timeout' => 5,
                     'ignore_errors' => true,
-                    'header' => "Accept: application/vnd.github+json\r\nUser-Agent: SimpleHomepage-Debug/1.0\r\n",
+                    'header' => "Accept: application/vnd.github+json\r\nUser-Agent: RiverOps-Debug/1.0\r\n",
                 ],
             ]);
             $resp = @file_get_contents($url, false, $ctx);
@@ -90,7 +90,7 @@ $page_title = '调试工具';
 require_once __DIR__ . '/shared/header.php';
 
 $cfg = load_config();
-$build_info = nav_read_build_info();
+$build_info = riverops_read_build_info();
 ?>
 
 <!-- 镜像构建元数据（CI 注入，便于与 GitHub 对照） -->
@@ -108,11 +108,11 @@ $build_info = nav_read_build_info();
     <a href="<?= htmlspecialchars(rtrim($build_info['source'], '/')) ?>/commit/<?= htmlspecialchars($build_info['git_commit']) ?>" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">在 GitHub 打开该提交</a>
     <span id="gh-compare-hint" style="margin-left:10px;color:var(--tm)"></span>
   </p>
-  <script type="application/json" id="nav-build-info-json"><?= json_encode($build_info, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+  <script type="application/json" id="riverops-build-info-json"><?= json_encode($build_info, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
   <script>
   (function(){
     var el = document.getElementById('gh-compare-hint');
-    var raw = document.getElementById('nav-build-info-json');
+    var raw = document.getElementById('riverops-build-info-json');
     if (!el || !raw) return;
     var bi;
     try { bi = JSON.parse(raw.textContent || '{}'); } catch (e) { return; }
@@ -135,7 +135,7 @@ $build_info = nav_read_build_info();
   <?php elseif ($build_info): ?>
   <p style="color:var(--tm);font-size:13px">已存在构建信息文件，但 <code>git_commit</code> 为 <code>unknown</code>（多为本地构建未传参数）。命令行可查看：<code>docker inspect &lt;容器名&gt; --format '{{json .Config.Labels}}'</code></p>
   <?php else: ?>
-  <p style="color:var(--tm);font-size:13px">未找到 <code>/var/www/nav/.build-info.json</code>。使用 GitHub Actions 构建的镜像会包含该文件；本地 <code>docker build</code> 可传入 <code>--build-arg GIT_COMMIT=...</code>。</p>
+  <p style="color:var(--tm);font-size:13px">未找到 <code>/var/www/riverops/.build-info.json</code>。使用 GitHub Actions 构建的镜像会包含该文件；本地 <code>docker build</code> 可传入 <code>--build-arg GIT_COMMIT=...</code>。</p>
   <?php endif; ?>
 </div>
 
@@ -175,7 +175,7 @@ $build_info = nav_read_build_info();
 function confirmToggleDisplayErrors(btn) {
     var form = btn.closest('form');
     var de = form.querySelector('[name=display_errors]').value;
-    NavConfirm.open({
+    RiverOpsConfirm.open({
         title: '切换 display_errors',
         message: de === '1'
             ? '开启 display_errors 会将 PHP 错误直接输出到页面，仅调试时使用，确认开启？'

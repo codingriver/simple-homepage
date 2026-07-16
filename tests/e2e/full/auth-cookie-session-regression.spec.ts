@@ -21,7 +21,7 @@ test('login uses complete bridge before protected redirect and survives stale in
 
   await page.context().addCookies([
     {
-      name: 'nav_session',
+      name: 'riverops_session',
       value: 'stale-invalid-cookie',
       domain: '127.0.0.1',
       path: '/',
@@ -41,19 +41,19 @@ test('login uses complete bridge before protected redirect and survives stale in
   await expect(page.locator('.topbar-title')).toHaveText('系统设置');
 
   const cookies = await page.context().cookies();
-  expect(cookies.some((cookie) => cookie.name === 'nav_session')).toBeTruthy();
+  expect(cookies.some((cookie) => cookie.name === 'riverops_session')).toBeTruthy();
 
   await tracker.assertNoClientErrors();
 });
 
 test('max-session page allows multi-select kick and falls back to oldest when none selected', async ({ browser }) => {
-  const usersSnapshot = await snapshotContainerFiles(['/var/www/nav/data/users.json']);
+  const usersSnapshot = await snapshotContainerFiles(['/var/www/riverops/data/users.json']);
   const holders = [];
   let context;
   try {
     const setMaxResult = runDockerPhpInline(
       [
-        '$file = "/var/www/nav/data/users.json";',
+        '$file = "/var/www/riverops/data/users.json";',
         '$users = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];',
         '$users["qatest"] = $users["qatest"] ?? ["password_hash" => password_hash("qatest2026", PASSWORD_BCRYPT), "role" => "admin"];',
         '$users["qatest"]["password_hash"] = password_hash("qatest2026", PASSWORD_BCRYPT);',
@@ -115,15 +115,15 @@ test('max-session page allows multi-select kick and falls back to oldest when no
 test('internal auth verification denial writes reason to auth log', async () => {
   const result = runDockerPhpInline(
     [
-      '$_SERVER["HTTP_COOKIE"] = "nav_session=malformed-token";',
+      '$_SERVER["HTTP_COOKIE"] = "riverops_session=malformed-token";',
       '$_SERVER["HTTP_HOST"] = "127.0.0.1:58080";',
       '$_SERVER["REQUEST_URI"] = "/admin/index.php";',
       '$_SERVER["REMOTE_ADDR"] = "127.0.0.1";',
-      'require "/var/www/nav/public/auth/verify.php";',
+      'require "/var/www/riverops/public/auth/verify.php";',
     ].join(' ')
   );
   expect(result.code, result.output).toBe(0);
-  const log = readContainerFile('/var/www/nav/data/logs/auth.log');
+  const log = readContainerFile('/var/www/riverops/data/logs/auth.log');
   expect(log).toContain('AUTH_DENY');
   expect(log).toContain('reason=malformed');
 });
@@ -140,7 +140,7 @@ test('revoked server session cookie can recover through fresh login then survive
   await expect(page).toHaveURL(/\/admin\/index\.php/);
   await expect(page.locator('.topbar-title')).toHaveText('控制台');
 
-  const revokeResult = runDockerPhpInline('file_put_contents("/var/www/nav/data/sessions.json", "{}", LOCK_EX);');
+  const revokeResult = runDockerPhpInline('file_put_contents("/var/www/riverops/data/sessions.json", "{}", LOCK_EX);');
   expect(revokeResult.code, revokeResult.output).toBe(0);
 
   await page.goto('/admin/index.php');

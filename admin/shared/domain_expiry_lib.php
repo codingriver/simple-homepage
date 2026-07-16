@@ -542,7 +542,7 @@ function domain_expiry_http_get_json(string $url, int $timeout = 8): array {
             CURLOPT_MAXREDIRS => 3,
             CURLOPT_TIMEOUT => $timeout,
             CURLOPT_CONNECTTIMEOUT => min(4, $timeout),
-            CURLOPT_USERAGENT => 'simple-homepage-domain-expiry/1.0',
+            CURLOPT_USERAGENT => 'riverops-domain-expiry/1.0',
             CURLOPT_HTTPHEADER => ['Accept: application/rdap+json,application/json,*/*'],
         ]);
         if (defined('CURLOPT_PROTOCOLS') && defined('CURLPROTO_HTTPS')) {
@@ -574,7 +574,7 @@ function domain_expiry_http_get_json(string $url, int $timeout = 8): array {
             'ignore_errors' => true,
             'follow_location' => 1,
             'max_redirects' => 3,
-            'header' => "User-Agent: simple-homepage-domain-expiry/1.0\r\nAccept: application/rdap+json,application/json,*/*\r\n",
+            'header' => "User-Agent: riverops-domain-expiry/1.0\r\nAccept: application/rdap+json,application/json,*/*\r\n",
         ],
     ]);
     $body = @file_get_contents($url, false, $ctx);

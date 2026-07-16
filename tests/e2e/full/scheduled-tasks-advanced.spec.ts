@@ -5,12 +5,12 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const scheduledTasksFile = path.resolve(__dirname, '../../../data/scheduled_tasks.json');
-const containerScheduledTasksFile = '/var/www/nav/data/scheduled_tasks.json';
+const containerScheduledTasksFile = '/var/www/riverops/data/scheduled_tasks.json';
 
 async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  const navigationPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
   await page.locator('#task-modal button[form="task-form"]').click({ force: true });
-  await navPromise;
+  await navigationPromise;
 }
 
 test('scheduled tasks advanced cases normalize invalid pages and keep system dispatchers guarded', async ({ page }) => {

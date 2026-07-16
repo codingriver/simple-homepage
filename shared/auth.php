@@ -1,7 +1,7 @@
 <?php
 /**
  * 核心认证库 v2.0
- * 后台管理面板共享认证库
+ * RiverOps 共享认证库
  *
  * 功能：Token生成验证、Cookie管理、用户验证、IP锁定、
  *       登录日志、首次安装检测、配置读取
@@ -10,9 +10,9 @@
 // ============================================================
 // 配置区（AUTH_SECRET_KEY 优先读环境变量，其次读 data/auth_secret.key）
 // ============================================================
-define('SESSION_COOKIE_NAME', 'nav_session');
-define('PHP_SESSION_COOKIE_NAME', 'nav_php_session');
-define('NAV_DOMAIN',        'nav.yourdomain.com');
+define('SESSION_COOKIE_NAME', 'riverops_session');
+define('PHP_SESSION_COOKIE_NAME', 'riverops_php_session');
+define('RIVEROPS_DEFAULT_DOMAIN',        'riverops.example.com');
 
 // 数据目录（相对于本文件的上级目录）
 if (!defined('DATA_DIR')) {
@@ -27,7 +27,7 @@ define('AUTH_LOG_FILE',     DATA_DIR . '/logs/auth.log');
 define('AUTH_LOG_MAX_LINES', 10);
 
 /**
- * 启动 Homepage 自己的 PHP Session。
+ * 启动 RiverOps 自己的 PHP Session。
  * 使用专用 Cookie 名称，避免与同一域下其他 PHP 应用的 PHPSESSID 冲突。
  */
 function auth_start_php_session(): void {
@@ -48,8 +48,8 @@ function auth_start_php_session(): void {
     session_start();
 }
 define('AUTH_SECRET_FILE',  DATA_DIR . '/auth_secret.key');
-/** 开发模式标记（容器 entrypoint 根据 NAV_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
-define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.nav_dev_mode');
+/** 开发模式标记（容器 entrypoint 根据 RIVEROPS_DEV_MODE 创建；PHP-FPM 可能不继承环境变量故用文件） */
+define('AUTH_DEV_MODE_FLAG_FILE', DATA_DIR . '/.riverops_dev_mode');
 define('SESSIONS_FILE', DATA_DIR . '/sessions.json');
 
 /** Token 默认有效期（小时） */
@@ -66,8 +66,8 @@ define('AUTH_LOGIN_LOCK_MINUTES_DEFAULT', 15);
  */
 function auth_default_config(): array {
     return [
-        'site_name'           => '后台中心',
-        'nav_domain'          => '',
+        'site_name'           => 'RiverOps',
+        'panel_domain'          => '',
         'token_expire_hours'  => AUTH_TOKEN_EXPIRE_HOURS_DEFAULT,
         'remember_me_days'    => AUTH_REMEMBER_ME_DAYS_DEFAULT,
         'login_fail_limit'    => AUTH_LOGIN_FAIL_LIMIT_DEFAULT,
@@ -94,6 +94,21 @@ function auth_default_config(): array {
  */
 function auth_remove_retired_config(array $cfg): array {
     unset(
+        $cfg['bg_color'],
+        $cfg['bg_image'],
+        $cfg['card_direction'],
+        $cfg['card_layout'],
+        $cfg['card_show_desc'],
+        $cfg['fs_allowed_roots'],
+        $cfg['show_asset_filter'],
+        $cfg['show_recent_visits'],
+        $cfg['ssh_terminal_idle_minutes'],
+        $cfg['ssh_terminal_persist'],
+        $cfg['webdav_enabled'],
+        $cfg['webdav_password_hash'],
+        $cfg['webdav_readonly'],
+        $cfg['webdav_root'],
+        $cfg['webdav_username'],
         $cfg['proxy_params_mode'],
         $cfg['nginx_last_applied'],
         $cfg['nginx_last_applied_proxy_state']
@@ -104,7 +119,7 @@ function auth_remove_retired_config(array $cfg): array {
 /**
  * 安全清洗 redirect 参数：
  * - 允许站内相对路径
- * - 允许当前站群（nav_domain / cookie_domain）内的绝对 URL，便于主站登录后回跳到受保护子域名
+ * - 允许当前站群（panel_domain / cookie_domain）内的绝对 URL，便于主站登录后回跳到受保护子域名
  * - 其他绝对 URL 一律裁剪为 path 或直接拒绝
  */
 function auth_sanitize_redirect(string $redirect): string {
@@ -118,11 +133,11 @@ function auth_sanitize_redirect(string $redirect): string {
 
         $host = strtolower((string) $parsed['host']);
         $cfg  = auth_get_config();
-        $nav_host = strtolower((string) ($cfg['nav_domain'] ?? ''));
+        $panel_host = strtolower((string) ($cfg['panel_domain'] ?? ''));
         $cookie_domain = ltrim(strtolower((string) ($cfg['cookie_domain'] ?? '')), '.');
 
         $is_same_site = false;
-        if ($nav_host !== '' && $host === $nav_host) {
+        if ($panel_host !== '' && $host === $panel_host) {
             $is_same_site = true;
         }
         if (!$is_same_site && $cookie_domain !== '' && ($host === $cookie_domain || str_ends_with($host, '.' . $cookie_domain))) {
@@ -224,10 +239,10 @@ function auth_request_scheme(): string {
 
 /**
  * 获取后台域名。
- * 优先使用 config.json 中的 nav_domain；否则回退到当前 Host 或示例常量。
+ * 优先使用 config.json 中的 panel_domain；否则回退到当前 Host 或示例常量。
  */
-function auth_nav_domain(): string {
-    $cfg_domain = trim((string) (auth_get_config()['nav_domain'] ?? ''));
+function auth_panel_domain(): string {
+    $cfg_domain = trim((string) (auth_get_config()['panel_domain'] ?? ''));
     if ($cfg_domain !== '') {
         return $cfg_domain;
     }
@@ -237,7 +252,7 @@ function auth_nav_domain(): string {
         return $host;
     }
 
-    return NAV_DOMAIN;
+    return RIVEROPS_DEFAULT_DOMAIN;
 }
 
 /**
@@ -245,7 +260,7 @@ function auth_nav_domain(): string {
  */
 function auth_current_host(): string {
     $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
-    return $host !== '' ? $host : auth_nav_domain();
+    return $host !== '' ? $host : auth_panel_domain();
 }
 
 /**
@@ -427,7 +442,7 @@ function auth_validate_setup_credentials(string $username, string $password, ?st
  * 读取无人值守安装配置：环境变量优先，否则 data/.initial_admin.json。
  * PASSWORD 允许为空；若已设置 ADMIN 环境变量但为空或用户名非法，则视为无效并删除辅助文件，返回 null（走安装向导）。
  *
- * @return array{user:string,password:string,site_name:string,nav_domain:string}|null
+ * @return array{user:string,password:string,site_name:string,panel_domain:string}|null
  */
 function auth_get_initial_admin_config(): ?array {
     $file = DATA_DIR . '/.initial_admin.json';
@@ -449,7 +464,7 @@ function auth_get_initial_admin_config(): ?array {
         $user = trim((string) $adminEnv);
         if ($user === '' || !auth_is_valid_initial_admin_username($user)) {
             @unlink($file);
-            error_log('[nav] 环境变量 ADMIN 为空或非法，无人值守已取消，请使用安装向导');
+            error_log('[riverops] 环境变量 ADMIN 为空或非法，无人值守已取消，请使用安装向导');
             return null;
         }
     } else {
@@ -459,7 +474,7 @@ function auth_get_initial_admin_config(): ?array {
         }
         if (!auth_is_valid_initial_admin_username($user)) {
             @unlink($file);
-            error_log('[nav] .initial_admin.json 中 ADMIN 非法，已清除，请使用安装向导');
+            error_log('[riverops] .initial_admin.json 中 ADMIN 非法，已清除，请使用安装向导');
             return null;
         }
     }
@@ -478,25 +493,25 @@ function auth_get_initial_admin_config(): ?array {
     if ($domainEnv !== false) {
         $dom = trim((string) $domainEnv);
     } else {
-        $dom = trim((string)($j['DOMAIN'] ?? $j['nav_domain'] ?? ''));
+        $dom = trim((string)($j['DOMAIN'] ?? $j['panel_domain'] ?? ''));
     }
 
     if ($site === '') {
-        $site = '后台中心';
+        $site = 'RiverOps';
     }
 
     return [
         'user'         => $user,
         'password'     => $pass,
         'site_name'    => $site,
-        'nav_domain'   => $dom,
+        'panel_domain'   => $dom,
     ];
 }
 
 /**
  * 执行首次安装的数据写入（与 setup.php 提交成功时一致）
  */
-function auth_apply_initial_install(string $username, string $password, string $site_name, string $nav_domain): void {
+function auth_apply_initial_install(string $username, string $password, string $site_name, string $panel_domain): void {
     auth_ensure_secret_key();
 
     if (!is_dir(DATA_DIR)) {
@@ -517,7 +532,7 @@ function auth_apply_initial_install(string $username, string $password, string $
 
     $cfg = [
         'site_name'          => $site_name,
-        'nav_domain'         => $nav_domain,
+        'panel_domain'         => $panel_domain,
         'token_expire_hours' => 8,
         'remember_me_days'   => 60,
         'login_fail_limit'   => 5,
@@ -580,7 +595,7 @@ function auth_bootstrap_initial_admin_if_needed(): void {
             $ini['user'],
             $ini['password'],
             $ini['site_name'],
-            $ini['nav_domain']
+            $ini['panel_domain']
         );
         @unlink(DATA_DIR . '/.initial_admin.json');
     } finally {
@@ -871,7 +886,7 @@ function auth_session_revoke_by_usernames(array $usernames): int {
 function auth_get_current_user(): ?array {
     $tokens = auth_request_cookie_values(SESSION_COOKIE_NAME);
     if (empty($tokens)) {
-        $GLOBALS['_nav_auth_failure_reason'] = 'no_cookie';
+        $GLOBALS['_riverops_auth_failure_reason'] = 'no_cookie';
         return null;
     }
     $payload = null;
@@ -885,7 +900,7 @@ function auth_get_current_user(): ?array {
         $reasons[] = $result['reason'];
     }
     if (!is_array($payload) || !isset($payload['username'])) {
-        $GLOBALS['_nav_auth_failure_reason'] = $reasons !== [] ? implode(',', array_unique($reasons)) : 'invalid_token';
+        $GLOBALS['_riverops_auth_failure_reason'] = $reasons !== [] ? implode(',', array_unique($reasons)) : 'invalid_token';
         return null;
     }
     // 检查用户是否被当前 IP / 域名屏蔽
@@ -896,22 +911,22 @@ function auth_get_current_user(): ?array {
     $blockedDomains = auth_user_blocked_domains($username);
     if (!empty($blockedIps) && is_ip_in_list($clientIp, $blockedIps)) {
         auth_clear_cookie();
-        $GLOBALS['_nav_auth_blocked'] = true;
-        $GLOBALS['_nav_auth_failure_reason'] = 'blocked_ip';
+        $GLOBALS['_riverops_auth_blocked'] = true;
+        $GLOBALS['_riverops_auth_failure_reason'] = 'blocked_ip';
         return null;
     }
     if (!empty($blockedDomains) && is_domain_in_list($host, $blockedDomains)) {
         auth_clear_cookie();
-        $GLOBALS['_nav_auth_blocked'] = true;
-        $GLOBALS['_nav_auth_failure_reason'] = 'blocked_domain';
+        $GLOBALS['_riverops_auth_blocked'] = true;
+        $GLOBALS['_riverops_auth_failure_reason'] = 'blocked_domain';
         return null;
     }
-    $GLOBALS['_nav_auth_failure_reason'] = 'ok';
+    $GLOBALS['_riverops_auth_failure_reason'] = 'ok';
     return $payload;
 }
 
 function auth_last_failure_reason(): string {
-    $reason = (string)($GLOBALS['_nav_auth_failure_reason'] ?? '');
+    $reason = (string)($GLOBALS['_riverops_auth_failure_reason'] ?? '');
     return $reason !== '' ? $reason : 'unknown';
 }
 
@@ -1008,10 +1023,10 @@ function auth_clear_cookie(): void {
 // ============================================================
 
 /**
- * 是否启用「开发镜像」内置测试账户（环境变量 NAV_DEV_MODE=1/true，或 data/.nav_dev_mode 存在）
+ * 是否启用「开发镜像」内置测试账户（环境变量 RIVEROPS_DEV_MODE=1/true，或 data/.riverops_dev_mode 存在）
  */
 function auth_dev_mode_enabled(): bool {
-    $env = getenv('NAV_DEV_MODE');
+    $env = getenv('RIVEROPS_DEV_MODE');
     if ($env === '1' || strcasecmp((string) $env, 'true') === 0) {
         return true;
     }
@@ -1514,8 +1529,8 @@ if (!function_exists('csrf_token')) {
     function csrf_token(): string {
         // 后台 header 在输出 HTML 前会 session_write_close()，之后不能再 session_start；
         // 同一请求内后续 csrf_field() 使用此处缓存的 token（见 admin/shared/header.php）
-        if (isset($GLOBALS['_nav_csrf_token']) && is_string($GLOBALS['_nav_csrf_token']) && $GLOBALS['_nav_csrf_token'] !== '') {
-            return $GLOBALS['_nav_csrf_token'];
+        if (isset($GLOBALS['_riverops_csrf_token']) && is_string($GLOBALS['_riverops_csrf_token']) && $GLOBALS['_riverops_csrf_token'] !== '') {
+            return $GLOBALS['_riverops_csrf_token'];
         }
         auth_start_php_session();
         if (empty($_SESSION['csrf_token'])) {

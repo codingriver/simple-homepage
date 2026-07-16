@@ -1,7 +1,7 @@
 <?php
 /**
  * 用户管理命令行工具（仓库根目录：manage_users.php）
- * Docker 内路径：/var/www/nav/manage_users.php（与 COPY 位置一致，勿写成 data/ 下）
+ * Docker 内路径：/var/www/riverops/manage_users.php（与 COPY 位置一致，勿写成 data/ 下）
  * 只能通过 CLI 运行，Web 访问返回 403
  *
  * 用法：

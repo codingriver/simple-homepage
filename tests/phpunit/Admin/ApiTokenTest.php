@@ -24,10 +24,10 @@ final class ApiTokenTest extends TestCase
 
     public function testApiTokenGenerateVerifyDelete(): void
     {
-        $this->assertFalse(api_token_verify('np_invalid'));
+        $this->assertFalse(api_token_verify('rop_invalid'));
 
         $token = api_token_generate('Test Token');
-        $this->assertMatchesRegularExpression('/^np_[a-f0-9]{64}$/', $token);
+        $this->assertMatchesRegularExpression('/^rop_[a-f0-9]{64}$/', $token);
         $this->assertTrue(api_token_verify($token));
         $this->assertSame('Test Token', api_token_get_name($token));
 
@@ -42,7 +42,7 @@ final class ApiTokenTest extends TestCase
     public function testApiTokenMask(): void
     {
         $this->assertSame('short', api_token_mask('short'));
-        $masked = api_token_mask('np_1234567890abcdef');
+        $masked = api_token_mask('rop_1234567890abcdef');
         $this->assertStringContainsString('...', $masked);
     }
 }

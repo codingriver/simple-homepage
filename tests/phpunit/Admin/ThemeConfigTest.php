@@ -39,10 +39,12 @@ final class ThemeConfigTest extends TestCase
         $this->assertSame('1', $loaded['nginx_access_log_enabled']);
     }
 
-    public function testRetiredProxyConfigIsRemovedOnLoadAndSave(): void
+    public function testRetiredConfigIsRemovedOnLoadAndSave(): void
     {
         file_put_contents(CONFIG_FILE, json_encode([
-            'site_name' => '后台中心',
+            'site_name' => 'RiverOps',
+            'webdav_enabled' => '1',
+            'card_layout' => 'grid',
             'proxy_params_mode' => 'full',
             'nginx_last_applied' => 123,
             'nginx_last_applied_proxy_state' => ['sites' => ['legacy' => []]],
@@ -52,11 +54,15 @@ final class ThemeConfigTest extends TestCase
         $this->assertArrayNotHasKey('proxy_params_mode', $loaded);
         $this->assertArrayNotHasKey('nginx_last_applied', $loaded);
         $this->assertArrayNotHasKey('nginx_last_applied_proxy_state', $loaded);
+        $this->assertArrayNotHasKey('webdav_enabled', $loaded);
+        $this->assertArrayNotHasKey('card_layout', $loaded);
 
         save_config($loaded);
         $saved = json_decode((string) file_get_contents(CONFIG_FILE), true);
         $this->assertArrayNotHasKey('proxy_params_mode', $saved);
         $this->assertArrayNotHasKey('nginx_last_applied', $saved);
         $this->assertArrayNotHasKey('nginx_last_applied_proxy_state', $saved);
+        $this->assertArrayNotHasKey('webdav_enabled', $saved);
+        $this->assertArrayNotHasKey('card_layout', $saved);
     }
 }

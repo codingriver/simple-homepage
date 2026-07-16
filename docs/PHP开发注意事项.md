@@ -1,6 +1,6 @@
 # PHP Web 开发注意事项
 
-> 基于 Simple Homepage 项目实战踩坑总结，适用于所有 PHP Web 项目。
+> 基于 RiverOps 项目实战踩坑总结，适用于所有 PHP Web 项目。
 > 每一条都是真实 Bug 的教训。
 
 ---

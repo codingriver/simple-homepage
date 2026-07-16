@@ -5,7 +5,7 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile } from '../../helpers/cli';
 
 const auditLogPath = path.resolve(__dirname, '../../../data/logs/audit.log');
-const containerAuditLogPath = '/var/www/nav/data/logs/audit.log';
+const containerAuditLogPath = '/var/www/riverops/data/logs/audit.log';
 
 test('logs center loads sources filters downloads and clears app logs', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page, {
@@ -74,8 +74,8 @@ test('logs center loads sources filters downloads and clears app logs', async ({
 
   // Clear audit log
   await page.locator('#btnClear').click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await page.waitForTimeout(400);
   await expect.poll(() => page.locator('#logPreview').textContent()).toMatch(/^\s*$|暂无内容/);
 

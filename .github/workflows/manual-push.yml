@@ -51,9 +51,9 @@ jobs:
       - name: Determine tags
         id: tags
         run: |
-          TAGS="codingriver/simple-homepage:latest"
+          TAGS="codingriver/riverops:latest"
           if [ -n "${{ inputs.tag }}" ]; then
-            TAGS="${TAGS},codingriver/simple-homepage:${{ inputs.tag }}"
+            TAGS="${TAGS},codingriver/riverops:${{ inputs.tag }}"
           fi
           echo "list=${TAGS}" >> $GITHUB_OUTPUT
           echo "[push] Will push tags: ${TAGS}"
@@ -82,8 +82,8 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: codingriver/simple-homepage
-          short-description: "A simple self-hosted navigation homepage with Docker support"
+          repository: codingriver/riverops
+          short-description: "A lightweight self-hosted operations console for personal infrastructure"
           readme-filepath: ./README.md
 
       - name: Summary

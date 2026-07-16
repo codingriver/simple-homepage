@@ -7,9 +7,9 @@ async function openDdnsDispatcherTab(page: Parameters<typeof loginAsDevAdmin>[0]
 }
 
 async function saveTaskModal(page: Parameters<typeof loginAsDevAdmin>[0]) {
-  const navPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
+  const navigationPromise = page.waitForURL(/\/admin\/scheduled_tasks\.php/, { timeout: 15000 }).catch(() => null);
   await page.locator('#task-modal button[form="task-form"]').click({ force: true });
-  await navPromise;
+  await navigationPromise;
 }
 
 async function ensureDdnsDispatcherExists(page: Parameters<typeof loginAsDevAdmin>[0]) {

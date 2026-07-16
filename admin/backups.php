@@ -16,7 +16,7 @@ if (isset($_GET['download']) || isset($_GET['export']) || $_SERVER['REQUEST_METH
         $export = backup_collect_payload('export');
         $json = json_encode($export, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         header('Content-Type: application/json; charset=utf-8');
-        header('Content-Disposition: attachment; filename="nav_export_' . date('Ymd_His') . '.json"');
+        header('Content-Disposition: attachment; filename="riverops_export_' . date('Ymd_His') . '.json"');
         header('Content-Length: ' . strlen($json));
         echo $json; exit;
     }
@@ -274,7 +274,7 @@ function handleImportFile(input) {
                 return;
             }
             var formatLabel = '包含：' + sections.join('、');
-            NavConfirm.open({
+            RiverOpsConfirm.open({
                 title: '导入配置',
                 message: '确认导入？' + formatLabel + '，当前配置将被覆盖（自动备份）',
                 confirmText: '确认导入',

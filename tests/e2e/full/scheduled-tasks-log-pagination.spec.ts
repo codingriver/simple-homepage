@@ -84,33 +84,33 @@ test('scheduled tasks use fixed workdir with log pagination and copy directory i
     const fn = (window as Window & { copyTaskWorkdir?: (taskPath: string) => void }).copyTaskWorkdir;
     if (typeof fn !== 'function') throw new Error('copyTaskWorkdir not found');
     fn(path);
-  }, '/var/www/nav/data/tasks');
+  }, '/var/www/riverops/data/tasks');
   const copied = await page.evaluate(() => (window as any).__copiedText || '');
-  expect(copied).toBe('/var/www/nav/data/tasks');
+  expect(copied).toBe('/var/www/riverops/data/tasks');
   expect(await fs.stat(tasksRootPath).then((stat) => stat.isDirectory()).catch(() => false)).toBe(true);
 
   await row.getByRole('button', { name: /日志/ }).click({ force: true });
-  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
-  await expect(page.locator('#nav-ace-pag-label')).toContainText(/第\s+\d+\s*\/\s*\d+\s*页/);
-  if (await page.locator('#nav-ace-pag-last').isEnabled()) {
-    await page.locator('#nav-ace-pag-last').click();
+  await expect(page.locator('#riverops-ace-editor-modal')).toBeVisible();
+  await expect(page.locator('#riverops-ace-pag-label')).toContainText(/第\s+\d+\s*\/\s*\d+\s*页/);
+  if (await page.locator('#riverops-ace-pag-last').isEnabled()) {
+    await page.locator('#riverops-ace-pag-last').click();
   }
-  if (await page.locator('#nav-ace-pag-prev').isEnabled()) {
-    await page.locator('#nav-ace-pag-prev').click();
+  if (await page.locator('#riverops-ace-pag-prev').isEnabled()) {
+    await page.locator('#riverops-ace-pag-prev').click();
   }
-  if (await page.locator('#nav-ace-pag-next').isEnabled()) {
-    await page.locator('#nav-ace-pag-next').click();
+  if (await page.locator('#riverops-ace-pag-next').isEnabled()) {
+    await page.locator('#riverops-ace-pag-next').click();
   }
   await page.evaluate(() => {
     const fn = (window as Window & { clearCurrentLog?: () => void }).clearCurrentLog;
     if (typeof fn !== 'function') throw new Error('clearCurrentLog not found');
     fn();
   });
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await page.waitForTimeout(500);
   await page.keyboard.press('Escape');
-  await expect(page.locator('#nav-ace-editor-modal')).toBeHidden();
+  await expect(page.locator('#riverops-ace-editor-modal')).toBeHidden();
 
   await page.getByRole('button', { name: /新建任务/ }).click();
   await expect(page.locator('#fm-workdir-preview')).toHaveCount(0);

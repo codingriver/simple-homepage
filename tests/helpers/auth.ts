@@ -46,9 +46,9 @@ export async function submitVisibleModal(page: Page) {
   const submit = modal.locator('button[type="submit"]').first();
   await submit.scrollIntoViewIfNeeded();
   // 如果提交后会触发页面重载，则等待重载完成
-  const navPromise = page.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch(() => null);
+  const navigationPromise = page.waitForNavigation({ waitUntil: 'load', timeout: 5000 }).catch(() => null);
   await submit.click({ force: true });
-  await navPromise;
+  await navigationPromise;
 }
 
 export async function attachClientErrorTracking(
@@ -136,10 +136,10 @@ export async function loginAsDevAdmin(page: Page) {
 
 export async function logout(page: Page) {
   // 直接清除登录 cookie，避免表单提交导致的导航竞态和 chrome-error
-  await page.context().clearCookies({ name: 'nav_session' });
+  await page.context().clearCookies({ name: 'riverops_session' });
 }
 
-export async function ensureSetup(page: Page, siteName = 'E2E 导航站') {
+export async function ensureSetup(page: Page, siteName = 'E2E RiverOps') {
   await page.goto('/setup.php');
   if ((await page.locator('body').textContent())?.includes('404 Not Found')) {
     return false;
@@ -150,7 +150,7 @@ export async function ensureSetup(page: Page, siteName = 'E2E 导航站') {
   await page.locator('input[name="password"]').fill('Admin@test2026');
   await page.locator('input[name="password2"]').fill('Admin@test2026');
   await page.locator('input[name="site_name"]').fill(siteName);
-  await page.locator('input[name="nav_domain"]').fill('nav.test.local');
+  await page.locator('input[name="panel_domain"]').fill('riverops.test.local');
   await page.getByRole('button', { name: /开始使用/ }).click();
   await expect(page.getByRole('link', { name: /前往登录/ })).toBeVisible();
   return true;

@@ -59,8 +59,8 @@ test('admin dashboard stat cards reflect created data and quick actions work', a
   const backupRow = page.locator(`tr:has(input[name="filename"][value="${createdBackup}"])`).first();
   await expect(backupRow).toBeVisible();
   await backupRow.getByRole('button', { name: /删除/ }).click();
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await page.waitForLoadState('domcontentloaded');
 
   await page.goto('/admin/index.php');

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { spawnSync } from 'child_process';
 
-const containerName = process.env.APP_CONTAINER || 'simple-homepage';
+const containerName = process.env.APP_CONTAINER || 'riverops';
 
 type LocalSnapshot = Record<string, Buffer | null>;
 type ContainerSnapshot = Record<string, { exists: boolean; contentBase64: string }>;
@@ -35,11 +35,11 @@ export function runDockerPhpInline(code: string, args: string[] = []) {
   return runDockerCommand([
     'exec',
     '-e',
-    `NAV_PHP_INLINE=${encodedCode}`,
+    `RIVEROPS_PHP_INLINE=${encodedCode}`,
     containerName,
     'php',
     '-r',
-    'eval(base64_decode(getenv("NAV_PHP_INLINE")));',
+    'eval(base64_decode(getenv("RIVEROPS_PHP_INLINE")));',
     ...args,
   ]);
 }

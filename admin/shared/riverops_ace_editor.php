@@ -1,37 +1,37 @@
 <?php
 /**
- * NavAceEditor 统一弹窗封装
+ * RiverOpsAceEditor 统一弹窗封装
  *
  * 使用方式：
  *   1. 页面加载 ace.js 和 ext-searchbox.js（<script src="assets/ace/ace.js"></script>）
- *   2. 在合适位置 require __DIR__ . '/shared/ace_editor_modal.php'
- *   3. 调用 NavAceEditor.open({...}) / NavAceEditor.close()
+ *   2. 在合适位置 require __DIR__ . '/shared/riverops_ace_editor.php'
+ *   3. 调用 RiverOpsAceEditor.open({...}) / RiverOpsAceEditor.close()
  *
  * 禁止各页面自行编写 Ace 初始化代码、弹窗 HTML、按钮 HTML。
  */
 ?>
 
-<!-- ========== NavAceEditor 统一弹窗 ========== -->
-<div id="nav-ace-editor-modal" class="ngx-modal" style="display:none">
-  <div class="ngx-modal-card" id="nav-ace-modal-card">
+<!-- ========== RiverOpsAceEditor 统一弹窗 ========== -->
+<div id="riverops-ace-editor-modal" class="ngx-modal" style="display:none">
+  <div class="ngx-modal-card" id="riverops-ace-modal-card">
     <div class="ngx-modal-head">
       <div class="ngx-modal-title-wrap">
-        <span class="ngx-modal-title" id="nav-ace-title">文本编辑器</span>
-        <span class="ngx-modal-dirty-status" id="nav-ace-dirty-status">未修改</span>
+        <span class="ngx-modal-title" id="riverops-ace-title">文本编辑器</span>
+        <span class="ngx-modal-dirty-status" id="riverops-ace-dirty-status">未修改</span>
       </div>
       <div class="ngx-modal-head-actions">
-        <button type="button" class="btn btn-secondary ngx-fullscreen-btn" id="nav-ace-fullscreen" title="放大">⛶</button>
-        <button type="button" class="btn btn-secondary ngx-close-btn" onclick="NavAceEditor.close()">×</button>
+        <button type="button" class="btn btn-secondary ngx-fullscreen-btn" id="riverops-ace-fullscreen" title="放大">⛶</button>
+        <button type="button" class="btn btn-secondary ngx-close-btn" onclick="RiverOpsAceEditor.close()">×</button>
       </div>
     </div>
     <div class="ngx-modal-body">
-      <div class="ngx-editor-toolbar" id="nav-ace-toolbar">
-        <div class="ngx-editor-toolbar-actions" id="nav-ace-toolbar-actions"></div>
-        <button type="button" class="btn btn-secondary" id="nav-ace-btn-find">查找 (Ctrl+F)</button>
-        <button type="button" class="btn btn-secondary" id="nav-ace-btn-goto">跳转行号 (Ctrl+G)</button>
+      <div class="ngx-editor-toolbar" id="riverops-ace-toolbar">
+        <div class="ngx-editor-toolbar-actions" id="riverops-ace-toolbar-actions"></div>
+        <button type="button" class="btn btn-secondary" id="riverops-ace-btn-find">查找 (Ctrl+F)</button>
+        <button type="button" class="btn btn-secondary" id="riverops-ace-btn-goto">跳转行号 (Ctrl+G)</button>
         <span class="toolbar-sep"></span>
         <label>语言
-          <select id="nav-ace-lang">
+          <select id="riverops-ace-lang">
             <option value="text">Plain Text</option>
             <option value="php">PHP</option>
             <option value="javascript">JavaScript</option>
@@ -52,7 +52,7 @@
           </select>
         </label>
         <label>主题
-          <select id="nav-ace-theme">
+          <select id="riverops-ace-theme">
             <option value="tomorrow_night">Tomorrow Night</option>
             <option value="monokai">Monokai</option>
             <option value="github_dark">GitHub Dark</option>
@@ -60,7 +60,7 @@
           </select>
         </label>
         <label>字号
-          <select id="nav-ace-fontsize">
+          <select id="riverops-ace-fontsize">
             <option value="12">12px</option>
             <option value="13">13px</option>
             <option value="14" selected>14px</option>
@@ -71,19 +71,19 @@
           </select>
         </label>
         <span class="toolbar-sep"></span>
-        <label><input type="checkbox" id="nav-ace-wrap" checked> 自动换行</label>
+        <label><input type="checkbox" id="riverops-ace-wrap" checked> 自动换行</label>
       </div>
-      <div class="ngx-editor-goto-bar" id="nav-ace-goto-bar">
+      <div class="ngx-editor-goto-bar" id="riverops-ace-goto-bar">
         <span>跳转到行号</span>
-        <input type="number" id="nav-ace-goto-input" placeholder="行号" min="1" autocomplete="off">
-        <button type="button" class="btn btn-secondary" id="nav-ace-goto-confirm">跳转</button>
-        <button type="button" class="btn btn-secondary" id="nav-ace-goto-cancel">取消</button>
+        <input type="number" id="riverops-ace-goto-input" placeholder="行号" min="1" autocomplete="off">
+        <button type="button" class="btn btn-secondary" id="riverops-ace-goto-confirm">跳转</button>
+        <button type="button" class="btn btn-secondary" id="riverops-ace-goto-cancel">取消</button>
       </div>
-      <div id="nav-ace-editor" class="ngx-editor-main"></div>
-      <div class="ngx-editor-footer" id="nav-ace-footer" style="display:none"></div>
+      <div id="riverops-ace-editor" class="ngx-editor-main"></div>
+      <div class="ngx-editor-footer" id="riverops-ace-footer" style="display:none"></div>
       <div class="ngx-editor-actions">
-        <div class="ngx-editor-actions-left" id="nav-ace-actions-left"></div>
-        <div class="ngx-editor-actions-right" id="nav-ace-actions-right"></div>
+        <div class="ngx-editor-actions-left" id="riverops-ace-actions-left"></div>
+        <div class="ngx-editor-actions-right" id="riverops-ace-actions-right"></div>
       </div>
     </div>
   </div>
@@ -106,19 +106,19 @@
   var els = {};
 
   function cacheElements() {
-    els.modal = document.getElementById('nav-ace-editor-modal');
-    els.modalCard = document.getElementById('nav-ace-modal-card');
-    els.title = document.getElementById('nav-ace-title');
-    els.toolbar = document.getElementById('nav-ace-toolbar');
-    els.lang = document.getElementById('nav-ace-lang');
-    els.theme = document.getElementById('nav-ace-theme');
-    els.fontsize = document.getElementById('nav-ace-fontsize');
-    els.wrap = document.getElementById('nav-ace-wrap');
-    els.actionsLeft = document.getElementById('nav-ace-actions-left');
-    els.actionsRight = document.getElementById('nav-ace-actions-right');
-    els.footer = document.getElementById('nav-ace-footer');
-    els.toolbarActions = document.getElementById('nav-ace-toolbar-actions');
-    els.fullscreenBtn = document.getElementById('nav-ace-fullscreen');
+    els.modal = document.getElementById('riverops-ace-editor-modal');
+    els.modalCard = document.getElementById('riverops-ace-modal-card');
+    els.title = document.getElementById('riverops-ace-title');
+    els.toolbar = document.getElementById('riverops-ace-toolbar');
+    els.lang = document.getElementById('riverops-ace-lang');
+    els.theme = document.getElementById('riverops-ace-theme');
+    els.fontsize = document.getElementById('riverops-ace-fontsize');
+    els.wrap = document.getElementById('riverops-ace-wrap');
+    els.actionsLeft = document.getElementById('riverops-ace-actions-left');
+    els.actionsRight = document.getElementById('riverops-ace-actions-right');
+    els.footer = document.getElementById('riverops-ace-footer');
+    els.toolbarActions = document.getElementById('riverops-ace-toolbar-actions');
+    els.fullscreenBtn = document.getElementById('riverops-ace-fullscreen');
   }
 
   // ── 初始化 ──
@@ -134,7 +134,7 @@
       return;
     }
 
-    editor = ace.edit('nav-ace-editor');
+    editor = ace.edit('riverops-ace-editor');
     editor.setTheme('ace/theme/' + (options.theme || 'tomorrow_night'));
     editor.session.setUseWrapMode(options.wrapMode !== false);
     editor.session.setTabSize(options.tabSize || 2);
@@ -150,7 +150,7 @@
 
     // 快捷键
     editor.commands.addCommand({
-      name: 'navAceSave',
+      name: 'riverOpsAceSave',
       bindKey: { win: 'Ctrl-S', mac: 'Command-S' },
       exec: function() {
         var btn = findButtonByAction('save');
@@ -160,7 +160,7 @@
       }
     });
     editor.commands.addCommand({
-      name: 'navAceGoto',
+      name: 'riverOpsAceGoto',
       bindKey: { win: 'Ctrl-G', mac: 'Command-G' },
       exec: function() { openGotoBar(); }
     });
@@ -204,7 +204,7 @@
           modalTouchMoved = false;
           return false;
         }
-        NavAceEditor.close();
+        RiverOpsAceEditor.close();
       }
     }
     function onModalTouchStart(e) {
@@ -259,7 +259,7 @@
         if (btn && isButtonVisible(btn)) {
           handleAction('close');
         } else {
-          NavAceEditor.close();
+          RiverOpsAceEditor.close();
         }
       }
     });
@@ -273,19 +273,19 @@
 
   // ── 跳转行号栏 ──
   function openGotoBar() {
-    var bar = document.getElementById('nav-ace-goto-bar');
-    var input = document.getElementById('nav-ace-goto-input');
+    var bar = document.getElementById('riverops-ace-goto-bar');
+    var input = document.getElementById('riverops-ace-goto-input');
     if (!bar || !input) return;
     bar.classList.add('open');
     input.value = '';
     input.focus();
   }
   function closeGotoBar() {
-    var bar = document.getElementById('nav-ace-goto-bar');
+    var bar = document.getElementById('riverops-ace-goto-bar');
     if (bar) bar.classList.remove('open');
   }
   function doGotoLine() {
-    var input = document.getElementById('nav-ace-goto-input');
+    var input = document.getElementById('riverops-ace-goto-input');
     if (!input || !editor) return;
     var line = parseInt(input.value, 10);
     if (line && line > 0) {
@@ -306,50 +306,50 @@
       els.theme.addEventListener('change', function() {
         var t = this.value || 'tomorrow_night';
         editor.setTheme('ace/theme/' + t);
-        try { localStorage.setItem('nav-ace-theme', t); } catch(e) {}
+        try { localStorage.setItem('riverops-ace-theme', t); } catch(e) {}
       });
     }
     if (els.fontsize) {
       els.fontsize.addEventListener('change', function() {
         var s = this.value || '14';
         editor.setFontSize(s + 'px');
-        try { localStorage.setItem('nav-ace-fontsize', s); } catch(e) {}
+        try { localStorage.setItem('riverops-ace-fontsize', s); } catch(e) {}
       });
     }
     if (els.wrap) {
       els.wrap.addEventListener('change', function() {
         editor.session.setUseWrapMode(!!this.checked);
-        try { localStorage.setItem('nav-ace-wrap', !!this.checked ? '1' : '0'); } catch(e) {}
+        try { localStorage.setItem('riverops-ace-wrap', !!this.checked ? '1' : '0'); } catch(e) {}
       });
     }
-    document.getElementById('nav-ace-btn-find').addEventListener('click', function() {
+    document.getElementById('riverops-ace-btn-find').addEventListener('click', function() {
       if (editor) editor.execCommand('find');
     });
-    document.getElementById('nav-ace-btn-goto').addEventListener('click', function() {
+    document.getElementById('riverops-ace-btn-goto').addEventListener('click', function() {
       openGotoBar();
     });
-    document.getElementById('nav-ace-goto-confirm').addEventListener('click', function() {
+    document.getElementById('riverops-ace-goto-confirm').addEventListener('click', function() {
       doGotoLine();
     });
-    document.getElementById('nav-ace-goto-cancel').addEventListener('click', function() {
+    document.getElementById('riverops-ace-goto-cancel').addEventListener('click', function() {
       closeGotoBar();
     });
-    document.getElementById('nav-ace-goto-input').addEventListener('keydown', function(e) {
+    document.getElementById('riverops-ace-goto-input').addEventListener('keydown', function(e) {
       if (e.key === 'Enter') { doGotoLine(); }
       if (e.key === 'Escape') { closeGotoBar(); editor && editor.focus(); }
     });
 
     // 恢复 localStorage 偏好
     var savedTheme = '';
-    try { savedTheme = localStorage.getItem('nav-ace-theme') || ''; } catch(e) {}
+    try { savedTheme = localStorage.getItem('riverops-ace-theme') || ''; } catch(e) {}
     if (savedTheme && els.theme) { editor.setTheme('ace/theme/' + savedTheme); els.theme.value = savedTheme; }
 
     var savedSize = '';
-    try { savedSize = localStorage.getItem('nav-ace-fontsize') || ''; } catch(e) {}
+    try { savedSize = localStorage.getItem('riverops-ace-fontsize') || ''; } catch(e) {}
     if (savedSize && els.fontsize) { editor.setFontSize(savedSize + 'px'); els.fontsize.value = savedSize; }
 
     var savedWrap = '';
-    try { savedWrap = localStorage.getItem('nav-ace-wrap') || ''; } catch(e) {}
+    try { savedWrap = localStorage.getItem('riverops-ace-wrap') || ''; } catch(e) {}
     if (savedWrap && els.wrap) {
       var wrapOn = savedWrap === '1';
       editor.session.setUseWrapMode(wrapOn);
@@ -360,7 +360,7 @@
   // ── 脏标记 ──
   function updateDirty() {
     if (!editor) return;
-    var status = document.getElementById('nav-ace-dirty-status');
+    var status = document.getElementById('riverops-ace-dirty-status');
     // 只读模式不显示脏标记
     if (config.readOnly) {
       if (status) status.style.display = 'none';
@@ -390,29 +390,29 @@
   function renderPagination(pag) {
     if (!els.footer) return;
     // 首次创建 DOM 结构
-    if (!document.getElementById('nav-ace-pag-info')) {
-      els.footer.innerHTML = '<div id="nav-ace-pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;flex-wrap:wrap">'
-        + '<span id="nav-ace-pag-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)"></span>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-refresh" title="刷新当前页">🔄</button>'
-        + '<select id="nav-ace-pag-limit" style="width:90px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;"></select>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-first" title="第一页">⏮</button>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-prev">◀ 上一页</button>'
-        + '<span id="nav-ace-pag-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)"></span>'
-        + '<input type="number" id="nav-ace-pag-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;">'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-goto">跳转</button>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-next">下一页 ▶</button>'
-        + '<button type="button" class="btn btn-sm btn-secondary" id="nav-ace-pag-last" title="最后一页">⏭</button>'
+    if (!document.getElementById('riverops-ace-pag-info')) {
+      els.footer.innerHTML = '<div id="riverops-ace-pagination" style="display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;flex-wrap:wrap">'
+        + '<span id="riverops-ace-pag-info" style="font-size:12px;color:var(--tm);font-family:var(--mono)"></span>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-refresh" title="刷新当前页">🔄</button>'
+        + '<select id="riverops-ace-pag-limit" style="width:90px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;"></select>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-first" title="第一页">⏮</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-prev">◀ 上一页</button>'
+        + '<span id="riverops-ace-pag-label" style="font-size:12px;font-family:var(--mono);color:var(--tx2)"></span>'
+        + '<input type="number" id="riverops-ace-pag-input" min="1" placeholder="页码" title="输入页码按回车跳转" style="width:58px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:12px;font-family:var(--mono);text-align:center;">'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-goto">跳转</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-next">下一页 ▶</button>'
+        + '<button type="button" class="btn btn-sm btn-secondary" id="riverops-ace-pag-last" title="最后一页">⏭</button>'
         + '</div>';
-      pagEls.info  = document.getElementById('nav-ace-pag-info');
-      pagEls.refresh = document.getElementById('nav-ace-pag-refresh');
-      pagEls.limit = document.getElementById('nav-ace-pag-limit');
-      pagEls.first = document.getElementById('nav-ace-pag-first');
-      pagEls.prev  = document.getElementById('nav-ace-pag-prev');
-      pagEls.label = document.getElementById('nav-ace-pag-label');
-      pagEls.next  = document.getElementById('nav-ace-pag-next');
-      pagEls.input = document.getElementById('nav-ace-pag-input');
-      pagEls.goto  = document.getElementById('nav-ace-pag-goto');
-      pagEls.last  = document.getElementById('nav-ace-pag-last');
+      pagEls.info  = document.getElementById('riverops-ace-pag-info');
+      pagEls.refresh = document.getElementById('riverops-ace-pag-refresh');
+      pagEls.limit = document.getElementById('riverops-ace-pag-limit');
+      pagEls.first = document.getElementById('riverops-ace-pag-first');
+      pagEls.prev  = document.getElementById('riverops-ace-pag-prev');
+      pagEls.label = document.getElementById('riverops-ace-pag-label');
+      pagEls.next  = document.getElementById('riverops-ace-pag-next');
+      pagEls.input = document.getElementById('riverops-ace-pag-input');
+      pagEls.goto  = document.getElementById('riverops-ace-pag-goto');
+      pagEls.last  = document.getElementById('riverops-ace-pag-last');
       bindPaginationEvents();
     }
     // 渲染 limit 选项
@@ -455,7 +455,7 @@
     }
     if (pagEls.refresh) {
       pagEls.refresh.addEventListener('click', function() {
-        NavAceEditor.refreshPagination();
+        RiverOpsAceEditor.refreshPagination();
       });
     }
     if (pagEls.limit) {
@@ -668,7 +668,7 @@
     btn.setAttribute('data-action', btnCfg.action || '');
 
     // 工具栏按钮统一样式，仅背景色可自定义
-    btn.className = 'btn btn-sm nav-ace-toolbar-btn';
+    btn.className = 'btn btn-sm riverops-ace-toolbar-btn';
     if (btnCfg.bgColor) {
       btn.style.backgroundColor = btnCfg.bgColor;
       btn.style.borderColor = btnCfg.bgColor;
@@ -708,16 +708,16 @@
   function handleAction(action) {
     var value = editor ? editor.getValue() : '';
     if (action === 'close') {
-      NavAceEditor.close();
+      RiverOpsAceEditor.close();
       return;
     }
     if (typeof config.onAction === 'function') {
-      try { config.onAction(action, value); } catch(e) { console.error('NavAceEditor onAction error', e); }
+      try { config.onAction(action, value); } catch(e) { console.error('RiverOpsAceEditor onAction error', e); }
     }
   }
 
   // ── 全局暴露 ──
-  window.NavAceEditor = {
+  window.RiverOpsAceEditor = {
     init: function(options) {
       init(options);
       return this;
@@ -796,7 +796,7 @@
 
       // 未保存确认（只读模式跳过）
       if (!config.readOnly && config.confirmOnClose !== false && dirty) {
-        NavConfirm.open({
+        RiverOpsConfirm.open({
           title: '关闭编辑器',
           message: '编辑器中有未保存的修改，确认关闭？',
           confirmText: '关闭',
@@ -847,21 +847,21 @@
       if (!editor) return;
       editor.setTheme('ace/theme/' + theme);
       if (els.theme) els.theme.value = theme;
-      try { localStorage.setItem('nav-ace-theme', theme); } catch(e) {}
+      try { localStorage.setItem('riverops-ace-theme', theme); } catch(e) {}
     },
 
     setFontSize: function(px) {
       if (!editor) return;
       editor.setFontSize(px + 'px');
       if (els.fontsize) els.fontsize.value = String(px);
-      try { localStorage.setItem('nav-ace-fontsize', String(px)); } catch(e) {}
+      try { localStorage.setItem('riverops-ace-fontsize', String(px)); } catch(e) {}
     },
 
     setWrapMode: function(on) {
       if (!editor) return;
       editor.session.setUseWrapMode(!!on);
       if (els.wrap) els.wrap.checked = !!on;
-      try { localStorage.setItem('nav-ace-wrap', !!on ? '1' : '0'); } catch(e) {}
+      try { localStorage.setItem('riverops-ace-wrap', !!on ? '1' : '0'); } catch(e) {}
     },
 
     setTitle: function(title) {

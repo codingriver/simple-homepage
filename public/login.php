@@ -61,7 +61,7 @@ if ($current_user) {
     exit;
 }
 // 被屏蔽时提示用户重新登录（全局变量由 auth_get_current_user() 设置）
-if (!$current_user && !empty($GLOBALS['_nav_auth_blocked']) && !empty($_COOKIE[SESSION_COOKIE_NAME])) {
+if (!$current_user && !empty($GLOBALS['_riverops_auth_blocked']) && !empty($_COOKIE[SESSION_COOKIE_NAME])) {
     $error = '当前网络已被限制访问此账户，请重新登录';
 }
 
@@ -174,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 检查 users.json 是否为空（已安装但数据损坏）
 $users_empty = empty(auth_load_users());
 $cfg         = auth_get_config();
-$site_name   = $cfg['site_name'] ?? '后台中心';
+$site_name   = $cfg['site_name'] ?? 'RiverOps';
 $theme       = $cfg['theme'] ?? 'dark';
 ?>
 <!DOCTYPE html>
@@ -185,7 +185,7 @@ $theme       = $cfg['theme'] ?? 'dark';
 <link rel="stylesheet" href="login.css">
 <script src="/gesture-guard.js" defer></script>
 <?php if (!empty($cfg['custom_css'] ?? '')): ?>
-<style id="nav-custom-css"><?= $cfg['custom_css'] ?></style>
+<style id="riverops-custom-css"><?= $cfg['custom_css'] ?></style>
 <?php endif; ?>
 </head><body>
 <div class="card">
@@ -246,15 +246,15 @@ $theme       = $cfg['theme'] ?? 'dark';
   <p style="margin-top:14px;font-size:12px;color:#64748b;line-height:1.5">
     <strong>开发模式</strong>：内置管理员 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">qatest</code>
     / <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px">qatest2026</code>
-    （数据卷中已有同名用户时以文件为准；生产环境请勿设置 <code>NAV_DEV_MODE</code>）
+    （数据卷中已有同名用户时以文件为准；生产环境请勿设置 <code>RIVEROPS_DEV_MODE</code>）
   </p>
   <?php endif; ?>
   <?php if ($users_empty): ?>
   <div class="rescue">
     ⚠️ 账户数据异常，无法登录。请在容器内执行以下命令恢复：
-    <code>php /var/www/nav/manage_users.php add admin 新密码</code>
+    <code>php /var/www/riverops/manage_users.php add admin 新密码</code>
     或重新触发安装向导：
-    <code>php /var/www/nav/manage_users.php setup</code>
+    <code>php /var/www/riverops/manage_users.php setup</code>
   </div>
   <?php endif; ?>
 </div>

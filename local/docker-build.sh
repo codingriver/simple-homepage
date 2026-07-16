@@ -39,8 +39,8 @@ docker compose version >/dev/null 2>&1 && COMPOSE_CMD="docker compose"
 
 BASE_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml")
 DEV_COMPOSE_ARGS=(-f "$SCRIPT_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.dev.yml")
-DEV_IMAGE_NAME="codingriver/simple-homepage:latest"
-DEV_CONTAINER_NAME="${CONTAINER_NAME:-simple-homepage}"
+DEV_IMAGE_NAME="codingriver/riverops:latest"
+DEV_CONTAINER_NAME="${CONTAINER_NAME:-riverops}"
 
 has_var() {
   local name="$1"
@@ -120,9 +120,9 @@ docker_container_is_dev_mode() {
   env_lines="$(docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || true)"
   mount_lines="$(docker container inspect --format '{{range .Mounts}}{{println .Source "|" .Destination}}{{end}}' "$name" 2>/dev/null || true)"
 
-  grep -Fqx "NAV_DEV_MODE=1" <<<"$env_lines" &&
-    grep -Fqx "$PROJECT_DIR|/var/www/nav" <<<"$mount_lines" &&
-    grep -Fqx "$SCRIPT_DIR/php-dev.ini|/usr/local/etc/php/conf.d/98-nav-dev.ini" <<<"$mount_lines"
+  grep -Fqx "RIVEROPS_DEV_MODE=1" <<<"$env_lines" &&
+    grep -Fqx "$PROJECT_DIR|/var/www/riverops" <<<"$mount_lines" &&
+    grep -Fqx "$SCRIPT_DIR/php-dev.ini|/usr/local/etc/php/conf.d/98-riverops-dev.ini" <<<"$mount_lines"
 }
 
 print_help() {

@@ -19,10 +19,10 @@ test('runtime config viewer keeps files unchanged', async ({ page }) => {
   await page.goto('/admin/nginx.php');
 
   await page.locator('[data-view-target="main"]').click();
-  await expect(page.locator('#nav-ace-editor-modal')).toHaveClass(/open/);
+  await expect(page.locator('#riverops-ace-editor-modal')).toHaveClass(/open/);
 
-  await expect(page.locator('#nav-ace-toolbar-actions button[data-action="save"]')).toHaveCount(0);
-  await expect(page.locator('#nav-ace-toolbar-actions button[data-action="save_reload"]')).toHaveCount(0);
+  await expect(page.locator('#riverops-ace-toolbar-actions button[data-action="save"]')).toHaveCount(0);
+  await expect(page.locator('#riverops-ace-toolbar-actions button[data-action="save_reload"]')).toHaveCount(0);
   await expect
     .poll(async () => fs.readFile(nginxMainPath, 'utf8'))
     .toBe(originalContent);

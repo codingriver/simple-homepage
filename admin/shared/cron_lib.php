@@ -168,7 +168,7 @@ function task_execution_label(): string {
 }
 
 function task_project_root(): string {
-    return realpath(__DIR__ . '/../..') ?: '/var/www/nav';
+    return realpath(__DIR__ . '/../..') ?: '/var/www/riverops';
 }
 
 function task_default_workdir(string $id = ''): string {
@@ -264,7 +264,7 @@ function task_try_prepare_cfst_runtime(): array {
     if (!file_exists('/tmp/cfst.lock')) {
         return ['ok' => true, 'msg' => ''];
     }
-    $cmd = 'sudo -n /usr/local/bin/nav-task-compat cfst >/dev/null 2>&1';
+    $cmd = 'sudo -n /usr/local/bin/riverops-task-helper cfst >/dev/null 2>&1';
     $out = [];
     $code = 0;
     @exec($cmd, $out, $code);
@@ -279,7 +279,7 @@ function task_try_cleanup_stale_lock(string $id): void {
     if ($id === '') {
         return;
     }
-    $cmd = 'sudo -n /usr/local/bin/nav-task-compat lock ' . escapeshellarg($id) . ' >/dev/null 2>&1';
+    $cmd = 'sudo -n /usr/local/bin/riverops-task-helper lock ' . escapeshellarg($id) . ' >/dev/null 2>&1';
     @exec($cmd, $out, $code);
     if ($code === 0) {
         task_dispatch_log('stale task lock cleaned', ['id' => $id]);
@@ -884,9 +884,9 @@ function task_spawn_background_command(string $command, ?string $cwd = null, arr
         return ['ok' => false, 'msg' => '后台进程工作目录不存在'];
     }
     $baseEnv = [
-        'HOME'  => '/home/navwww',
-        'USER'  => 'navwww',
-        'LOGNAME' => 'navwww',
+        'HOME'  => '/home/riverops',
+        'USER'  => 'riverops',
+        'LOGNAME' => 'riverops',
         'PATH'  => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'SHELL' => '/bin/bash',
         'LANG'  => 'en_US.UTF-8',
@@ -1346,7 +1346,7 @@ function cron_php_binary(): string {
 }
 
 function cron_ddns_dispatcher_command(): string {
-    return escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/ddns_sync.php';
+    return escapeshellcmd(cron_php_binary()) . ' /var/www/riverops/cli/ddns_sync.php';
 }
 
 function cron_ddns_group_task_names(array $groupTasks): string {
@@ -1461,7 +1461,7 @@ function cron_sync_ddns_dispatcher_task(): array {
 }
 
 function cron_domain_expiry_command(): string {
-    return escapeshellcmd(cron_php_binary()) . ' /var/www/nav/cli/domain_expiry_sync.php';
+    return escapeshellcmd(cron_php_binary()) . ' /var/www/riverops/cli/domain_expiry_sync.php';
 }
 
 function cron_sync_domain_expiry_task(): array {
@@ -1584,7 +1584,7 @@ function cron_regenerate(): array {
     cron_sync_ddns_dispatcher_task();
     cron_sync_domain_expiry_task();
     $lines   = [];
-    $lines[] = '# simple-homepage generated — do not edit by hand';
+    $lines[] = '# RiverOps generated — do not edit by hand';
 
     $lineToTask = []; // lineNumber (1-based) => ['id'=>..., 'name'=>...]
 
@@ -1604,7 +1604,7 @@ function cron_regenerate(): array {
         }
         $cmd = 'TASK_RUN_SOURCE=cron TASK_SILENT_CLI=1 '
             . escapeshellcmd(cron_php_binary())
-            . ' /var/www/nav/cli/run_scheduled_task.php '
+            . ' /var/www/riverops/cli/run_scheduled_task.php '
             . escapeshellarg($id);
         $lines[] = $sched . ' ' . $cmd;
         $lineToTask[count($lines)] = ['id' => $id, 'name' => (string)($t['name'] ?? '')];
@@ -1633,9 +1633,9 @@ function cron_regenerate(): array {
  */
 function cron_install_stdin(string $content): array {
     $env = [
-        'HOME'    => '/home/navwww',
-        'USER'    => 'navwww',
-        'LOGNAME' => 'navwww',
+        'HOME'    => '/home/riverops',
+        'USER'    => 'riverops',
+        'LOGNAME' => 'riverops',
         'PATH'    => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'SHELL'   => '/bin/bash',
     ];
@@ -1665,7 +1665,7 @@ function cron_install_stdin(string $content): array {
 
     // 最终 fallback：直接写 crontab 文件（需要目录可写）
     $crontab_dir  = '/var/spool/cron/crontabs';
-    $crontab_file = $crontab_dir . '/navwww';
+    $crontab_file = $crontab_dir . '/riverops';
     if (is_dir($crontab_dir) && is_writable($crontab_dir)) {
         $r = file_put_contents($crontab_file, $content, LOCK_EX);
         if ($r !== false) {
@@ -1908,8 +1908,8 @@ function cron_execute_task(string $id): array {
         2 => ['file', '/dev/null', 'a'],
     ];
     $env = [
-        'HOME'  => '/home/navwww',
-        'USER'  => 'navwww',
+        'HOME'  => '/home/riverops',
+        'USER'  => 'riverops',
         'PATH'  => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         'SHELL' => '/bin/bash',
         'LANG'  => 'en_US.UTF-8',

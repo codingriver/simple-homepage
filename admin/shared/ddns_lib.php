@@ -6,7 +6,7 @@ require_once __DIR__ . '/cron_lib.php';
 
 const DDNS_TASKS_FILE = DATA_DIR . '/ddns_tasks.json';
 const DDNS_LOG_FILE = DATA_DIR . '/logs/ddns.log';
-$__ddns_default_port = getenv('NAV_PORT');
+$__ddns_default_port = getenv('RIVEROPS_PORT');
 if ($__ddns_default_port === false || $__ddns_default_port === '' || !ctype_digit($__ddns_default_port)) {
     $__ddns_default_port = '58080';
 }
@@ -397,7 +397,7 @@ function ddns_toggle_task(string $id): ?bool {
 function ddns_fetch_url(string $url, array $logMeta = []): array {
     $taskId = trim((string)($logMeta['task_id'] ?? ''));
     $step = trim((string)($logMeta['step'] ?? '来源请求'));
-    $userAgent = trim((string)($logMeta['user_agent'] ?? 'simple-homepage-ddns/1.0'));
+    $userAgent = trim((string)($logMeta['user_agent'] ?? 'riverops-ddns/1.0'));
     $accept = trim((string)($logMeta['accept'] ?? 'application/json,text/plain,*/*'));
     if ($taskId !== '') {
         ddns_task_log($taskId, 'info', $step . '开始', ['url' => $url]);
@@ -414,7 +414,7 @@ function ddns_fetch_url(string $url, array $logMeta = []): array {
             CURLOPT_CONNECTTIMEOUT => 8,
             CURLOPT_SSL_VERIFYPEER => 0,
             CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_USERAGENT => $userAgent !== '' ? $userAgent : 'simple-homepage-ddns/1.0',
+            CURLOPT_USERAGENT => $userAgent !== '' ? $userAgent : 'riverops-ddns/1.0',
             CURLOPT_HTTPHEADER => ['Accept: ' . ($accept !== '' ? $accept : 'application/json,text/plain,*/*')],
         ]);
         $body = curl_exec($ch);
@@ -462,8 +462,8 @@ function ddns_fetch_url(string $url, array $logMeta = []): array {
     return _ddns_fetch_url_fallback($url, $taskId, $step, $userAgent, $accept);
 }
 
-function _ddns_fetch_url_fallback(string $url, string $taskId, string $step, string $userAgent = 'simple-homepage-ddns/1.0', string $accept = 'application/json,text/plain,*/*'): array {
-    $userAgent = $userAgent !== '' ? $userAgent : 'simple-homepage-ddns/1.0';
+function _ddns_fetch_url_fallback(string $url, string $taskId, string $step, string $userAgent = 'riverops-ddns/1.0', string $accept = 'application/json,text/plain,*/*'): array {
+    $userAgent = $userAgent !== '' ? $userAgent : 'riverops-ddns/1.0';
     $accept = $accept !== '' ? $accept : 'application/json,text/plain,*/*';
     $context = stream_context_create([
         'http' => [

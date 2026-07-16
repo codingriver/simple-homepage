@@ -24,7 +24,7 @@ test('complete logout flow and session rejection', async ({ page }) => {
   // Try to use old token/session by manually setting an invalid/expired cookie
   await page.context().addCookies([
     {
-      name: 'nav_session',
+      name: 'riverops_session',
       value: 'invalid_token_value_that_should_be_rejected',
       domain: '127.0.0.1',
       path: '/',

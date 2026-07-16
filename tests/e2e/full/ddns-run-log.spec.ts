@@ -77,22 +77,22 @@ test('ddns run and log modal support execution pagination search and clear', asy
     { id: taskId, name: taskName }
   );
   await logResponse;
-  await expect(page.locator('#nav-ace-editor-modal')).toBeVisible();
+  await expect(page.locator('#riverops-ace-editor-modal')).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    const editor = (window as Window & { RiverOpsAceEditor?: { getValue(): string } }).RiverOpsAceEditor;
     return editor?.getValue() || '';
   })).toMatch(/（空）|成功|失败|跳过|\[/);
 
-  await expect(page.locator('#nav-ace-pag-label')).toBeVisible();
+  await expect(page.locator('#riverops-ace-pag-label')).toBeVisible();
   await page.evaluate(() => {
     const fn = (window as Window & { clearCurrentDdnsLog?: () => Promise<void> }).clearCurrentDdnsLog;
     if (typeof fn !== 'function') throw new Error('clearCurrentDdnsLog not found');
     void fn();
   });
-  await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-  await page.locator('#nav-confirm-ok').click();
+  await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+  await page.locator('#riverops-confirm-ok').click();
   await expect.poll(() => page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { getValue(): string } }).NavAceEditor;
+    const editor = (window as Window & { RiverOpsAceEditor?: { getValue(): string } }).RiverOpsAceEditor;
     return editor?.getValue() || '';
   })).toMatch(/（空）|加载中/);
 

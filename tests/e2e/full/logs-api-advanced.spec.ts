@@ -5,7 +5,7 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile, readContainerFile } from '../../helpers/cli';
 
 const logsDir = path.resolve(__dirname, '../../../data/logs');
-const containerLogsDir = '/var/www/nav/data/logs';
+const containerLogsDir = '/var/www/riverops/data/logs';
 
 test('logs api supports clear_all and download', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page);

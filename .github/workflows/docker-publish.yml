@@ -36,7 +36,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: codingriver/simple-homepage
+          images: codingriver/riverops
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
@@ -61,6 +61,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: codingriver/simple-homepage
-          short-description: "A simple self-hosted navigation homepage with Docker support"
+          repository: codingriver/riverops
+          short-description: "A lightweight self-hosted operations console for personal infrastructure"
           readme-filepath: ./README.md

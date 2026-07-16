@@ -40,7 +40,7 @@ test('auth verify endpoint returns authenticated user headers after login', asyn
   await loginAsDevAdmin(page);
 
   const result = runDockerPhpInline(`
-require_once '/var/www/nav/shared/auth.php';
+require_once '/var/www/riverops/shared/auth.php';
 register_shutdown_function(function () {
     $payload = auth_get_current_user();
     echo json_encode([
@@ -50,10 +50,10 @@ register_shutdown_function(function () {
         'payload_role' => is_array($payload) ? ($payload['role'] ?? '') : '',
     ], JSON_UNESCAPED_UNICODE);
 });
-$_COOKIE['nav_session'] = auth_generate_token('e2e-auth-verify', 'admin', false);
+$_COOKIE['riverops_session'] = auth_generate_token('e2e-auth-verify', 'admin', false);
 $_SERVER['HTTP_HOST'] = '127.0.0.1:58080';
 $_SERVER['REQUEST_METHOD'] = 'GET';
-include '/var/www/nav/public/auth/verify.php';
+include '/var/www/riverops/public/auth/verify.php';
   `);
   expect(result.code, result.output).toBe(0);
   const payload = JSON.parse(result.stdout.trim()) as {

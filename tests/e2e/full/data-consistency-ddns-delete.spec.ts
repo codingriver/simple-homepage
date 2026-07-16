@@ -47,7 +47,7 @@ test('deleting a ddns task cleans up orphan sys_ddns_dispatcher scheduled tasks'
         id: expectedDispatcherId,
         name: `DDNS Dispatcher ${ts}`,
         schedule: cronExpr,
-        command: 'php /var/www/nav/cli/ddns_sync.php',
+        command: 'php /var/www/riverops/cli/ddns_sync.php',
         enabled: true,
         is_system: true,
         created_at: new Date().toISOString(),

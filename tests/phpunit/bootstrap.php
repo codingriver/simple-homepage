@@ -3,7 +3,7 @@
  * PHPUnit bootstrap
  */
 
-$tmpDir = sys_get_temp_dir() . '/nav-phpunit-' . uniqid();
+$tmpDir = sys_get_temp_dir() . '/riverops-phpunit-' . uniqid();
 if (!is_dir($tmpDir)) {
     @mkdir($tmpDir, 0777, true);
     @mkdir($tmpDir . '/logs', 0777, true);

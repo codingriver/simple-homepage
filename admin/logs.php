@@ -297,7 +297,7 @@ require_once __DIR__ . '/shared/header.php';
 
 <script src="assets/ace/ace.js"></script>
 <script src="assets/ace/ext-searchbox.js"></script>
-<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
+<?php require_once __DIR__ . '/shared/riverops_ace_editor.php'; ?>
 <script>
 (function(){
   var sources = {};
@@ -544,7 +544,7 @@ require_once __DIR__ . '/shared/header.php';
 
   function aceLogLoadPage(page) {
     if (!aceLogState.key) return;
-    NavAceEditor.setValue('加载中…');
+    RiverOpsAceEditor.setValue('加载中…');
     var url = 'logs_api.php?action=read&type=' + encodeURIComponent(aceLogState.key)
       + '&page=' + encodeURIComponent(page)
       + '&limit=' + encodeURIComponent(aceLogState.limit);
@@ -552,7 +552,7 @@ require_once __DIR__ . '/shared/header.php';
       .then(function(r){ return r.json(); })
       .then(function(d){
         if (!d.ok) {
-          NavAceEditor.setValue('加载失败：' + (d.msg || ''));
+          RiverOpsAceEditor.setValue('加载失败：' + (d.msg || ''));
           return;
         }
         aceLogState.pages = d.total_pages || 1;
@@ -561,11 +561,11 @@ require_once __DIR__ . '/shared/header.php';
 
         var lines = d.lines || [];
         var text = lines.join('\n');
-        NavAceEditor.setValue(text);
-        NavAceEditor.setPagination(aceLogState.page, aceLogState.pages, aceLogState.limit, d.total_lines || 0);
+        RiverOpsAceEditor.setValue(text);
+        RiverOpsAceEditor.setPagination(aceLogState.page, aceLogState.pages, aceLogState.limit, d.total_lines || 0);
       })
       .catch(function(){
-        NavAceEditor.setValue('请求异常');
+        RiverOpsAceEditor.setValue('请求异常');
       });
   }
 
@@ -580,7 +580,7 @@ require_once __DIR__ . '/shared/header.php';
     aceLogState.pages = logState.totalPages;
     aceLogState.limit = logState.limit;
 
-    NavAceEditor.open({
+    RiverOpsAceEditor.open({
       title: logTitle,
       mode: 'text',
       value: '加载中…',
@@ -621,13 +621,13 @@ require_once __DIR__ . '/shared/header.php';
 
     // 首次加载当前页数据
     setTimeout(function() {
-      NavAceEditor.refreshPagination();
+      RiverOpsAceEditor.refreshPagination();
     }, 50);
   };
 
   window.clearCurrentLog = function() {
     if (!currentKey) return;
-    NavConfirm.open({
+    RiverOpsConfirm.open({
       title: '清空日志',
       message: '确认清空「' + sources[currentKey].label + '」？此操作不可恢复。',
       confirmText: '清空',

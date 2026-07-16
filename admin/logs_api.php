@@ -16,8 +16,8 @@ if (!$current_admin || ($current_admin['role'] ?? '') !== 'admin') {
 }
 
 $logSources = [
-    'nginx_access'   => ['path' => '/var/log/nginx/nav.access.log',   'category' => 'system', 'label' => 'Nginx 访问日志',    'clearable' => false],
-    'nginx_error'    => ['path' => '/var/log/nginx/nav.error.log',    'category' => 'system', 'label' => 'Nginx 错误日志',    'clearable' => false],
+    'nginx_access'   => ['path' => '/var/log/nginx/riverops.access.log',   'category' => 'system', 'label' => 'Nginx 访问日志',    'clearable' => false],
+    'nginx_error'    => ['path' => '/var/log/nginx/riverops.error.log',    'category' => 'system', 'label' => 'Nginx 错误日志',    'clearable' => false],
     'nginx_main'     => ['path' => '/var/log/nginx/error.log',        'category' => 'system', 'label' => 'Nginx 主错误日志',  'clearable' => false],
     'php_fpm'        => ['path' => '/var/log/php-fpm/error.log',      'category' => 'system', 'label' => 'PHP-FPM 日志',      'clearable' => false],
     'request_timing' => ['path' => DATA_DIR . '/logs/request_timing.log', 'category' => 'app', 'label' => '请求耗时日志',      'clearable' => true],

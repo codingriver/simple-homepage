@@ -29,7 +29,7 @@ export async function resetVolatileAppData(): Promise<void> {
     const config = JSON.parse(configRaw);
     const configContent = JSON.stringify(config, null, 2);
     await fs.writeFile(configPath, configContent, { mode: 0o644 });
-    writeContainerFile('/var/www/nav/data/config.json', configContent);
+    writeContainerFile('/var/www/riverops/data/config.json', configContent);
   } catch {
     // ignore
   }
@@ -38,7 +38,7 @@ export async function resetVolatileAppData(): Promise<void> {
   // 导致容器内 PHP 读取到旧内容或空内容。
   for (const [f, content] of Object.entries(jsonFilesToReset)) {
     try {
-      writeContainerFile(`/var/www/nav/data/${f}`, content);
+      writeContainerFile(`/var/www/riverops/data/${f}`, content);
     } catch {
       // fallback to host
       try {
@@ -51,7 +51,7 @@ export async function resetVolatileAppData(): Promise<void> {
 
   // ip_locks.json.lock
   try {
-    writeContainerFile('/var/www/nav/data/ip_locks.json.lock', '');
+    writeContainerFile('/var/www/riverops/data/ip_locks.json.lock', '');
   } catch {
     try {
       await fs.writeFile(path.join(dataDir, 'ip_locks.json.lock'), '', { mode: 0o644 });
@@ -62,7 +62,7 @@ export async function resetVolatileAppData(): Promise<void> {
 
   // 2. 清空日志目录（容器内执行更可靠）
   try {
-    runDockerShell('rm -f /var/www/nav/data/logs/*.log /var/www/nav/data/logs/*.lock /var/www/nav/data/logs/*.gz 2>/dev/null; mkdir -p /var/www/nav/data/logs');
+    runDockerShell('rm -f /var/www/riverops/data/logs/*.log /var/www/riverops/data/logs/*.lock /var/www/riverops/data/logs/*.gz 2>/dev/null; mkdir -p /var/www/riverops/data/logs');
   } catch {
     // fallback to host
     const logsDir = path.join(dataDir, 'logs');
@@ -100,7 +100,7 @@ export async function resetVolatileAppData(): Promise<void> {
   ];
   for (const { file, content } of ensureEmptyFiles) {
     try {
-      writeContainerFile(`/var/www/nav/data/${file}`, content);
+      writeContainerFile(`/var/www/riverops/data/${file}`, content);
     } catch {
       const p = path.join(dataDir, file);
       try {

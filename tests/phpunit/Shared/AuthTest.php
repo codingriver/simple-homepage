@@ -66,7 +66,7 @@ final class AuthTest extends TestCase
 
         $valid = auth_generate_token('multi-cookie-user', 'admin');
         $_COOKIE = [];
-        $_SERVER['HTTP_COOKIE'] = 'nav_session=bad-token; nav_session=' . rawurlencode($valid);
+        $_SERVER['HTTP_COOKIE'] = 'riverops_session=bad-token; riverops_session=' . rawurlencode($valid);
 
         $user = auth_get_current_user();
         $this->assertIsArray($user);
@@ -76,7 +76,7 @@ final class AuthTest extends TestCase
         $payload = auth_verify_token($valid);
         $this->assertIsArray($payload);
         auth_session_revoke((string)$payload['jti']);
-        $_SERVER['HTTP_COOKIE'] = 'nav_session=' . rawurlencode($valid);
+        $_SERVER['HTTP_COOKIE'] = 'riverops_session=' . rawurlencode($valid);
         $this->assertNull(auth_get_current_user());
         $this->assertSame('session_missing', auth_last_failure_reason());
 
@@ -107,10 +107,10 @@ final class AuthTest extends TestCase
     public function testDevModeVirtualUser(): void
     {
         @unlink(USERS_FILE);
-        putenv('NAV_DEV_MODE=1');
+        putenv('RIVEROPS_DEV_MODE=1');
         $users = auth_load_users();
         $this->assertArrayHasKey('qatest', $users);
-        putenv('NAV_DEV_MODE=');
+        putenv('RIVEROPS_DEV_MODE=');
         @unlink(AUTH_DEV_MODE_FLAG_FILE);
     }
 

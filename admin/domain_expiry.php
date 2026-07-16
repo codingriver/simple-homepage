@@ -8,7 +8,7 @@ require_once __DIR__ . '/shared/header.php';
 
 $rows = domain_expiry_rows();
 $summary = domain_expiry_summary();
-$csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
+$csrf = $GLOBALS['_riverops_csrf_token'] ?? csrf_token();
 ?>
 
 <div class="stat-grid">
@@ -436,7 +436,7 @@ async function refreshDue(force) {
 }
 
 async function ignoreDomain(domain) {
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '忽略域名',
     message: '确认从有效期监控列表中忽略 ' + domain + '？',
     confirmText: '忽略',
@@ -467,7 +467,7 @@ async function unignoreDomain(domain) {
 }
 
 async function deleteManualDomain(domain) {
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '删除手动域名',
     message: '只会从手动列表删除 ' + domain + '。如果它来自 DNS Zone 或 DDNS，仍会自动出现在列表中。',
     confirmText: '删除',

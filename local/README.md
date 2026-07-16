@@ -23,16 +23,16 @@
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `NAV_PORT` | `58080` | 容器内监听端口 |
+| `RIVEROPS_PORT` | `58080` | 容器内监听端口 |
 | `TZ` | `Asia/Shanghai` | 容器时区 |
 | `PUID` | 空 | 可选；显式指定容器运行用户 UID |
 | `PGID` | 空 | 可选；显式指定容器运行用户 GID |
 | `ADMIN` | 空 | 首次启动时自动创建管理员用户名 |
 | `PASSWORD` | 空 | 首次启动时自动创建管理员密码 |
-| `NAME` | `后台中心` | 首次启动时后台名称 |
+| `NAME` | `RiverOps` | 首次启动时后台名称 |
 | `DOMAIN` | 空 | 首次启动时后台域名 |
-| `NAV_DEV_MODE` | 空 | 开发模式，会启用内置测试管理员 |
-| `NAV_REQUEST_TIMING` | `1` | 设为 `0` 可关闭请求耗时日志 |
+| `RIVEROPS_DEV_MODE` | 空 | 开发模式，会启用内置测试管理员 |
+| `RIVEROPS_REQUEST_TIMING` | `1` | 设为 `0` 可关闭请求耗时日志 |
 | `AUTH_SECRET_KEY` | 空 | 可显式指定认证密钥 |
 
 ### 数据目录
@@ -40,7 +40,7 @@
 必须挂载：
 
 ```text
-/var/www/nav/data
+/var/www/riverops/data
 ```
 
 常见文件和目录：
@@ -83,37 +83,37 @@ data/
 查看用户列表：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php list
+docker exec riverops php /var/www/riverops/manage_users.php list
 ```
 
 查看用户信息：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php info admin
+docker exec riverops php /var/www/riverops/manage_users.php info admin
 ```
 
 新增管理员：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php add admin 新密码
+docker exec riverops php /var/www/riverops/manage_users.php add admin 新密码
 ```
 
 修改密码：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php passwd admin 新密码
+docker exec riverops php /var/www/riverops/manage_users.php passwd admin 新密码
 ```
 
 删除用户：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php del admin
+docker exec riverops php /var/www/riverops/manage_users.php del admin
 ```
 
 重置安装状态：
 
 ```bash
-docker exec simple-homepage php /var/www/nav/manage_users.php reset
+docker exec riverops php /var/www/riverops/manage_users.php reset
 ```
 
 `reset` 会清空安装状态、登录锁定等账户数据，并重新进入安装向导。备份文件会保留。
@@ -145,7 +145,7 @@ Linux bind mount 默认会在容器启动时自动按 `data` 目录 owner 对齐
 开发模式会：
 
 - 挂载源码目录
-- 启用 `NAV_DEV_MODE`
+- 启用 `RIVEROPS_DEV_MODE`
 - 加载 `local/php-dev.ini`
 - 提供内置测试管理员 `qatest / qatest2026`
 

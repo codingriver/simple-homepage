@@ -117,7 +117,7 @@ function syncWebhookType() {
     document.getElementById('wh_tg_chat').style.display = t === 'telegram' ? 'block' : 'none';
 }
 function testWebhook() {
-    NavConfirm.open({
+    RiverOpsConfirm.open({
         title: '测试 Webhook',
         message: '发送一条测试 Webhook 消息？',
         confirmText: '发送',

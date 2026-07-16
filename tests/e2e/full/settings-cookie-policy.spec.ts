@@ -4,11 +4,12 @@ import { runDockerPhpInline } from '../../helpers/cli';
 
 async function readSessionCookie(page: Parameters<typeof attachClientErrorTracking>[0]) {
   const cookies = await page.context().cookies();
-  return cookies.find(cookie => cookie.name === 'nav_session');
+  return cookies.find(cookie => cookie.name === 'riverops_session');
 }
 
 test('cookie policy settings persist and affect session cookie flags', async ({ browser }) => {
-  const adminContext = await browser.newContext({ baseURL: 'http://127.0.0.1:58080' });
+  const baseURL = process.env.BASE_URL || 'http://127.0.0.1:58080';
+  const adminContext = await browser.newContext({ baseURL });
   const adminPage = await adminContext.newPage();
   const tracker = await attachClientErrorTracking(adminPage, {
     ignoredMessages: [
@@ -39,7 +40,7 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
   await adminContext.close();
 
   const ipContext = await browser.newContext({
-    baseURL: 'http://127.0.0.1:58080',
+    baseURL,
   });
   const ipPage = await ipContext.newPage();
   const ipTracker = await attachClientErrorTracking(ipPage, {
@@ -68,7 +69,7 @@ test('cookie policy settings persist and affect session cookie flags', async ({ 
 
   const restore = runDockerPhpInline(
     [
-      '$file="/var/www/nav/data/config.json";',
+      '$file="/var/www/riverops/data/config.json";',
       '$cfg=file_exists($file)?(json_decode(file_get_contents($file), true)?:[]):[];',
       '$cfg["cookie_secure"]=$argv[1];',
       '$cfg["cookie_domain"]=$argv[2];',

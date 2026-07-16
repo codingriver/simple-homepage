@@ -304,7 +304,7 @@ $sf=($action==='add'||$action==='edit');
   }
 
   window.batchDelete = function() {
-    NavConfirm.open({
+    RiverOpsConfirm.open({
       title: '批量删除用户',
       message: '确认删除选中的 ' + getSelected().length + ' 个用户？当前登录的管理员不会被删除。',
       confirmText: '确认删除',
@@ -328,7 +328,7 @@ $sf=($action==='add'||$action==='edit');
     sendBatch('batch_set_blocked', { blocked_ips: ips, blocked_domains: domains });
   };
   window.batchKick = function() {
-    NavConfirm.open({
+    RiverOpsConfirm.open({
       title: '批量强制下线',
       message: '确认将选中的 ' + getSelected().length + ' 个用户的所有会话强制下线？',
       confirmText: '确认下线',

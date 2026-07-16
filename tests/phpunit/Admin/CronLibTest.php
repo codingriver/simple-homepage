@@ -107,7 +107,7 @@ final class CronLibTest extends TestCase
                 [
                     'id' => 'sys_favicon_sync',
                     'name' => 'retired',
-                    'command' => '/usr/local/bin/php /var/www/nav/cli/favicon_sync.php',
+                    'command' => '/usr/local/bin/php /var/www/riverops/cli/favicon_sync.php',
                 ],
             ],
         ]));

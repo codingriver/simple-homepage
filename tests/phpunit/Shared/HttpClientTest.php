@@ -12,7 +12,7 @@ final class HttpClientTest extends TestCase
     {
         parent::setUpBeforeClass();
 
-        self::$routerFile = tempnam(sys_get_temp_dir(), 'nav_http_router_');
+        self::$routerFile = tempnam(sys_get_temp_dir(), 'riverops_http_router_');
         file_put_contents(self::$routerFile, <<<'PHP'
 <?php
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -39,8 +39,8 @@ PHP
             . ' ' . escapeshellarg(self::$routerFile);
         self::$serverProcess = proc_open($command, [
             0 => ['pipe', 'r'],
-            1 => ['file', sys_get_temp_dir() . '/nav-http-test.out.log', 'a'],
-            2 => ['file', sys_get_temp_dir() . '/nav-http-test.err.log', 'a'],
+            1 => ['file', sys_get_temp_dir() . '/riverops-http-test.out.log', 'a'],
+            2 => ['file', sys_get_temp_dir() . '/riverops-http-test.err.log', 'a'],
         ], $pipes);
         if (!is_resource(self::$serverProcess)) {
             throw new RuntimeException('Unable to start local HTTP test server');

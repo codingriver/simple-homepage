@@ -124,8 +124,8 @@ test('settings webhook test action reports missing url and invalid custom url cl
     await saveWebhook(page);
 
     await page.getByRole('button', { name: /发送测试消息/ }).click();
-    await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-    await page.locator('#nav-confirm-ok').click();
+    await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+    await page.locator('#riverops-confirm-ok').click();
     await expect(page.locator('body')).toContainText('未配置 Webhook URL');
 
     await page.goto('/admin/notifications.php');
@@ -135,8 +135,8 @@ test('settings webhook test action reports missing url and invalid custom url cl
     await saveWebhook(page);
 
     await page.getByRole('button', { name: /发送测试消息/ }).click();
-    await expect(page.locator('#nav-confirm-modal')).toBeVisible();
-    await page.locator('#nav-confirm-ok').click();
+    await expect(page.locator('#riverops-confirm-modal')).toBeVisible();
+    await page.locator('#riverops-confirm-ok').click();
     await expect(page.locator('body')).toContainText(/发送失败：|发送失败，HTTP 状态码：/);
     await expect(page).toHaveURL(/notifications\.php/);
   } finally {

@@ -19,12 +19,12 @@ require_once __DIR__ . '/shared/header.php';
 
 $allTasks = ddns_load_tasks()['tasks'] ?? [];
 $rows = array_map('ddns_task_row', $allTasks);
-$csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
+$csrf = $GLOBALS['_riverops_csrf_token'] ?? csrf_token();
 ?>
 
 <script src="assets/ace/ace.js"></script>
 <script src="assets/ace/ext-searchbox.js"></script>
-<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
+<?php require_once __DIR__ . '/shared/riverops_ace_editor.php'; ?>
 <script>window.DDNS_DATA_DIR = <?= json_encode(DATA_DIR) ?>;</script>
 
 <div class="toolbar">
@@ -161,7 +161,7 @@ $csrf = $GLOBALS['_nav_csrf_token'] ?? csrf_token();
           <div class="form-group full">
             <label>Cron 表达式 *</label>
             <input type="text" id="fm-cron" value="*/30 * * * *" placeholder="*/30 * * * *" style="font-family:var(--mono)">
-            <span class="form-hint">继续使用 crontab；请为 <code>php /var/www/nav/cli/ddns_sync.php</code> 增加计划任务。</span>
+            <span class="form-hint">继续使用 crontab；请为 <code>php /var/www/riverops/cli/ddns_sync.php</code> 增加计划任务。</span>
           </div>
           <div class="form-group full">
             <label>来源测试结果</label>
@@ -316,7 +316,7 @@ function openDdnsLogModal(id, name) {
   var title = 'DDNS 日志 · ' + name;
   if (logFile) title += ' · ' + logFile;
 
-  NavAceEditor.open({
+  RiverOpsAceEditor.open({
     title: title,
     mode: 'text',
     value: '加载中…',
@@ -354,7 +354,7 @@ function openDdnsLogModal(id, name) {
     },
     onAction: function(action) {
       if (action === 'close') {
-        NavAceEditor.close();
+        RiverOpsAceEditor.close();
         return;
       }
       if (action === 'clear') {
@@ -365,7 +365,7 @@ function openDdnsLogModal(id, name) {
 
   // 首次加载并跳到最后一页
   var doInitialLoad = function() {
-    var pag = NavAceEditor._getPagination && NavAceEditor._getPagination();
+    var pag = RiverOpsAceEditor._getPagination && RiverOpsAceEditor._getPagination();
     if (!pag || typeof pag.fetch !== 'function') return;
     pag.fetch(1, ddnsLogState.limit || 100)
       .then(function(d) {
@@ -377,16 +377,16 @@ function openDdnsLogModal(id, name) {
         return d;
       })
       .then(function(d) {
-        NavAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
+        RiverOpsAceEditor.setPagination(d.page, d.pages, d.limit, d.totalLines);
         var text = typeof d.lines === 'string' ? d.lines : (d.lines || []).join('\n');
-        NavAceEditor.setValue(text || '（空）');
+        RiverOpsAceEditor.setValue(text || '（空）');
         if (text) {
           var totalLines = text.split('\n').length;
-          NavAceEditor.gotoLine(totalLines, 0, false);
+          RiverOpsAceEditor.gotoLine(totalLines, 0, false);
         }
       })
       .catch(function(err) {
-        NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
+        RiverOpsAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)));
       });
   };
   setTimeout(doInitialLoad, 50);
@@ -394,7 +394,7 @@ function openDdnsLogModal(id, name) {
 
 async function clearCurrentDdnsLog() {
   if (!ddnsLogState.id) return;
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '清空日志',
     message: '确定清空当前 DDNS 任务日志？此操作不可恢复。',
     confirmText: '清空',
@@ -407,7 +407,7 @@ async function clearCurrentDdnsLog() {
         return;
       }
       showToast(res.msg || '日志已清空', 'success');
-      NavAceEditor.refreshPagination();
+      RiverOpsAceEditor.refreshPagination();
     }
   });
 }
@@ -613,7 +613,7 @@ async function toggleTask(id) {
 }
 
 async function deleteTask(id, name) {
-  NavConfirm.open({
+  RiverOpsConfirm.open({
     title: '删除任务',
     message: '确认删除任务「' + name + '」吗？',
     confirmText: '删除',

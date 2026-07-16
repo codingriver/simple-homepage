@@ -59,7 +59,7 @@ final class SharedFunctionsTest extends TestCase
     public function testBackupExportAndRestoreDiscardRetiredProxyConfig(): void
     {
         file_put_contents(CONFIG_FILE, json_encode([
-            'site_name' => '后台中心',
+            'site_name' => 'RiverOps',
             'proxy_params_mode' => 'full',
             'nginx_last_applied' => 123,
             'nginx_last_applied_proxy_state' => ['sites' => ['legacy' => []]],
@@ -132,9 +132,9 @@ final class SharedFunctionsTest extends TestCase
         $this->assertFalse($result['ok']);
     }
 
-    public function testNavReadBuildInfoReturnsNullWhenAbsent(): void
+    public function testRiverOpsReadBuildInfoReturnsNullWhenAbsent(): void
     {
-        $this->assertNull(nav_read_build_info());
+        $this->assertNull(riverops_read_build_info());
     }
 
     public function testTrashMoveCreatesEntry(): void

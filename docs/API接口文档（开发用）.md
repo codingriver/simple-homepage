@@ -1,8 +1,8 @@
 # API 接口文档（开发用）
 
-> 本文档面向开发维护人员，描述 Simple Homepage 后端 HTTP API 接口的调用方式、参数及响应格式。不面向终端用户。
+> 本文档面向开发维护人员，描述 RiverOps 后端 HTTP API 接口的调用方式、参数及响应格式。不面向终端用户。
 >
-> 如需查阅前端 Ace 文本编辑器组件接口，请见同目录下的 `Ace编辑器接口说明（开发用）.md`。
+> 如需查阅前端 Ace 文本编辑器组件接口，请见同目录下的 `RiverOps编辑器接口说明（开发用）.md`。
 
 ---
 
@@ -19,9 +19,9 @@
 
 API Token 为不透明共享密钥，格式如下：
 
-- 前缀：`np_`
+- 前缀：`rop_`
 - 主体：64 位十六进制字符（`bin2hex(random_bytes(32))` 生成）
-- 示例：`np_a1b2c3d4e5f6...`（共 67 个字符）
+- 示例：`rop_a1b2c3d4e5f6...`（共 68 个字符）
 
 Token 存储在 `data/api_tokens.json` 中，以明文形式保存，无过期时间，长期有效直至被显式删除。
 
@@ -38,7 +38,7 @@ Token 数据格式（`data/api_tokens.json`）：
 
 ```json
 {
-  "np_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": {
+  "rop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": {
     "name": "home-assistant",
     "created_at": "2026-05-01T12:00:00+08:00"
   }
@@ -53,13 +53,13 @@ Token 数据格式（`data/api_tokens.json`）：
 
 ```http
 GET /api/dns.php?action=query&domain=www.example.com&type=A HTTP/1.1
-Authorization: Bearer np_xxxxxxxx...
+Authorization: Bearer rop_xxxxxxxx...
 ```
 
 **方式二：URL Query Parameter**
 
 ```http
-GET /api/dns.php?action=query&domain=www.example.com&type=A&token=np_xxxxxxxx...
+GET /api/dns.php?action=query&domain=www.example.com&type=A&token=rop_xxxxxxxx...
 ```
 
 > **注意**：Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。
@@ -87,7 +87,7 @@ GET /api/dns.php?action=query&domain=www.example.com&type=A&token=np_xxxxxxxx...
 | 认证方式 | 用途 | 存储位置 | 说明 |
 |----------|------|----------|------|
 | API Token | DNS API 程序化访问 | `data/api_tokens.json` | 本文档所述；`dns.php` 支持 |
-| Session JWT | Web 登录会话 | Cookie (`nav_session`) | `shared/auth.php` 管理，用于前后台页面 |
+| Session JWT | Web 登录会话 | Cookie (`riverops_session`) | `shared/auth.php` 管理，用于前后台页面 |
 | Nginx auth_request | 反向代理子站鉴权 | Cookie | `public/auth/verify.php` 验证 Session JWT |
 
 API Token 与 Session JWT 完全独立，API Token 不关联任何用户。DNS API 外网访问时仅认 API Token，不认 Session Cookie。
@@ -120,13 +120,13 @@ API Token 与 Session JWT 完全独立，API Token 不关联任何用户。DNS A
 
 ```http
 GET /api/dns.php?action=query&domain=www.example.com&type=A HTTP/1.1
-Authorization: Bearer np_xxxxxxxx...
+Authorization: Bearer rop_xxxxxxxx...
 ```
 
 **URL Query Parameter**
 
 ```http
-GET /api/dns.php?action=query&domain=www.example.com&type=A&token=np_xxxxxxxx... HTTP/1.1
+GET /api/dns.php?action=query&domain=www.example.com&type=A&token=rop_xxxxxxxx... HTTP/1.1
 ```
 
 > Header 方式优先级高于 URL 参数。若同时存在，以 Header 中的 Token 为准。

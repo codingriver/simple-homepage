@@ -5,7 +5,7 @@ import { attachClientErrorTracking, loginAsDevAdmin } from '../../helpers/auth';
 import { writeContainerFile } from '../../helpers/cli';
 
 const sessionsFile = path.resolve(__dirname, '../../../data/sessions.json');
-const containerSessionsFile = '/var/www/nav/data/sessions.json';
+const containerSessionsFile = '/var/www/riverops/data/sessions.json';
 
 test('sessions page lists active sessions and supports filtering', async ({ page }) => {
   const tracker = await attachClientErrorTracking(page);

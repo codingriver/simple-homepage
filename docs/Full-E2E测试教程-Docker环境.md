@@ -29,7 +29,7 @@ bash local/docker-build.sh dev
 
 说明：
 
-- 被测站点由 `nav` 服务提供
+- 被测站点由 `riverops` 服务提供
 - Playwright 测试容器定义在 `local/docker-compose.test.yml`
 - 测试容器会自动安装依赖并执行 `npx playwright install`
 
@@ -58,7 +58,7 @@ docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f lo
 如需切换被测地址，可额外传入环境变量：
 
 ```bash
-docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm -e BASE_URL=http://nav:58080 playwright-full
+docker compose -f local/docker-compose.yml -f local/docker-compose.dev.yml -f local/docker-compose.test.yml run --rm -e BASE_URL=http://riverops:58080 playwright-full
 ```
 
 ---

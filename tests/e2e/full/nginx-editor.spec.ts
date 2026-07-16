@@ -20,17 +20,17 @@ test('runtime config page opens config files in readonly viewer', async ({ page 
   await expect(page.locator('[data-edit-target]')).toHaveCount(0);
 
   await page.locator('[data-view-target="http"]').click();
-  await expect(page.locator('#nav-ace-editor-modal')).toHaveClass(/open/);
-  await expect(page.locator('#nav-ace-title')).toContainText(/HTTP 模块/);
-  await expect(page.locator('#nav-ace-toolbar-actions button[data-action="save"]')).toHaveCount(0);
-  await expect(page.locator('#nav-ace-toolbar-actions button[data-action="save_reload"]')).toHaveCount(0);
+  await expect(page.locator('#riverops-ace-editor-modal')).toHaveClass(/open/);
+  await expect(page.locator('#riverops-ace-title')).toContainText(/HTTP 模块/);
+  await expect(page.locator('#riverops-ace-toolbar-actions button[data-action="save"]')).toHaveCount(0);
+  await expect(page.locator('#riverops-ace-toolbar-actions button[data-action="save_reload"]')).toHaveCount(0);
 
   await page.evaluate(() => {
-    const editor = (window as Window & { NavAceEditor?: { close(): void } }).NavAceEditor;
-    if (!editor) throw new Error('NavAceEditor not found');
+    const editor = (window as Window & { RiverOpsAceEditor?: { close(): void } }).RiverOpsAceEditor;
+    if (!editor) throw new Error('RiverOpsAceEditor not found');
     editor.close();
   });
-  await expect(page.locator('#nav-ace-editor-modal')).not.toHaveClass(/open/);
+  await expect(page.locator('#riverops-ace-editor-modal')).not.toHaveClass(/open/);
 
   await tracker.assertNoClientErrors();
 });

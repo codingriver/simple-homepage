@@ -173,7 +173,7 @@ foreach ($targets as $key => $meta) {
 
 <div class="config-readonly-note">
   后台不再支持修改 Nginx / PHP-FPM / PHP 配置，也不再支持在线 Reload。请在宿主机或挂载目录中修改配置文件，然后执行
-  <code>docker restart simple-homepage</code> 让配置生效。
+  <code>docker restart riverops</code> 让配置生效。
 </div>
 
 <div class="config-status-grid">
@@ -226,13 +226,13 @@ foreach ($targets as $key => $meta) {
 
 <script src="assets/ace/ace.js"></script>
 <script src="assets/ace/ext-searchbox.js"></script>
-<?php require_once __DIR__ . '/shared/ace_editor_modal.php'; ?>
+<?php require_once __DIR__ . '/shared/riverops_ace_editor.php'; ?>
 <script>
 (function(){
   var configDataMap = <?= json_encode($configDataMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 
   function openReadonlyViewer(title, content, mode) {
-    NavAceEditor.open({
+    RiverOpsAceEditor.open({
       title: title,
       mode: mode || 'nginx',
       value: content || '',
@@ -244,7 +244,7 @@ foreach ($targets as $key => $meta) {
         right: [{ text: '关闭', action: 'close' }]
       },
       onAction: function(action) {
-        if (action === 'close') NavAceEditor.close();
+        if (action === 'close') RiverOpsAceEditor.close();
       }
     });
   }
@@ -273,10 +273,10 @@ foreach ($targets as $key => $meta) {
       })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        NavAceEditor.setValue(data.ok ? (data.content || '无错误记录') : (data.msg || '加载失败'), 'text');
+        RiverOpsAceEditor.setValue(data.ok ? (data.content || '无错误记录') : (data.msg || '加载失败'), 'text');
       })
       .catch(function(err) {
-        NavAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)), 'text');
+        RiverOpsAceEditor.setValue('加载失败：' + (err && err.message ? err.message : String(err)), 'text');
       });
     });
   }
